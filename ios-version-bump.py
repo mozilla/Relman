@@ -80,6 +80,6 @@ if bitrise_file is not None:
 print("Creating git commit...")
 repo = Repo()
 repo.git.add(all=True)
-repo.index.commit('Version bump to ' + new_version)
+repo.index.commit('Bump [v' + major_version + '] Set version to ' + new_version)
 
 print("Successfully updated the version!")
