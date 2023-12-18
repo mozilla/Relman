@@ -36,11 +36,11 @@ if product == "firefox":
                    'WidgetKit/Info.plist']
 elif product == "focus":
     bitrise_file = None
-    plist_files = ['Blockzilla/Info.plist',
-                   'ContentBlocker/Info.plist',
-                   'FocusIntentExtension/Info.plist',
-                   'OpenInFocus/Info.plist',
-                   'Widgets/Info.plist']
+    plist_files = ['focus-ios/Blockzilla/Info.plist',
+                   'focus-ios/ContentBlocker/Info.plist',
+                   'focus-ios/FocusIntentExtension/Info.plist',
+                   'focus-ios/OpenInFocus/Info.plist',
+                   'focus-ios/Widgets/Info.plist']
 
 # Loop through the plist files and replace the version number
 print("Updating plist files...")
