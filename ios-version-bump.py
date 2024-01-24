@@ -29,11 +29,11 @@ if product is None:
 # Set the file names to be bumped depending on which product is being updated
 if product == "firefox":
     bitrise_file = 'bitrise.yml'
-    plist_files = ['Client/Info.plist',
-                   'CredentialProvider/Info.plist',
-                   'Extensions/NotificationService/Info.plist',
-                   'Extensions/ShareTo/Info.plist',
-                   'WidgetKit/Info.plist']
+    plist_files = ['firefox-ios/Client/Info.plist',
+                   'firefox-ios/CredentialProvider/Info.plist',
+                   'firefox-ios/Extensions/NotificationService/Info.plist',
+                   'firefox-ios/Extensions/ShareTo/Info.plist',
+                   'firefox-ios/WidgetKit/Info.plist']
 elif product == "focus":
     bitrise_file = None
     plist_files = ['focus-ios/Blockzilla/Info.plist',
