@@ -38,30 +38,28 @@ for file in plist_files:
     with open(file, 'wb') as fp:
         plistlib.dump(plist, fp)
 
-# Update bitrise.yml if necessary
-if bitrise_file is not None:
-    print("Update bitrise.yml...")
-    # Read the YAML file
-    with open(bitrise_file, 'r') as file:
-        yaml_data = file.read()
+print("Updating bitrise.yml...")
+# Read the YAML file
+with open(bitrise_file, 'r') as file:
+    yaml_data = file.read()
 
-    # Define the regex patterns for the keys we want to update
-    release_version_pattern = r"(BITRISE_RELEASE_VERSION: )'(\d+\.\d+)'"
-    beta_version_pattern = r"(BITRISE_BETA_VERSION: )'(\d+\.\d+)'"
-    push_branch_pattern = r"(push_branch:\s+release/v)(\d+)"
+# Define the regex patterns for the keys we want to update
+release_version_pattern = r"(BITRISE_RELEASE_VERSION: )'(\d+\.\d+)'"
+beta_version_pattern = r"(BITRISE_BETA_VERSION: )'(\d+\.\d+)'"
+push_branch_pattern = r"(push_branch:\s+release/v)(\d+)"
 
-    # Update the BITRISE_RELEASE_VERSION
-    yaml_data = re.sub(release_version_pattern, r"\1'" + new_version + "'", yaml_data)
+# Update the BITRISE_RELEASE_VERSION
+yaml_data = re.sub(release_version_pattern, r"\1'" + new_version + "'", yaml_data)
 
-    # Update the BITRISE_BETA_VERSION
-    yaml_data = re.sub(beta_version_pattern, r"\1'" + new_version + "'", yaml_data)
+# Update the BITRISE_BETA_VERSION
+yaml_data = re.sub(beta_version_pattern, r"\1'" + new_version + "'", yaml_data)
 
-    # Update the push_branch value based on the major_version
-    yaml_data = re.sub(push_branch_pattern, r"\g<1>" + major_version, yaml_data)
+# Update the push_branch value based on the major_version
+yaml_data = re.sub(push_branch_pattern, r"\g<1>" + major_version, yaml_data)
 
-    # Write the updated YAML back to the file
-    with open(bitrise_file, 'w') as file:
-        file.write(yaml_data)
+# Write the updated YAML back to the file
+with open(bitrise_file, 'w') as file:
+    file.write(yaml_data)
 
 # Commit the results
 print("Creating git commit...")
