@@ -17,30 +17,17 @@ elif not sys.argv[1].split(".")[0].isdigit():
 new_version = sys.argv[1]
 major_version = new_version.split(".")[0]
 
-# Detect which product is being updated depending on the current directory and set for later use
-product_directory = os.path.basename(os.getcwd())
-search_strings = ["firefox", "focus"]
-product = next((search_string for search_string in search_strings if search_string in product_directory), None)
-
-if product is None:
-    print("Unable to detect product, run from a supported clone")
-    sys.exit(1)
-
-# Set the file names to be bumped depending on which product is being updated
-if product == "firefox":
-    bitrise_file = 'bitrise.yml'
-    plist_files = ['firefox-ios/Client/Info.plist',
-                   'firefox-ios/CredentialProvider/Info.plist',
-                   'firefox-ios/Extensions/NotificationService/Info.plist',
-                   'firefox-ios/Extensions/ShareTo/Info.plist',
-                   'firefox-ios/WidgetKit/Info.plist']
-elif product == "focus":
-    bitrise_file = None
-    plist_files = ['focus-ios/Blockzilla/Info.plist',
-                   'focus-ios/ContentBlocker/Info.plist',
-                   'focus-ios/FocusIntentExtension/Info.plist',
-                   'focus-ios/OpenInFocus/Info.plist',
-                   'focus-ios/Widgets/Info.plist']
+bitrise_file = 'bitrise.yml'
+plist_files = ['firefox-ios/Client/Info.plist',
+               'firefox-ios/CredentialProvider/Info.plist',
+               'firefox-ios/Extensions/NotificationService/Info.plist',
+               'firefox-ios/Extensions/ShareTo/Info.plist',
+               'firefox-ios/WidgetKit/Info.plist',
+               'focus-ios/Blockzilla/Info.plist',
+               'focus-ios/ContentBlocker/Info.plist',
+               'focus-ios/FocusIntentExtension/Info.plist',
+               'focus-ios/OpenInFocus/Info.plist',
+               'focus-ios/Widgets/Info.plist']
 
 # Loop through the plist files and replace the version number
 print("Updating plist files...")
@@ -80,6 +67,6 @@ if bitrise_file is not None:
 print("Creating git commit...")
 repo = Repo()
 repo.git.add(all=True)
-repo.index.commit('Bump [v' + major_version + '] Set version to ' + new_version)
+repo.index.commit('Bump - Set version to ' + new_version)
 
 print("Successfully updated the version!")
