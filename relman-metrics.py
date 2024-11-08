@@ -2,22 +2,28 @@
 import argparse
 import json
 import requests
+import urllib.request as url_request
 import pyperclip
 
 # get the data from the bugzilla api
-def fetch_bugzilla_data(api_url, api_key=None):
-# add the api key to the end of the url
-    if api_key:
-        api_url += f"&api_key={api_key}"
+def fetch_bugzilla_data(api_url, api_key: str | None = None):
+    req = url_request.Request(
+        f"{api_url}",
+        headers={
+            "X-BUGZILLA-API-KEY": api_key if api_key else ""
+        },
+    )
+    # Return JSON response
     try:
-        response = requests.get(api_url)
-        response.raise_for_status()  # raise an error for bad responses
-        data = response.json() 
-        return data
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching data: {e}")
-        return None
-
+        with url_request.urlopen(req) as r:
+            res = json.load(r)
+        return res
+    except url_error.HTTPError as e:
+        try:
+            res = json.load(e.fp)
+            raise Error(res["message"])
+        except (OSError, ValueError, KeyError):
+            raise Error(e)
 
 if __name__ == "__main__":
     # parse command line arguments, in case of an issue this was copied from the contributor script
