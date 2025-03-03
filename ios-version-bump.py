@@ -29,6 +29,9 @@ plist_files = ['firefox-ios/Client/Info.plist',
                'focus-ios/OpenInFocus/Info.plist',
                'focus-ios/Widgets/Info.plist']
 
+if int(major_version) >= 137:
+    plist_files += ['firefox-ios/sticker/Info.plist']
+
 # Loop through the plist files and replace the version number
 print("Updating plist files...")
 for file in plist_files:
