@@ -18,18 +18,21 @@ new_version = sys.argv[1]
 major_version = new_version.split(".")[0]
 
 bitrise_file = 'bitrise.yml'
-plist_files = ['firefox-ios/Client/Info.plist',
-               'firefox-ios/CredentialProvider/Info.plist',
-               'firefox-ios/Extensions/NotificationService/Info.plist',
-               'firefox-ios/Extensions/ShareTo/Info.plist',
-               'firefox-ios/WidgetKit/Info.plist',
-               'focus-ios/Blockzilla/Info.plist',
-               'focus-ios/ContentBlocker/Info.plist',
-               'focus-ios/FocusIntentExtension/Info.plist',
-               'focus-ios/OpenInFocus/Info.plist',
-               'focus-ios/Widgets/Info.plist']
+plist_files = []
 
-if int(major_version) >= 137:
+if int(major_version) < 138:
+    plist_files += ['firefox-ios/Client/Info.plist',
+                    'firefox-ios/CredentialProvider/Info.plist',
+                    'firefox-ios/Extensions/NotificationService/Info.plist',
+                    'firefox-ios/Extensions/ShareTo/Info.plist',
+                    'firefox-ios/WidgetKit/Info.plist',
+                    'focus-ios/Blockzilla/Info.plist',
+                    'focus-ios/ContentBlocker/Info.plist',
+                    'focus-ios/FocusIntentExtension/Info.plist',
+                    'focus-ios/OpenInFocus/Info.plist',
+                    'focus-ios/Widgets/Info.plist']
+
+if int(major_version) == 137:
     plist_files += ['firefox-ios/sticker/Info.plist']
 
 # Loop through the plist files and replace the version number
