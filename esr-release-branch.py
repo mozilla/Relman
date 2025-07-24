@@ -8,9 +8,6 @@
 #
 # Usage:
 #   python esr-release-branch.py esr140
-#
-# cherry pick your commits to the branch and then push via land
-# e.g. lando push-commits --lando-repo firefox-esr140  --relbranch FIREFOX_ESR_140_1_X_RELBRANCH
 
 import argparse
 import subprocess
@@ -103,7 +100,7 @@ def main():
     print(f"⬅️  Previous version: {base_version}")
 
     # Find the commit used to build the previous dot release
-    tag = f"FIREFOX_{base_version.replace('.', '_')}_0esr_RELEASE"
+    tag = f"FIREFOX_{base_version.replace('.', '_')}esr_RELEASE"
     run(f"git fetch origin tag {tag}")
     commit = run(f"git rev-list -n 1 {tag}")
 
