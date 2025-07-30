@@ -6,6 +6,11 @@
 # commit (e.g., FIREFOX_ESR_140_1_X_RELBRANCH), bumps the version number (e.g., to 140.1.1),
 # updates version files, and commits the changes.
 #
+# The script will then ask to cherry-pick to the branch and will cherry-pick commits provide.
+#
+# The script will NOT push changes but will provide the lando-cli relevant command
+# (e.g. lando push-commits --lando-repo firefox-esr140 --relbranch FIREFOX_ESR_140_1_X_RELBRANCH)
+#
 # Usage:
 #   python esr-release-branch.py esr140
 
@@ -125,8 +130,36 @@ def main():
     # Commit the changes
     run(f"git commit -a -m \"No bug - Bump version to {new_version} a=me\"")
     print(f"📝 Version bump committed: {new_version}")
-    
-    
+
+    # Optionally cherry-pick one or more commits
+    while True:
+        response = input("💬 Would you like to cherry-pick a commit into this branch? (y/N): ").strip().lower()
+        if response != 'y':
+            break
+        while True:
+            commit_hash = input("🔢 Enter the commit hash to cherry-pick: ").strip()
+            try:
+                run(f"git cat-file -e {commit_hash}")  # Check that commit exists
+            except Exception:
+                print(f"❌ Commit {commit_hash} not found in the repository.")
+                retry = input("🔁 Try a different commit? (y/N): ").strip().lower()
+                if retry != 'y':
+                    print("🚫 Exiting cherry-pick flow.")
+                    break
+                else:
+                    continue
+            try:
+                run(f"git cherry-pick {commit_hash}")
+                commit_message = run(f"git log -1 --pretty=%B {commit_hash}")
+                print(f"✅ Successfully cherry-picked {commit_hash}\n📝 {commit_message.strip()}")
+                break
+            except Exception as e:
+                print(f"❌ Cherry-pick of {commit_hash} failed due to conflict or other issue: {e}")
+                print("⚠️ Please resolve conflicts manually if necessary.")
+                break
+
+    print(f"📤 To push this branch, run:\nlando push-commits --lando-repo firefox-{git_branch} --relbranch {relbranch}")
+
 
 if __name__ == "__main__":
     main()
