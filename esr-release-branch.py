@@ -1,9 +1,9 @@
 # esr-release-branch.py
 #
-# This script automates the creation of a dot-release branch for Firefox ESR releases.
-# It checks out the given ESR branch (e.g., ESR140), finds the commit from the last shipped
-# release tag (e.g., FIREFOX_140_1_0esr_RELEASE), creates a new release branch from that
-# commit (e.g., FIREFOX_ESR_140_1_X_RELBRANCH), bumps the version number (e.g., to 140.1.1),
+# This script automates the creation of a dot-release branch for Firefox ESR or Release.
+# It checks out the given ESR branch (e.g., ESR140) or Release, finds the commit from the last shipped
+# release tag (e.g., FIREFOX_140_1_0esr_RELEASE, or FIREFOX_RELEASE_136_END), creates a new release branch from that
+# commit (e.g., FIREFOX_ESR_140_1_X_RELBRANCH, FIREFOX_136_0_X_RELBRANCH), bumps the version number (e.g., to 140.1.1, or 136.0.2),
 # updates version files, and commits the changes.
 #
 # The script will then ask to cherry-pick to the branch and will cherry-pick commits provide.
@@ -13,6 +13,7 @@
 #
 # Usage:
 #   python esr-release-branch.py esr140
+#   python esr-release-branch.py release
 
 import argparse
 import subprocess
@@ -27,6 +28,13 @@ def run(cmd):
         print(result.stderr)
         raise Exception(f"Command failed: {cmd}")
     return result.stdout.strip()
+
+def is_release_branch(branch):
+    return branch.lower() == "release"
+
+def get_previous_major_version(current_version):
+    major = int(current_version.split(".")[0])
+    return major - 1
 
 def get_current_version():
     # Read the current version from version.txt
@@ -62,14 +70,17 @@ def update_version_files(new_version, esr=True):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("branch", help="ESR branch, e.g. ESR140")
+    parser.add_argument("branch", help="ESR branch (e.g. esr140) or 'release'")
     args = parser.parse_args()
 
     branch = args.branch
-    assert re.match(r"^(esr|ESR)\d+$", branch), f"Unexpected branch format: {branch}"
-    git_branch = branch.lower()
+    is_esr = not is_release_branch(branch)
 
-    major_version = re.findall(r"\d+", branch)[0]
+    if is_esr:
+        assert re.match(r"^(esr|ESR)\d+$", branch), f"Unexpected branch format: {branch}"
+        git_branch = branch.lower()
+    else:
+        git_branch = "release"
 
     # Try to checkout the local branch; if not found, try the remote one
     try:
@@ -86,36 +97,40 @@ def main():
     run("git pull")
 
     # Get current version and derive previous version (to locate release tag)
-    current_version = get_current_version()  # e.g., 140.2
+    current_version = get_current_version() # e.g., 140.2
     print(f"🔍 Current version: {current_version}")
-    parts = current_version.split(".")
-    if len(parts) == 2 and parts[1] == '0':
-        base_version = current_version  # e.g., 140.0
-    elif len(parts) == 2:
-        prev_minor = int(parts[1]) - 1
-        base_version = f"{parts[0]}.{prev_minor}.0"
-    elif len(parts) == 3:
-        if parts[1] == '0' and parts[2] == '0':
-            base_version = f"{parts[0]}.0"  # e.g., from 140.0.0 → 140.0
-        else:
+
+    if is_esr:
+        parts = current_version.split(".")
+        if len(parts) == 2 and parts[1] == '0':
+            base_version = current_version
+        elif len(parts) == 2:
             prev_minor = int(parts[1]) - 1
             base_version = f"{parts[0]}.{prev_minor}.0"
+        elif len(parts) == 3:
+            if parts[1] == '0' and parts[2] == '0':
+                base_version = f"{parts[0]}.0"
+            else:
+                prev_minor = int(parts[1]) - 1
+                base_version = f"{parts[0]}.{prev_minor}.0"
+        else:
+            raise ValueError(f"Unexpected version format: {current_version}")
+        tag = f"FIREFOX_{base_version.replace('.', '_')}esr_RELEASE"
+        relbranch = f"FIREFOX_ESR_{base_version.split('.')[0]}_{base_version.split('.')[1]}_X_RELBRANCH"
     else:
-        raise ValueError(f"Unexpected version format: {current_version}")
-    print(f"⬅️  Previous version: {base_version}")
+        prev_major = get_previous_major_version(current_version)
+        tag = f"FIREFOX_RELEASE_{prev_major}_END"
+        base_version = run(f"git show {tag}:browser/config/version.txt").strip()
+        relbranch = f"FIREFOX_{prev_major}_0_X_RELBRANCH"
 
-    # Find the commit used to build the previous dot release
-    tag = f"FIREFOX_{base_version.replace('.', '_')}esr_RELEASE"
+    print(f"⬅️  Previous version base: {base_version}")
     run(f"git fetch origin tag {tag}")
-    commit = run(f"git rev-list -n 1 {tag}")
-
     # Show the commit message for context
+    commit = run(f"git rev-list -n 1 {tag}")
     commit_msg = run(f"git log -1 --pretty=%B {commit}")
     print(f"📌 Branch will be based on commit {commit}: {commit_msg.strip()}")
 
     # Create new release branch from that commit
-    base_parts = base_version.split(".")
-    relbranch = f"FIREFOX_ESR_{base_parts[0]}_{base_parts[1]}_X_RELBRANCH"
     try:
         run(f"git checkout -b {relbranch} {commit}")
         print(f"✅ Created branch {relbranch} from commit {commit}")
@@ -125,10 +140,10 @@ def main():
 
     # Bump the version and update files
     new_version = bump_version(base_version)
-    print(f"⬆️  New version will be: {new_version}")  # e.g., 140.1.1
-    update_version_files(new_version)
+    print(f"⬆️  New version will be: {new_version}") # e.g., 140.1.1
+    update_version_files(new_version, esr=is_esr)
     # Commit the changes
-    run(f"git commit -a -m \"No bug - Bump version to {new_version} a=me\"")
+    run(f'git commit -a -m "No bug - Bump version to {new_version} a=me"')
     print(f"📝 Version bump committed: {new_version}")
 
     # Optionally cherry-pick one or more commits
@@ -139,7 +154,7 @@ def main():
         while True:
             commit_hash = input("🔢 Enter the commit hash to cherry-pick: ").strip()
             try:
-                run(f"git cat-file -e {commit_hash}")  # Check that commit exists
+                run(f"git cat-file -e {commit_hash}") # Check that commit exists
             except Exception:
                 print(f"❌ Commit {commit_hash} not found in the repository.")
                 retry = input("🔁 Try a different commit? (y/N): ").strip().lower()
@@ -159,7 +174,6 @@ def main():
                 break
 
     print(f"📤 To push this branch, run:\nlando push-commits --lando-repo firefox-{git_branch} --relbranch {relbranch}")
-
 
 if __name__ == "__main__":
     main()
