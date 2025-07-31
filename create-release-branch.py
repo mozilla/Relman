@@ -1,4 +1,4 @@
-# esr-release-branch.py
+# create-release-branch.py
 #
 # This script automates the creation of a dot-release branch for Firefox ESR or Release.
 # It checks out the given ESR branch (e.g., ESR140) or Release, finds the commit from the last shipped
@@ -12,8 +12,8 @@
 # (e.g. lando push-commits --lando-repo firefox-esr140 --relbranch FIREFOX_ESR_140_1_X_RELBRANCH)
 #
 # Usage:
-#   python esr-release-branch.py esr140
-#   python esr-release-branch.py release
+#   python create-release-branch.py esr140
+#   python create-release-branch.py release
 
 import argparse
 import subprocess
