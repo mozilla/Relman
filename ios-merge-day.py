@@ -1,5 +1,5 @@
 """
-release_branch_and_bump.py
+ios-merge-day.py
 
 Automates Firefox iOS version management and release branching.
 
@@ -26,7 +26,7 @@ HOW TO RUN:
 -----------
 From the root of your firefox-ios Git clone, run:
 
-    python path/to/release_branch_and_bump.py
+    python path/to/ios-merge-day.py
 
 """
 
