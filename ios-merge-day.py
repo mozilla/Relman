@@ -21,6 +21,7 @@ WHAT THIS SCRIPT DOES:
 
 5. Commits the version bump to main.
 6. Prompts you to push both the release branch and updated main.
+7. Provides a slack message to share
 
 HOW TO RUN:
 -----------
@@ -140,6 +141,17 @@ def prompt_and_push(branch_name):
         print(f"    git push --set-upstream origin {branch_name}")
         print(f"    git push origin main")
 
+def show_slack_message_reminder(version, next_version):
+    """
+    Show a ready-to-send Slack message and remind you to post it.
+    """
+    message = f"firefox-ios release/v{version} branch has been created and the version has been bumped to {next_version} on main."
+    print("\n📣 Slack message:")
+    print("=" * 60)
+    print(message)
+    print("=" * 60)
+    print("📌 Please post this in the #firefox-ios-releases channel.")
+
 def main():
     """
     Main script workflow:
@@ -148,6 +160,7 @@ def main():
     - Read and bump version
     - Create release branch
     - Optionally push changes
+    - Slack message reminder
     """
     ensure_clean_working_tree()
     checkout_and_update_main()
@@ -156,6 +169,7 @@ def main():
     release_branch = create_release_branch(current_version)
     bump_version(next_version)
     prompt_and_push(release_branch)
+    show_slack_message_reminder(current_version, next_version)
     print("\n🎉 All done!")
 
 if __name__ == "__main__":
