@@ -113,7 +113,7 @@ def main() -> None:
         "bug",
         {
             "target_milestone": f"{args.version} Branch",
-            "status": "RESOLVED",
+            "status": ["RESOLVED", "VERIFIED"],
             "product": PRODUCTS,
             "include_fields": "id,assigned_to,cf_last_resolved",
             "order": "cf_last_resolved",
@@ -182,7 +182,7 @@ def main() -> None:
             {
                 # resolved bugs in our products
                 "product": PRODUCTS,
-                "status": "RESOLVED",
+                "status": ["RESOLVED", "VERIFIED"],
                 # assigned to our user
                 "emailassigned_to1": "1",
                 "emailtype1": "exact",
