@@ -36,6 +36,7 @@ import subprocess
 
 # Constants for file and branch naming
 VERSION_FILE = "version.txt"
+XCCONFIG_FILE = "firefox-ios/Client/Configuration/version.xcconfig"
 RELEASE_BRANCH_PREFIX = "release/"
 
 def run_git_command(*args, capture_output=False):
@@ -126,6 +127,13 @@ def is_valid_version(version: str) -> bool:
     major, minor = parts
     return major.isdigit() and minor.isdigit()
 
+def write_xcconfig_version(version):
+    """
+    Write APP_VERSION = <version> to version.xcconfig
+    """
+    with open(XCCONFIG_FILE, "w") as f:
+        f.write(f"APP_VERSION = {version}\n")
+
 def create_release_branch(current_version):
     """
     Create a new release branch from main named release/vXXX.Y.
@@ -133,6 +141,11 @@ def create_release_branch(current_version):
     branch_name = f"{RELEASE_BRANCH_PREFIX}v{current_version}"
     print(f"\n🌿 Creating branch: {branch_name} from 'main'...")
     run_git_command("checkout", "-b", branch_name)
+
+    write_xcconfig_version(current_version)
+    run_git_command("add", XCCONFIG_FILE)
+    run_git_command("commit", "-m", f"Set APP_VERSION to {current_version}")
+
     print(f"✅ Branch {branch_name} created successfully.")
     return branch_name
 
@@ -144,7 +157,10 @@ def bump_version(next_version):
     run_git_command("checkout", "main")
     with open(VERSION_FILE, "w") as f:
         f.write(f"{next_version}\n")
-    run_git_command("add", VERSION_FILE)
+
+    write_xcconfig_version(next_version)
+
+    run_git_command("add", VERSION_FILE, XCCONFIG_FILE)
     run_git_command("commit", "-m", f"Bump version to {next_version}")
     print(f"✅ Commit created: Bump version to {next_version}")
 
