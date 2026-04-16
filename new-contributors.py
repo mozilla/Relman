@@ -61,8 +61,7 @@ def bmo_request(
     # return json response
     try:
         with url_request.urlopen(req) as r:
-            res = json.load(r)
-        return res
+            return json.load(r)
     except url_error.HTTPError as e:
         try:
             res = json.load(e.fp)
@@ -142,6 +141,9 @@ def main() -> None:
             )
         ):
             continue
+        # skip known bots
+        if assignee in ("wptsync@mozilla.bugs",):
+            continue
         # skip users we already know are not new
         should_skip = False
         for cache_item in cache:
@@ -155,7 +157,7 @@ def main() -> None:
             new[assignee]["bugs"].append(bug["id"])
             continue
 
-        print(f"checking {assignee}", file=sys.stderr, end="")
+        print(f"checking {assignee}", file=sys.stderr, end="", flush=True)
 
         # always exclude employees; this is quicker than a bug search, and not
         # all bugs have correct metadata
@@ -174,7 +176,12 @@ def main() -> None:
             print(" employee", file=sys.stderr)
             current_cache["skip"].append(assignee)
             continue
-        print(" contributor", file=sys.stderr, end="")
+        print(" contributor", file=sys.stderr, end="", flush=True)
+
+        # ignore bugs in a broken state
+        if not bug.get("cf_last_resolved"):
+            print(f" bug-{bug['id']} in unexpected state", file=sys.stderr)
+            continue
 
         # query for bugs fixed by this user before this one
         prior_bugs = bmo_request(
