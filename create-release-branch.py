@@ -11,6 +11,8 @@
 # The script will NOT push changes but will provide the lando-cli relevant command
 # (e.g. lando push-commits --lando-repo firefox-esr140 --relbranch FIREFOX_ESR_140_1_X_RELBRANCH)
 #
+# The script will also provide a list of commits that landed after the last release tag.
+#
 # Usage:
 #   python create-release-branch.py esr140
 #   python create-release-branch.py release
@@ -67,6 +69,33 @@ def update_version_files(new_version, esr=True):
             lines[i] = new_version
             break
     milestone_path.write_text("\n".join(lines) + "\n")
+
+def show_cherry_pick_candidates(base_commit, branch, base_version, relbranch):
+    log = run(f"git log {base_commit}..{branch} --pretty=format:%h%x09%s")
+    if not log:
+        print(f"\nℹ️  No commits found on {branch} since {base_version}.")
+        return
+
+    entries = [line.split("\t", 1) for line in log.splitlines()]
+    print(f"\n🔎 There are {len(entries)} commits on {branch} since {base_version}. Please review to check anything that should be cherry-picked to the {relbranch} branch.")
+
+    bug_numbers = list(dict.fromkeys(re.findall(r'[Bb]ug\s+(\d+)', "\n".join(s for _, s in entries))))
+    if bug_numbers:
+        bug_list = ",".join(bug_numbers)
+        url = f"https://bugzilla.mozilla.org/buglist.cgi?bug_id={bug_list}&bug_id_type=anyexact&order=bug_id"
+        print(f"\n🐛 Bugzilla query for {len(bug_numbers)} bugs:")
+        print(f"   {url}")
+
+    response = input("\n💬 Would you like to see the commit list (git hash + commit message)? (y/N): ").strip().lower()
+    if response != 'y':
+        return
+
+    print()
+    print(f"  {'GIT HASH':<12}  COMMIT MESSAGE")
+    print(f"  {'-'*12}  {'-'*60}")
+    for hash_, subject in entries:
+        print(f"  {hash_:<12}  {subject}")
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -174,6 +203,8 @@ def main():
                 break
 
     print(f"📤 To push this branch, run:\nlando push-commits --lando-repo firefox-{git_branch} --relbranch {relbranch}")
+
+    show_cherry_pick_candidates(commit, git_branch, base_version, relbranch)
 
 if __name__ == "__main__":
     main()
