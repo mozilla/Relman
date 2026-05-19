@@ -167,13 +167,17 @@ def main():
         print(f"❌ Branch {relbranch} already exists. Please delete it or choose another name.")
         return
 
-    # Bump the version and update files
-    new_version = bump_version(base_version)
-    print(f"⬆️  New version will be: {new_version}") # e.g., 140.1.1
-    update_version_files(new_version, esr=is_esr)
-    # Commit the changes
-    run(f'git commit -a -m "No bug - Bump version to {new_version} a=me"')
-    print(f"📝 Version bump committed: {new_version}")
+    # Bump the version and update files (ESR only — release branches are already bumped)
+    if is_esr:
+        new_version = bump_version(base_version)
+        print(f"⬆️  New version will be: {new_version}") # e.g., 140.1.1
+        update_version_files(new_version, esr=is_esr)
+        # Commit the changes
+        run(f'git commit -a -m "No bug - Bump version to {new_version} a=me"')
+        print(f"📝 Version bump committed: {new_version}")
+    else:
+        release_version = run(f"git show {commit}:browser/config/version.txt").strip()
+        print(f"🔖 The version in the release branch is {release_version}")
 
     # Optionally cherry-pick one or more commits
     while True:
