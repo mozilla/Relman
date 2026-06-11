@@ -7,6 +7,8 @@ description: Review draft Firefox release notes for style, tone, scoping, and au
 
 Review draft Firefox release notes against the Mozilla Release Management style guide, checking for consistent style, correct audience scoping, and proper categorization. Produce a clear, actionable critique with concrete suggested rewrites.
 
+**Scope: review only.** This skill assesses the notes and reports findings — it does not publish, schedule, push, or otherwise ship the notes anywhere; publishing is a separate step that happens later and is out of scope. When a review comes back clean, say the notes have no outstanding issues — not that they're "ready to publish" or anything implying you'll act on them.
+
 ## Getting the draft
 
 The notes can come in three ways. Direct Google Drive access is **not** available in this environment (no Drive/Docs integration), so:
@@ -91,7 +93,7 @@ If the `moz` MCP server isn't connected in this session, the `@moz:` resources w
 - **Changed** — interface or behavior modifications
 - **Developer** / **Web Platform** — developer-facing or web-platform changes
 - **HTML5** — web platform issues (legacy tag; "Web Platform" is the modern equivalent — match what the target product uses)
-- **Labs** (a.k.a. **Firefox Labs**) — experimental, opt-in features that ship pref'd-off by default and are enabled from the Firefox Labs panel in Settings (e.g. an experimental image format behind a pref). This is the right home for such features — don't move them to **New** or **Web Platform**, and don't treat "Labs" as a stray/unknown tag. The note should make clear the feature is experimental and say how to enable it.
+- **Firefox Labs** — experimental, opt-in features that ship pref'd-off by default and are enabled from the Firefox Labs panel in Settings (e.g. an experimental image format behind a pref). This is the right home for such features — don't move them to **New** or **Web Platform**, and don't treat the section as a stray/unknown tag. The note should make clear the feature is experimental and say how to enable it.
 - **Community** — community contributor work (note: this section is generated elsewhere — see "Sections to skip" below)
 
 **Sections to skip during review**
