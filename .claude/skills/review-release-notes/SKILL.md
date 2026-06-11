@@ -131,6 +131,7 @@ Note the contrast: user-facing notes ("New", "Fixed", "Changed") stay plain-lang
    - **Localized URLs and stray bug links** (allowed only for dot releases).
    - **Correct tag** for each entry.
 3. Watch for issues the style rules don't enumerate but that matter: duplicated/overlapping notes, inconsistent capitalization of feature names, vague impact ("improved performance" with no specifics), and notes that bury the user benefit.
+4. When a note reads awkwardly, check whether it's **compressing two distinct facts into one phrase** — often by stacking two modifiers on a single noun when each really describes a different thing (e.g. "more and smaller increments" → the change was *more zoom levels* **and** *smaller increments between them*, two facts attached to one noun). Tease them apart so each fact gets its own noun. Looking up the bug to see what actually changed is usually what reveals there were two facts to separate — and once split, the cleaner wording falls out (here: "now offers more zoom levels in smaller increments than before").
 
 ## Output
 
