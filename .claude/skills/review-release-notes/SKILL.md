@@ -15,6 +15,10 @@ The notes can come in three ways. Direct Google Drive access is **not** availabl
 2. **A "Published to the web" Google Doc** — if the user did File → Share → Publish to web, the resulting public `docs.google.com/.../pub?...` URL can be read with WebFetch. A normal Drive share link (`/edit`, `/view`) is authenticated and will fail — ask them to publish to web or export instead.
 3. If you only have a private share link, tell the user it can't be opened directly and ask for a paste, export, or published-to-web URL.
 
+**Publish lag when re-checking edits.** The published `/pub` snapshot is regenerated on a delay (the doc header usually says "Updated automatically every 5 minutes"), so right after the author makes edits it can trail their live document by a few minutes. On top of that, WebFetch caches each URL for ~15 minutes, so re-fetching the *same* URL can return your own earlier (pre-edit) copy. So when you re-check whether requested changes were applied and the old text is still showing:
+- **Bust the WebFetch cache** by appending a throwaway query param (e.g. `…/pub?freshness=recheck2`) so it's treated as a new URL and actually re-fetched.
+- If the change *still* isn't there after a genuinely fresh fetch, it's most likely the `/pub` publish lag, not a missed edit — don't tell the author they forgot. Say you're seeing a stale published snapshot, wait a few minutes, and re-check before concluding anything.
+
 Before reviewing, confirm the **target**: which product (Firefox Desktop, Firefox for Android/iOS, Focus), which channel/version, and whether these are mainline, dot-release, beta, ESR/Enterprise, or known-issues notes. Audience scoping depends on it (see below).
 
 ## Source of truth
