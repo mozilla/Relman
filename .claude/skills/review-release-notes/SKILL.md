@@ -91,6 +91,7 @@ If the `moz` MCP server isn't connected in this session, the `@moz:` resources w
 - **Changed** — interface or behavior modifications
 - **Developer** / **Web Platform** — developer-facing or web-platform changes
 - **HTML5** — web platform issues (legacy tag; "Web Platform" is the modern equivalent — match what the target product uses)
+- **Labs** (a.k.a. **Firefox Labs**) — experimental, opt-in features that ship pref'd-off by default and are enabled from the Firefox Labs panel in Settings (e.g. an experimental image format behind a pref). This is the right home for such features — don't move them to **New** or **Web Platform**, and don't treat "Labs" as a stray/unknown tag. The note should make clear the feature is experimental and say how to enable it.
 - **Community** — community contributor work (note: this section is generated elsewhere — see "Sections to skip" below)
 
 **Sections to skip during review**
