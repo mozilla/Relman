@@ -15,6 +15,10 @@ The notes can come in three ways. Direct Google Drive access is **not** availabl
 2. **A "Published to the web" Google Doc** — if the user did File → Share → Publish to web, the resulting public `docs.google.com/.../pub?...` URL can be read with WebFetch. A normal Drive share link (`/edit`, `/view`) is authenticated and will fail — ask them to publish to web or export instead.
 3. If you only have a private share link, tell the user it can't be opened directly and ask for a paste, export, or published-to-web URL.
 
+**Dot releases come as a staging URL, not a Google Doc.** For a dot release (e.g. 151.0.4), the notes are generally provided as a rendered staging page on the dev server rather than a draft doc — e.g. `https://www-dev.springfield.moz.works/en-US/firefox/151.0.4/releasenotes/`. Read it with WebFetch like any public page. A couple of things follow from this:
+- It's the *rendered* page, so it already reflects the final layout/tags — review it as published output. The publish-lag/cache caveat below still applies when the author re-stages after edits (bust the WebFetch cache with a throwaway query param).
+- Remember dot releases **require bug links** (the opposite of mainline), so expect and check linked bugs rather than flagging them.
+
 **Publish lag when re-checking edits.** The published `/pub` snapshot is regenerated on a delay (the doc header usually says "Updated automatically every 5 minutes"), so right after the author makes edits it can trail their live document by a few minutes. On top of that, WebFetch caches each URL for ~15 minutes, so re-fetching the *same* URL can return your own earlier (pre-edit) copy. So when you re-check whether requested changes were applied and the old text is still showing:
 - **Bust the WebFetch cache** by appending a throwaway query param (e.g. `…/pub?freshness=recheck2`) so it's treated as a new URL and actually re-fetched.
 - If the change *still* isn't there after a genuinely fresh fetch, it's most likely the `/pub` publish lag, not a missed edit — don't tell the author they forgot. Say you're seeing a stale published snapshot, wait a few minutes, and re-check before concluding anything.
