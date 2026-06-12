@@ -93,7 +93,7 @@ If the `moz` MCP server isn't connected in this session, the `@moz:` resources w
 - **Changed** — interface or behavior modifications
 - **Developer** / **Web Platform** — developer-facing or web-platform changes
 - **HTML5** — web platform issues (legacy tag; "Web Platform" is the modern equivalent — match what the target product uses)
-- **Firefox Labs** — experimental, opt-in features that ship pref'd-off by default and are enabled from the Firefox Labs panel in Settings (e.g. an experimental image format behind a pref). This is the right home for such features — don't move them to **New** or **Web Platform**, and don't treat the section as a stray/unknown tag. The note should make clear the feature is experimental and say how to enable it.
+- **Firefox Labs** — experimental, opt-in features that ship pref'd-off by default and are enabled from the Firefox Labs panel in Settings (e.g. an experimental image format behind a pref). This is the right home for such features — don't move them to **New** or **Web Platform**, and don't treat the section as a stray/unknown tag. The note must make clear the feature is experimental and say how to enable it — and **front-load the experimental/off-by-default nature in the first sentence**. Don't open with "Firefox now supports X" and only clarify in a later sentence that it's opt-in: a reader who skims the first line is left with the false impression it's on by default. Lead with the qualifier instead (e.g. "Firefox now offers experimental support for X… You can enable it from the Firefox Labs panel in Settings.").
 - **Community** — community contributor work (note: this section is generated elsewhere — see "Sections to skip" below)
 
 **Sections to skip during review**
