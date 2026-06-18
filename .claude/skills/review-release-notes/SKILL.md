@@ -83,6 +83,7 @@ If the `moz` MCP server isn't connected in this session, the `@moz:` resources w
 **Links**
 - De-localize all URLs — remove the `en-US/` (or other locale) segment.
 - Don't link to bugs in finalized mainline notes. **Exception:** dot releases require bug links.
+- When a bug link uses the word "Bug" in its anchor text, capitalize it ("Bug 2047850", not "bug 2047850").
 
 **Known issues**
 - Focus on user impact. If a workaround exists, give clear, step-by-step instructions.
@@ -108,6 +109,8 @@ For Firefox for Android and iOS, we use generic, reusable release notes unless t
 - **Product-supplied (non-generic) notes** — a **light review only**. Product generally provides these in the form they want, without our input, so flag only clear errors (typos, broken/localized links, obviously wrong scoping) and otherwise leave the wording alone. Don't apply the full desktop style critique.
 
 If it's unclear whether mobile notes are generic or Product-supplied, ask before reviewing.
+
+**Dot releases are the exception:** for a mobile **dot release**, the notes are authored by Release Management (us), not Product. Give these the **full desktop-style critique** — the light-touch rule above does not apply. (And as with all dot releases, expect and require bug links.)
 
 ## Real-world tone reference (Firefox 151)
 
@@ -138,6 +141,7 @@ Note the contrast: user-facing notes ("New", "Fixed", "Changed") stay plain-lang
 Produce a review with:
 - A short summary (overall quality, biggest themes).
 - A per-note list of issues. **Walk the notes in the same order they appear in the document, top to bottom (by section, then by note within each section)** — the author reviews with the doc open and works straight down it, so matching that order lets them apply comments in place without hunting. Don't reorder by severity or theme, and don't group all the "jargon" or all the "consolidation" items together. For each note give: the original text, what's wrong (cite the rule), and a **concrete suggested rewrite**.
+- **Always show the full final note with all proposed changes applied — not just a description of the changes.** Even when the fix is a small tweak (a comma, an added bug link, one reworded clause), write out the complete note as it should read so the author can copy it straight in. Describing the change alone ("move the comma outside the quotes", "add a bug link") forces the author to reconstruct the result; show the finished note instead.
 - For a consolidation, raise it at the position of the **first** of the notes involved and name the other notes (and their positions) it merges with, so it still appears in reading order.
 - A short cross-cutting section *after* the in-order walk for anything that genuinely spans the whole doc (a coverage check against the bug query, a pattern like missing full stops throughout, terminology consistency). Keep per-note issues in the walk, not here.
 - Flag anything you're unsure about as a question rather than a hard correction — especially audience-scoping calls that depend on product/channel context. Keep these questions attached to their note in the walk; you may also restate them in a short list at the end.
