@@ -32,6 +32,8 @@ There are three hard constraints; the skill is built around them.
 
 `scripts/fetch-bugs.sh` performs both REST queries, dedupes (a bug can appear in both lists), and prints an id/component/version/keywords/regressed_by table plus the raw JSON paths. Run it first; it encodes the exact product set and the UNCONFIRMED proxy.
 
+**Always invoke it without an OUTDIR argument** (e.g. `scripts/fetch-bugs.sh` or at most `scripts/fetch-bugs.sh -24h -4d`). With no OUTDIR it defaults to a fresh `mktemp -d`, so scratch JSON never lands in the repo. Do **not** pass a repo-relative path (like `artifacts/...`) and do **not** `mkdir` a scratch directory — this skill is read-only and should leave no working-tree artifacts.
+
 ## Freshness — do not analyze outdated patches
 
 This is a first-class rule, not a footnote. Getting it wrong produces confidently-wrong diagnoses.
@@ -58,6 +60,8 @@ Put each bug in exactly one bucket:
 Per-bug, also note: a wrong bugbug auto-component, cross-links/See-Also, and whether the bug is out of scope (e.g. a Thunderbird bug surfaced by the keyword query — note and set aside; not actionable from a Firefox checkout).
 
 ## Finding regressors
+
+**Regressor hunting is a first-class pass, not an afterthought — prioritize it whenever the bucket qualifies.** Run regressor discovery on **every** bug that lands in **CLEAR-FUNCTIONAL-REGRESSION**, **REGRESSION-FINDABLE**, and **VALID-NEW** — not just the `regressionwindow-wanted` set. For VALID-NEW the hunt doubles as a regression check: conclude "longstanding / not a regression" with git evidence when that's what the archaeology shows — don't force a candidate, but don't skip the check either (a bug mis-triaged as "longstanding" can hide a live regression with a trivial fix). **Skip** the minor buckets: DUPLICATE, INVALID/WORKSFORME, NEEDS-INFO, FEATURE-REQUEST, and out-of-scope (for a DUPLICATE, only validate an already-set `regressed_by`; NEEDS-INFO by definition lacks the signal to hunt). Priority order: shipped-channel CLEAR-FUNCTIONAL-REGRESSION first, then REGRESSION-FINDABLE, then VALID-NEW. **Do the code archaeology — do not default to recommending a mozregression range.** Only fall back to mozregression when archaeology is genuinely blocked, and then state the specific reason and the narrowest range.
 
 Attempt discovery in this order — don't jump straight to "needs a mozregression range":
 
@@ -86,8 +90,10 @@ This is the "tell me like the last chemspill" signal (e.g. the 152.0.2 newtab/l1
 
 ## Execution model (adaptive)
 
-- **Small list (≲ 15 bugs):** triage inline, one bug at a time.
-- **Larger list:** fan out parallel subagents in batches (e.g. ~7–8 bugs each), with the `regressionwindow-wanted` set as its own batch focused on regressor validation. Give every subagent the freshness + version-timing guardrails verbatim. Then synthesize.
+Two passes: **(1) classify**, then **(2) hunt regressors** on the CLEAR-FUNCTIONAL-REGRESSION / REGRESSION-FINDABLE / VALID-NEW buckets (see Finding regressors → prioritize the hunt). Pass 2 is not optional when qualifying bugs exist.
+
+- **Small list (≲ 15 bugs):** classify inline one bug at a time, then hunt regressors on the qualifying buckets.
+- **Larger list:** fan out parallel subagents in batches (e.g. ~7–8 bugs each) for pass 1. For pass 2, fan out one focused regressor-hunt subagent per qualifying bug (or small groups of related bugs), each instructed to do archaeology first and label any candidate "candidate." Give every subagent the freshness + version-timing guardrails verbatim. Then synthesize.
 
 Dedupe across the two sources before assigning batches (a bug can be in both).
 
