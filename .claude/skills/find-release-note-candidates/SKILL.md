@@ -1,126 +1,1007 @@
 ---
 name: find-release-note-candidates
-description: Scan everything that landed on mozilla-central (the Nightly train) in a recent window and propose release-note candidates — with bug number, whether the change is gated (and how), and a draft one-liner in the Release Management style. Use when the user wants to find release notes for recent landings, work the daily "what landed overnight" pass, or asks things like "what should we note from the last day", "find release-note candidates", "anything user-facing land this week". Complements review-release-notes (which critiques an existing draft); this one produces the candidate list from scratch.
+description: Scan what landed on firefox-main over a window (a day, a week, or a whole Nightly cycle) and surface the changes worth asking a developer about for a release note — with bug numbers, whether the change is gated and how, feature rollups across many bugs, and a draft one-liner. Use when the user wants to find release-note candidates, work the daily "what landed overnight" pass, review a full cycle before a merge, or asks things like "what should we note from the last day", "anything user-facing land this week", "find pref flips". Also works the relnote-flag nomination queue — bugs someone flagged `relnote-firefox?` that are waiting on a decision — and answers which bugs carry a given flag value ("what's in the nomination queue", "anything waiting on a relnote decision", "what has been declined for notes"). Complements review-release-notes (which critiques an existing draft); this one produces the candidate list from scratch.
 ---
 
 # Find Release Note Candidates
 
-Go through the commits that landed on `mozilla-central` (the Nightly train) in a recent window, and surface the ones worth a release note. For each surviving candidate, produce: the **bug number(s)**, whether it is **live or gated** (and the exact gating mechanism), a suggested **category**, a **draft one-liner** in the Release Management style, and a **screenshot suggestion** where a visual would help.
+Go through what landed on `firefox-main` in a window and surface the changes worth a release note.
 
-**Scope: propose only.** This skill reads the tree and Bugzilla and produces a candidate list. It does **not** set the `relnote-firefox` flag, comment on bugs, nominate anything, or publish. Those are follow-up actions the user takes afterward. When you've drafted a one-liner or a gating call, present it for the user to apply; never write to Bugzilla or to any release-notes system from this skill.
+**What this is for.** The output is a **guide for prompting developers in bugs** about whether their
+change deserves a note. It is not a publication-ready draft. That shapes every judgment call below:
 
-This is the mirror image of `review-release-notes`: that skill critiques an already-written draft; this one finds what should be in the draft. Defer to it for the full style rules (summarized below) and reuse its bug/patch-lookup conventions.
+- **Err toward including.** A surplus candidate costs one question in a bug. A missed one ships a
+  release with a note nobody wrote. When genuinely unsure, include it in a lower tier and say why
+  you're unsure — don't drop it.
+- **The 1.1% publication rate in the survey is not a pruning budget.** It is what survived *after*
+  developers were asked and Release Management decided. Discovery sits upstream of both.
 
-## Channel mapping and freshness (get this right first)
+**Scope: propose only.** Read the tree and Bugzilla, produce a candidate list. Do **not** set the
+`relnote-firefox` flag, comment on bugs, nominate, or publish. When you've drafted a one-liner or a
+gating call, present it for the user to apply. Never write to Bugzilla or any release-notes system.
 
-The version-to-channel mapping shifts about monthly; never assume it. Fetch it live:
+## Truthfulness is the hard requirement
+
+This output gets used to go ask developers questions. A confident wrong claim wastes their time and
+damages trust, so **never guess and never present inference as verification**. Concretely:
+
+- **Label every claim's basis.** Mark each candidate's gating and impact statements as
+  **verified** (you read the patch, the pref default, or the manifest) or **inferred** (from
+  component, subject, or bug summary alone). Two different words, used consistently.
+- **Say what you could not determine, per candidate** — not only in a closing note. "Could not tell
+  whether this is user-visible without reading the patch" is a useful, honest line. A guess dressed
+  as a finding is not.
+- **Never invent** a bug number, pref name, Nimbus feature id, version, or note wording. If you
+  didn't read it, don't state it.
+- **Distinguish "no evidence" from "evidence of no".** "No pref gate found" and "confirmed on by
+  default everywhere" are different claims. Only make the second one after reading the default.
+- **Report tool failures rather than routing around them silently.** If the MCP wasn't connected,
+  a bug was security-restricted, or a script capped its input, say so where it affects a
+  conclusion.
+
+## References — read these, don't restate them
+
+**Paths below are relative to the repository root, not this skill's directory.** From the repo root,
+`reference/release-notes/style-guide.md` resolves; `.claude/skills/…/reference/…` does not exist.
+
+| Topic | File |
+|---|---|
+| Style rules, tags, tone, wording traps | `reference/release-notes/style-guide.md` |
+| What actually clears the bar (empirical, 2 years) | `reference/release-notes/shipped-notes-survey.md` |
+| REST vs MCP, backouts, freshness, channel mapping | `reference/release-notes/bugzilla-access.md` |
+| Pref/Nimbus/Labs/platform gating recipes | `reference/release-notes/gating.md` |
+| Command forms that don't trigger permission prompts | `reference/release-notes/command-forms.md` |
+
+The survey is the calibration source. Read at least its "bar in one line", the `Fixed` threshold
+section, and the zero-yield table before judging significance. Note that the `Fixed`-in-majors bar
+is **actively moving** (0.54 → 1.46 → 2.14 substantive notes per release over two years), so treat
+"fixes don't get mainline notes" as outdated.
+
+## Scope: you are working one release's notes
+
+**Every Firefox release has its own release owner, and you evaluate notes only for the release you
+own** — normally the current Nightly. A daily pass over Nightly N is producing candidates for N.
+
+That changes how uplifts are reported. A bug uplifted to N-1 or N-2 belongs to *that* release
+owner's queue, not yours. Surface it briefly so nothing is lost, but do not put it in the tiered
+candidate list or write asks for it — say plainly that it's another owner's call.
+
+The convention is that uplifts get flagged for notes **at uplift time** by the owner doing the
+uplift. In practice that happens reliably for **dot-release** uplifts and less reliably for **beta**
+uplifts, which is a known weak spot this skill can help with — see the beta-uplift mode below.
+
+**A future mode worth knowing about:** running this over the beta cycle's uplifts to prompt that
+release's owner. Same machinery, different window (`--range FIREFOX_BETA_{N}_BASE..` with
+`--first-parent`), and the audience is the beta owner rather than you.
+
+## Two modes — pick by window size and be honest about which
+
+| | **Daily** (≤ ~2 days) | **Cycle** (a week to a full cycle) |
+|---|---|---|
+| Commits | ~30–530 | 2,000–7,000 |
+| Survivors after the funnel | ~10–130 | ~500–2,000 |
+| Approach | **Exhaustive** — every survivor gets looked at | **Signal-driven** — start from high-precision signals |
+| Completeness claim | "Every landing in the window was considered." | "Bugs reached by these signals were considered; the rest were not." |
+
+**Never claim cycle-mode coverage you don't have.** 2,000 survivors cannot each be examined. State
+plainly which signals you ran, and that a change touching none of them would have been missed.
+
+**A "day" is not a fixed size.** Quiet days run 10–20 survivors; the days after a merge run 100–130.
+Measured: 07-26 gave 10 survivors, 07-21 gave 127 from 423 commits. **Above roughly 60 survivors,
+walking every one is real work and the temptation is to read the multi-commit head of the list plus
+the impact-evidence section and stop.** That is not exhaustive, and claiming it is, is a false
+statement about coverage. Either walk the whole list or say exactly what you prioritised and what
+you did not read.
+
+**The weak-impact-evidence list is a reading-order hint, not a skip list.** It routinely holds half
+the survivors — 61 of 127 on 07-21 — and real candidates live in it: bugs 2042999 (CSS `line-clamp`)
+and 2050397 (passport management page) were both missed there, both internally reported with no
+duplicates. Low prior, not zero.
+
+## Choosing the window — never by date
+
+**Commit dates on `firefox-main` are non-monotonic, so a date-based boundary is broken.** A commit
+merged from autoland keeps its original committer date, so `git rev-list --before=<date>` can land
+arbitrarily deep in the ancestry. Measured: `--since "24 hours ago"` picked a commit dated 20:06 that
+sat **41 commits later in ancestry** than a build boundary dated 18:32, and covered only **29 of that
+build's 57 bugs**. A build's commits can span **ten days** of commit dates. The date-based `--since`
+flag has been removed rather than left as a footgun.
+
+Use one of these instead:
+
+| Purpose | Flag |
+|---|---|
+| Daily pass, resuming where you left off | `--since-last` (stored watermark) |
+| Exactly one nightly build | `--build <id>` |
+| From a chosen build up to now | `--from-build <id>` |
+| A whole cumulative cycle | `--cycle N` |
+
+### The daily pass — show state, then ask
+
+**Always run `--show-state` first and let the user choose.** It prints the stored watermark, how far
+behind it is, whether it belongs to an older train, and the ten most recent nightly builds with their
+git commits.
 
 ```
-curl -s https://product-details.mozilla.org/1.0/firefox_versions.json
+python3 scripts/relnotes/scan-window.py --show-state
 ```
 
-`FIREFOX_NIGHTLY` (e.g. `154.0a1`) is what lands on `mozilla-central` today — call it **N**. `LATEST_FIREFOX_DEVEL_VERSION` is Beta (**N-1**), `LATEST_FIREFOX_VERSION` is Release (**N-2**), `FIREFOX_ESR` is ESR. A change that lands now ships to users in **Firefox N**, so its Bugzilla status field is `cf_status_firefox{N}`.
+The watermark is per-user, outside the repo (`$XDG_STATE_HOME/relman-relnotes/watermark.json`),
+because several people on the team use this and a scan must not dirty a shared working tree.
 
-Two freshness rules that the trial proved matter:
+Then ask which start point they want, and say why it matters:
 
-- **Refresh the mirror before logging.** Run `git fetch origin main` in the Gecko checkout first; a stale local `main` will miss the most recent day. The working tree is often checked out on `autoland` or an older commit — do not trust files on disk.
-- **Read code and preference defaults from `origin/main`, not the working tree.** To check a preference's default, use `git show origin/main:modules/libpref/init/StaticPrefList.yaml` (or `browser/app/profile/firefox.js`), never the on-disk copy — it can be days behind central and will show the wrong (pre-landing) default. This is the single most common way to get a gating call wrong.
+- **Watermark within the current train** → `--since-last` is the right resume point.
+- **Watermark predates the current cycle** → it belongs to an **earlier release train**; resuming
+  would sweep in a whole shipped cycle's commits. The script refuses unless `--allow-stale` is
+  passed. Offer a recent build instead — this is the common case for someone returning after a break.
+- **No watermark (first run)** → offer a recent build or the current cycle.
 
-## Step 1 — enumerate the window
+Add `--save-state` to record the window end once the run succeeds, so the next day resumes cleanly
+with no gap and no double-reporting.
 
-Default window is **the last 24 hours** (roughly the last two Nightly builds); accept a different window if the user asks (the trial used 96h). List the landings:
+**One day per turn. Report it, then stop and wait for verdicts.** When the user asks for several
+days, do not scan the next one — not even in the background — until they have worked through the
+first. Two reasons beyond not talking over them:
+
+- **Their verdicts are calibration input for the days that follow.** A decline reasoned "very likely
+  to be uplifted per the comments" or "no duplicates in five years, so it's minor" changes how the
+  next day's list should be judged. Scanning ahead spends that judgment before it arrives.
+- **An interrupt mid-pass strands verification silently.** On 2026-08-04 a pass ran ahead through
+  three days; the interrupt that stopped it also killed a queued precedent search, and one candidate
+  went to the user with its precedent unchecked and no flag saying so.
+
+Record each day as you finish it (`days <YYYYMMDD>`, `--save-state`, a `log` entry) so stopping
+costs nothing and the next turn resumes exactly where the review did.
+
+### Backfilling old windows vs. the normal forward pass
+
+Normal use is **forward, one day at a time**, where the tree state and the window state coincide.
+Working *backwards* through past days — as during calibration — introduces a hazard that never
+arises going forward: preference state can have changed between the window and today.
+`pref-delta.py` handles this by reporting `at window end:` alongside `effective now:` and flagging
+when they differ, but the wider point holds for anything read from `origin/main`. When backfilling,
+treat "what is true today" and "what was true then" as separate questions.
+
+### End-of-cycle rollup check
+
+Long-running clusters that were deferred all cycle need one deliberate pass before the merge:
+**run `--cycle N` near the end of the Nightly cycle and revisit every cluster that was on hold**, to
+decide whether the finished body of work now deserves a single rollup note. Interop work, multi-bug
+feature pushes and preference-gated features that flipped late are the usual candidates. Track
+deferrals in the watchlist (`--status watching`) so they resurface rather than being rediscovered.
+
+### Cumulative passes
+
+Use `--cycle N` for the wider sweeps where notes have no daily granularity — feature rollups that
+only become visible across weeks, and preference flips that make earlier work live. Run
+`bug-tree.py` and `pref-delta.py` over the same range.
+
+### The nomination queue — bugs someone else proposed
+
+Discovery works forward from what landed, but developers and triagers also nominate bugs directly by
+setting `cf_tracking_firefox_relnote` to `?`. Those never appear in a window scan unless they happen
+to land in it.
 
 ```
-git log --since="24 hours ago" --format="%H%x09%s" origin/main
+python3 scripts/relnotes/relnote-flag.py --nominated
 ```
 
-Expect a few hundred commits per day. Most are not note-worthy — the funnel below cuts them down.
+**Defaults to nominations on bugs that are actually fixed, and that default matters.** Most `?` bugs
+are open — a developer pre-registering an intention months ahead — and the team treats those as noise
+rather than decisions waiting to be made. At the time of writing, six bugs carried `?` and only one
+was fixed. `--include-open` shows the rest if you specifically want the pipeline view.
 
-## Step 2 — bug numbers and backouts
+Work a fixed nomination exactly like a candidate you found yourself: the bar, the tiering, the
+precedent search and the gating checks below all apply unchanged. The only difference is that someone
+has already argued it deserves a note, so the question is whether you agree, and the answer is a
+comment in the bug rather than a proposal in a report.
 
-Extract the primary bug id from each subject (`Bug NNNNNNN - ...`; take the first bug id in the subject as the primary).
+## Cycle tags
 
-**Detect backouts.** On this git mirror, backouts are phrased `Revert "..."` (git style), **not** the hg-style "Backed out" — matching only "Backed out" finds zero. Match subjects starting with `Revert` (also allow "Backed out"/"backout" for safety). Collect the reverted bug ids, but do **not** rely on the revert text to decide what's dead: things land, get backed out, and **re-land** within the same window. The authoritative signal is Bugzilla status (next step). Note which bugs appeared in a revert so you can double-check their final state.
+**The repository's cycle tags are the authoritative boundaries.** Don't infer a cycle from release
+tags, dates, or `version.txt`; the tags exist for exactly this:
 
-## Step 3 — pull status and metadata from Bugzilla (REST for enumeration)
-
-The `moz` MCP fetches a bug *by id* but has no search/buglist tool, and `buglist.cgi` is WAF-challenged through WebFetch. So enumerate lightweight fields through the REST API (the one acceptable non-MCP Bugzilla call, exactly as `review-release-notes` does for its query). Batch the ids (≈120 per call):
+**Nightly cycle for version N — use this, it is validated:**
 
 ```
-curl -s "https://bugzilla.mozilla.org/rest/bug?id=<comma,ids>&include_fields=id,summary,status,resolution,product,component,keywords,type,flags,whiteboard,cf_status_firefox<N>"
+FIREFOX_NIGHTLY_{N-1}_END..FIREFOX_NIGHTLY_{N}_END
 ```
 
-Some bugs won't come back — they're security-restricted; count and disclose them, don't chase them.
+Note there is **no `FIREFOX_NIGHTLY_{N}_BASE` tag** — only `_END` exists, so the cycle start is the
+previous version's `_END`. `FIREFOX_BETA_{N}_BASE` is the same commit as `FIREFOX_NIGHTLY_{N}_END`
+(verified identical SHA), so either works as the closing boundary.
 
-For the **detail** you need to judge a candidate (what actually changed, gating, suggested wording), read the full bug — prefer the MCP resource `@moz:bugzilla://bug/{id}`, and fall back to `curl -s https://bugzilla.mozilla.org/rest/bug/{id}` + `/comment` when the MCP redacts untrusted reporter content or isn't connected. Say which you used. For the patch, read `@moz:phabricator://revision/D{id}` (the `D` number is in the bug's commit comments).
+**Beta cycle for version N — work also lands during beta, so this is required for version coverage:**
 
-## Step 4 — keep only what is currently FIXED (the real backout filter)
+```
+scan-window.py --version N --first-parent \
+    --range FIREFOX_BETA_{N}_BASE..FIREFOX_RELEASE_{N}_BASE
+```
 
-Keep a bug only if it is **`resolution=FIXED` and status `RESOLVED` or `VERIFIED`**, with `cf_status_firefox{N}` = `fixed`/`verified` (treat `disabled` as still-landed — it just means the fix lives behind an off-by-default preference; keep it and handle gating in Step 7). Everything that landed-then-backed-out and hasn't re-landed will sit at `REOPENED`/`NEW`/`ASSIGNED` and drops out here — this is what catches the "landed on main but backed out later" case the enumeration alone can't. Re-verify any bug that showed up in a revert: confirm its *final* state is FIXED before trusting it.
+Three things about this range, each verified against the 153 cycle:
 
-## Step 5 — drop the mechanical noise
+- **`--first-parent` is mandatory.** It restricts the walk to the beta branch's own chain. Without
+  it the range pulls in every merged `main` ancestor: **71,678 commits instead of 682.**
+- **The closing boundary is `FIREFOX_RELEASE_{N}_BASE`, not `FIREFOX_BETA_{N}_END`.** In the git
+  mirror `FIREFOX_BETA_153_END` points at a merge-day config commit dated the *same day* as
+  `_BASE` ("No Bug - Update configs after merge day operations") — it sits at the **start** of the
+  beta cycle, not the end. This differs from the hg tag of the same name; don't assume the mirror's
+  tags match hg's.
+- **It matches the hg pushlog.** Cross-checked against
+  `hg-edge.mozilla.org/releases/mozilla-beta/json-pushes?fromchange=FIREFOX_BETA_153_BASE&tochange=FIREFOX_BETA_153_END&full=1&version=2`
+  (660 pushes, 820 changesets, 454 distinct bugs): the git range yields **458 distinct bugs and
+  contains all 454 of hg's**, with 4 extra. Superset, so it errs toward inclusion.
 
-Set aside, without deep analysis, the commits that are structurally never release notes: test-only changes (crashtest/reftest/wpt/mochitest/xpcshell, "add a test", "mark X passing/failing"), build-system/CI/lint, vendoring and library bumps, `BUG_COMPONENT` edits, documentation, string/locale-only landings, supply-chain audits, and pure internal refactors/cleanups (rename, remove-dead-code, move-to, deduplicate). Also set aside anything in internal components (Testing, Build System, Developer Infrastructure). Keep what touches user-facing components (Firefox/Toolkit/Fenix UI areas), web-platform components (Core DOM/CSS/Layout/JS/Media/Graphics/Networking/Storage/WebExtensions...), or Developer Tools.
+Uplift commits carry an `a=<approver>` marker (`Bug 2033733 - enable LNA for all desktop users by
+default. a=pascalc`). Both 153 uplifts that earned notes were **preference flips**, so run
+`pref-delta.py` across the beta endpoints too, not just the nightly ones.
 
-## Step 6 — apply the significance bar (this does most of the filtering)
+## Measured coverage (Firefox 153 backtest)
 
-Calibrate against **shipped** notes, not "is it user-facing at all": read a recent example such as https://www.firefox.com/firefox/152.0/releasenotes/. The bar is high.
+Against the 27 bugs that earned a published 153.0 note:
 
-**Keep:** genuine user-facing features (new UI, a new capability, new languages/dictionaries), notable behavior changes users would actually notice (where files open, zoom increments), fixes to things users really hit (paste missing, image drag broken, right-to-left navigation), and **fully-shipped** web-platform capabilities a web author can use now (e.g. `field-sizing`, WebAuthn Related Origin, `text-box`).
+| Basis | Recall |
+|---|---|
+| Nightly cycle only | 18/27 = **67%** |
+| Nightly + beta cycle | 20/27 = **74%** |
 
-**Drop as too minor:** internal performance micro-optimizations (even if benchmarked), minor visual polish (spacing, a single icon swap, a full-height tweak, a stray "New" label), niche developer-API removals, and correctness fixes only visible in edge cases. **Parsing-only / phase-1 web-platform work that isn't author-usable yet is not a note** — record it in the "landed but not usable yet" watchlist (Step 9) and note it when the property actually ships, the way JPEG XL only appeared once it was offered in Firefox Labs.
+The mechanical filter caused **zero** of the misses. The remaining 7 are structural, and knowing the
+classes matters more than the number:
 
-When you drop something, keep a one-line reason — the output shows the dropped list so the user can rescue anything (per their preference).
+- **Landed in an earlier cycle, noted later** (1996422, 2038877, JPEG XL 2016688) — the code shipped
+  in 152's cycle; the note came when a preference flip or Labs offering followed.
+- **Third-party upstream** (2032967, 2043290) — PDF Viewer features arrive via `Update PDF.js to
+  <sha>` commits filed under *different* bug numbers, so the feature bug has no Gecko commit at all.
+- **Open tracking bug** (2012848) — an open `[meta]` whose work landed long before the window.
+- **Post-release** (1681745) — a known issue added after 153.0 shipped.
 
-## Step 7 — roll up features, and determine gating
+**So a git-window scan tops out around 74% for version coverage, and must say so.** For a
+version-complete pass the authoritative set is Bugzilla `cf_status_firefox{N}=fixed`. Use git windows
+for freshness work, and never claim version-completeness from one.
 
-**Roll up per feature.** Work fans out across many bugs (a New Tab widget can be 6-7 bugs; the "Nova" desktop refresh is 15+ theming bugs). Produce **one** candidate per feature, listing every contributing bug number — not one note per bug. Treat the whole **Nova** desktop-interface refresh as a single "Changed" rollup.
+**A nightly-cycle scan alone cannot give version-complete coverage, and must not claim it.**
+Work also lands during the **beta** cycle: a change can land on `main` during version N+1's nightly
+cycle and be uplifted into version N's beta. Measured on the Firefox 153 cycle, 9 of the 27 bugs
+that earned a 153.0 note were unreachable from the 153 nightly window:
 
-**Determine live vs gated, with the mechanism.** For each candidate, decide whether it reaches users as Firefox N rides the trains, or is hidden. Check, reading from `origin/main` (Step's freshness rule):
+- **Beta uplifts** — landed on `main` *after* `FIREFOX_NIGHTLY_153_END`, then uplifted (bugs 2033733,
+  2053060).
+- **Landed in an earlier cycle, noted later** — the code shipped in 152's cycle but the note appeared
+  in 153, typically because a preference flip or Labs offering came later (bugs 1996422, 2038877,
+  and JPEG XL 2016688).
+- **Third-party upstream work** — PDF Viewer features arrive through `Update PDF.js to <sha>` commits
+  filed under *different* bug numbers than the feature bug, so the feature bug has no Gecko commit at
+  all (bugs 2032967, 2043290). Any commit-based scan is blind to these.
+- **Post-release known issues** — added after the release shipped (bug 1681745).
 
-- **Preference gate** — grep `StaticPrefList.yaml` and `browser/app/profile/firefox.js` for the controlling preference and read its actual default and any per-channel/`#ifdef NIGHTLY_BUILD` value. State it plainly (e.g. "off by default on all channels", "Nightly-only", "on by default everywhere").
-- **Nimbus experiment / rollout** — check `toolkit/components/nimbus/FeatureManifest.yaml` and the bug/whiteboard for a feature id or rollout. New Tab widgets, onboarding/messaging (OMC), and many Android features are Nimbus-gated even when the code is in.
-- **Firefox Labs opt-in** — an experimental feature that ships preference-off and is enabled from the Firefox Labs panel in Settings. This maps to the **Firefox Labs** note category (see Step 8).
-- **Platform gate** — e.g. Taskbar Tabs is Windows-only (`#if defined(XP_WIN)`); a macOS-only fix.
+So: **for freshness work (daily/weekly), scan the git window. For version-complete coverage before a
+release, the authoritative set is Bugzilla `cf_status_firefox{N}=fixed`, not a git range.** State
+which basis you used, and when you used a git window, say that uplifts and upstream-library work are
+outside it.
 
-Sort the output into **live now**, **gated (landed but hidden)**, and **landed-but-not-usable-yet (track for future)**. A fully-experimental opt-in belongs in the Firefox Labs category with a live note; a feature that is simply off on every channel (like Nova or an unshipped Nimbus rollout) goes in the gated bucket and is flagged for the user to decide whether to hold.
+## Invoking the scripts
 
-## Step 8 — draft the one-liner and category
+**Copy the invocation form in the examples below exactly** — `python3 scripts/relnotes/<script>.py`
+from the repository root, no `cd`, scratch files under `/tmp` by absolute path, no shell `for` loops,
+and gecko reads through the absolute clone path from `check-setup`. Written any other way, most of
+these commands stop for a permission prompt on every call.
 
-Categories: **New** (new features), **Fixed** (resolved bugs), **Changed** (interface/behavior changes), **Developer** / **Web Platform** (developer- or web-platform-facing), **HTML5** (legacy tag for web-platform — match what the product uses), **Firefox Labs** (experimental opt-in; front-load the experimental/off-by-default nature and say how to enable it).
+`reference/release-notes/command-forms.md` is the single home for those rules and the measurements
+behind them; it is not restated here.
 
-Write one line per candidate, following the Release Management style guide (https://wiki.mozilla.org/Release_Management/Release_Notes#Release_Notes_Style_Guide) — the same rules `review-release-notes` enforces:
+## First run on a machine: locate the Gecko clone
 
-- Plain language for a broad, international audience; focus on **user impact**, not internals. (Web Platform / Developer notes may be technical and reference APIs.)
-- Spell terms out — "preference" not "pref", "Developer Tools" not "DevTools"; avoid abbreviations. Do **not** mention `about:config` preference names in the note text.
-- **Fixed** notes lead with a past-tense verb ("Fixed", "Improved", "Removed"). **New**/**Changed** notes are present-tense descriptive ("X now does Y").
-- End every note with a full stop. De-localize any URLs.
-- Don't put bug links in the note text (mainline convention) — but always carry the bug number(s) alongside the candidate in this skill's output, since that's what the user needs to act.
+```
+python3 scripts/relnotes/watchlist.py check-setup
+```
 
-Keep the draft copy-pasteable; the user will edit and approve.
+Every script needs a Gecko checkout, and **it lives somewhere different on every machine**, so no
+path can be committed to the shared tree or assumed here. `check-setup` resolves it once
+(`--repo` → `$RELMAN_GECKO_REPO` → saved state → `~/repos/firefox` as a legacy guess), saves it to
+the per-user state file next to the watermark, and every script reads it from there.
 
-## Step 9 — screenshots
+It also reports the `Bash(git -C <clone> …:*)` permission entries needed for the gecko reads. Without
+them **every single gecko read prompts** — one pass ran `git grep` eleven times and `git show` six,
+all prompting, which is most of what makes a cold run feel like an approval treadmill.
 
-Suggest a screenshot when a visual would materially help the note: new or restyled visible UI (widgets, menus, onboarding, the Nova refresh, a new toolbar control). Say no for behavior/platform/back-end changes with nothing new to see (most Fixed, Web Platform, and Developer notes). The style guide has no hard rule here — this is a judgment call, so briefly say why.
+- If it reports a missing or unsaved path, ask the user where their clone is and run
+  `check-setup --repo <path>`.
+- If it reports missing permission entries, **show them and ask before writing.** `--write` merges
+  them into the git-ignored `.claude/settings.local.json`; it is granting the session standing
+  approval, so it is the user's call, not yours. Never add them to the shared `settings.json`.
+- Use the resolved absolute path in every `git -C` call you write by hand. Don't use `~` and don't
+  use `cd <clone> && git …` — permission matching is a literal prefix, so both forms miss the
+  allowlist and prompt.
 
-## Execution model (adaptive)
+## Then reconstitute where you are
 
-- **Small window / few survivors:** do the deep-dive inline, one candidate at a time.
-- **Larger set (a normal daily run easily reaches dozens post-Step-5):** fan out parallel subagents grouped by area (New Tab/Messaging, Address Bar/Search, CSS/Layout, JS/Networking/Media, Android/Autofill, and the big desktop features + Nova rollup as its own batch). Give every subagent the freshness rules (read prefs from `origin/main`), the significance bar, and the requirement to verify final FIXED state. Then synthesize into one report.
+```
+python3 scripts/relnotes/watchlist.py resume
+```
+
+**Run this before anything else on any pass you did not personally start.** Release-note work spans a
+six-week cycle, and the session doing it will be compacted — probably more than once — and may be
+replaced entirely. Nothing in a conversation survives that; the per-user state on disk does. `resume`
+prints the scan position and the exact command to continue, days reviewed, status counts, what is
+awaiting a reply, what a developer has already answered, what is being held for the cycle-end rollup,
+and dated release-level context.
+
+Two habits make that briefing worth reading, and without them it decays into a stale bookmark:
+
+- **`--save-state` on every pass**, so the watermark tracks reality rather than the last time someone
+  remembered.
+- **Write a `log` entry at the end of every pass** — what the window was, how many candidates, what
+  you rescued or declined and why. Without it the state shows *where* the scan reached but not what
+  it concluded, and the next session (or the same one after compaction) cannot tell a quiet day from
+  an unfinished one.
+- **Record as you go.** `watchlist.py add <bug> --status asked --note "..."` when you ask,
+  `days <YYYYMMDD>` when a day is done, `replied`/`decline`/`noted` as things move, and
+  `log "<text>"` for context belonging to no single bug — a notes review, a decision, an open
+  question. A declined bug with no recorded reason will simply be re-proposed next cycle.
+
+## Run it: one command
+
+`daily-pass.py` runs the scan, the preference delta and the clustering over a **guaranteed-identical**
+range, adds the Bugzilla signals no single script owns, and reads your watchlist. Use it rather than
+invoking the three scripts by hand — running them separately is how their windows drift apart.
+
+```
+python3 scripts/relnotes/daily-pass.py --build-day 20260801 --outdir /tmp/day01 --brief
+```
+
+- **`--brief`** prints the funnel and headline signals and writes the full report to
+  `<outdir>/report.txt`. Use it and then **read the files** — do not redirect output with `>`, which
+  is a file write needing its own approval, and do not pipe through `grep`/`head` when the Read tool
+  will do.
+- Everything lands in `<outdir>/`: `report.txt`, `scan.txt` (survivors with their landings),
+  `prefs.txt`, `clusters.txt`, `flags.json`, `scan.json`.
+- Window flags are the same as `scan-window.py` (`--build`, `--build-day`, `--from-build`, `--cycle`,
+  `--since-last`), plus `--save-state` to record the watermark on success.
+
+**Then keep the watchlist current** (`scripts/relnotes/watchlist.py`), because it is the only memory
+between passes:
+
+```
+watchlist.py summary                     # per-release counts and days reviewed
+watchlist.py followup                    # asked/replied bugs: nominated, awaiting, or needs chasing
+watchlist.py replies                     # developer replies received since each ask
+watchlist.py add <bug> --status asked --note "<what and when>"
+watchlist.py days 20260801               # record the day as reviewed
+```
+
+`bug-detail.py <ids> --landings A..B` shows each bug's landings in a window with their diffstat —
+what a candidate actually changed, which is the usual reason to reach for the clone at all. Prefer it
+over composing `git show --stat $(git log --grep=…)` by hand: a `$(…)` subshell defeats the permission
+allowlist and prompts every time. It lists only commits whose *subject* names the bug and counts
+cross-references separately, so another bug's commit is never reported as this one's landing.
+
+`bug-detail.py <ids> [--comments]` gives the judgment fields for a candidate — version flags, relnote
+flag, reporter and whether they are internal, resolved duplicate/blocker summaries, regressor age,
+pending uplift requests. Reach for it instead of assembling Bugzilla queries by hand.
+
+## Step 1 — Enumerate and funnel (script does this)
+
+```
+python3 scripts/relnotes/scan-window.py --version 153 \
+    --range FIREFOX_NIGHTLY_152_END..FIREFOX_NIGHTLY_153_END --format json -o /tmp/w.json
+```
+
+**Pass `--version N` for any historical window.** It defaults to the current Nightly, which checks
+the wrong `cf_status_firefox{N}` field entirely when you're scanning a past cycle.
+
+### Validating against whattrainisitnow.com
+
+`https://whattrainisitnow.com/nightly/` is how Release Management currently hunts notes by hand, so
+it's the reference for checking this skill's coverage — **not** an input the skill depends on.
+`scripts/relnotes/nightly-buglist.py` pulls a build's or a day's list from it.
+
+Two things about that list:
+
+- **It does not filter backouts.** On build 20260731085738 it lists 57 bugs; 8 of those are not
+  currently FIXED (backed out, never re-landed) and 7 are security-restricted. The funnel here
+  reduces the same 57 to 29 survivors.
+- **`--build <id>` reproduces its enumeration exactly** (57/57, nothing either way), because both
+  resolve the same build boundaries. So a difference between this skill and a manual pass is a
+  difference in *judgment*, not coverage — which is what makes the comparison meaningful.
+
+Build boundaries resolve through two public hg endpoints (`json-firefoxreleases` for build id → hg
+node, then `json-rev/<node>` for the `git_commit` field). `trainlib.py` handles this and caches the
+12 MB build index for three hours.
+
+### Uplifts change which version a note belongs to
+
+A change that lands on Nightly N but gets **uplifted to Beta (N-1) or Release (N-2)** reaches users
+in *that* version first, so **its note belongs to the version it was uplifted to, not N.** Those
+ship sooner, which makes a missed uplift time-critical rather than a curiosity: a note owed to Beta
+may be days from shipping while you file it against a Nightly six weeks out.
+
+The scan checks `cf_status_firefox{N}`, `{N-1}`, `{N-2}`, and the live ESR versions, and flags any
+survivor whose earliest landed version is below N:
+
+```
+2033733  Core :: Networking  [UPLIFTED -> note belongs to 154, also ESR 140]
+```
+
+Report the **target version per candidate**, not one version for the whole run.
+
+**Merge-day windows straddle two versions.** The automatic version bump lands mid-window, so
+commits before it belong to N-1 and commits after to N. The uplift check only sees "earliest landed
+version is below the Nightly" and labels both cases `UPLIFTED`, which is wrong for the pre-merge
+half — those landed in N-1 natively. `scan-window.py` now warns when a window contains a
+`browser/config/version.txt` bump. Measured on 2026-07-20: 6 of 7 survivors were flagged as uplifted
+and most had simply landed before the merge. Either way they are not the current Nightly's notes,
+but do not describe them as uplifts.
+
+**The catch: uplift status is not knowable when the change lands.** Approval comes days to weeks
+later. Measured today, a 24-hour window had **zero** uplifted survivors, while the 153 beta-cycle
+window had **40**. So:
+
+- A daily pass will almost never see uplifts. Its version attribution is **provisional**.
+- **Re-check version flags before notes are finalized**, not only at discovery. This is a re-check
+  step in the workflow, not a one-time scan property.
+- Say so in the output: state that uplift status was accurate as of the run and may change.
+
+It fetches origin, resolves the window, extracts bug ids, batch-fetches Bugzilla, keeps only
+currently-FIXED bugs (the real backout filter — reverts are flagged, not trusted), and drops
+mechanically-never-noteworthy landings. It prints the funnel counts; **carry those into your
+output** so the user can see the denominator.
+
+**Audit the mechanical drop list too — every pass.** `--show-dropped` prints it, and the report
+links a buglist for it. The drops are heuristics and they do get things wrong: bug 2047027, a real
+Android tab-ungrouping menu item, was dropped as localization work because
+`android-l10n-reviewers` appeared in the commit's `r=` list. Skim the dropped summaries for anything
+that reads like user-facing work and rescue it. A false drop is invisible in the survivor list by
+construction, so this is the only place it can be caught.
+
+Judge the `landed:` lines, not the bug summary — a bug titled like test work often lands real
+changes and vice versa. Use `--show-dropped` when the user wants to rescue something; the drop list
+is auditable by design.
+
+## Step 2 — Pref flips and gating (script does this)
+
+```
+python3 scripts/relnotes/pref-delta.py --range <start>..<end>
+python3 scripts/relnotes/pref-delta.py --lookup browser.nova.enabled,layout.css.attr.enabled
+```
+
+**A flip is only as meaningful as the feature it configures.** Check the *feature's* gate, not just
+the flipped preference's own default. `browser.smartwindow.mistralRelease` flipped to `true` on every
+channel — a textbook `FLIPPED ON` signal — while `browser.smartwindow.enabled` is `false` everywhere,
+so nothing reached anyone. `pref-delta.py` now prints the enclosing `<namespace>.enabled` gates
+beside each change; read them before treating a flip as a candidate.
+
+**And check which version the feature actually landed in.** A flip can be the last step of work that
+shipped in an earlier release: bug 2059112 only flipped the gate on bug 2047300, which landed in
+**154** and was already region-gated. The note, if any, belongs to that version — the flip is not
+news on its own.
+
+**Run this on every window, and read its output before you walk the survivor list from Step 1.** The
+steps are numbered in execution order — `daily-pass.py` runs the scan first because the funnel and
+this share one window — but the *reading* order is the reverse: a flip reframes what the survivor list
+means, so knowing what went live comes first. A feature's code often lands months
+before it becomes live; the commit that makes it note-worthy is a one-line default change with an
+unremarkable subject that no subject-based funnel will surface. `FLIPPED ON` is the strongest single
+release-note signal there is.
+
+The script resolves defaults per channel and platform from `origin/main`, handles the `@DEFINE@`
+indirection, distinguishes *absent* from *false*, and collapses land/backout/re-land churn by
+diffing window endpoints. Quote its `effective now:` verdict as **verified**; anything you infer
+beyond it is inferred.
+
+Preference state is not the whole gating story — check Nimbus and Labs per
+`reference/release-notes/gating.md`.
+
+**Resolve the gate before the evidence workup, not after.** Over three consecutive days
+(2026-08-01..03) three separate candidates were killed by their feature's gate, and in every case the
+full workup — reporter, duplicate count, blocking meta, landing message, precedent search — was done
+first and then a single `--lookup` settled it:
+
+| Bug | Gate | Verdict |
+|---|---|---|
+| 2047027 | Android tab groups, hardcoded `false` | not a note |
+| 2060090 | `browser.ipProtection.enabled` false on all 12 configs | not a note |
+| 2009909 | `dom.select.customizable_select.enabled` false on all 12 configs | not a note |
+
+So: **if a survivor touches anything that looks preference-gated, `--lookup` its gate first.** Off
+everywhere means watchlist, and the workup was wasted either way. One call answers it.
+
+**A gated-off bug still has to appear in the report** — as a watchlist line naming the gate. Bug
+2009909 was correctly excluded and then omitted entirely, so the user had to ask why a notable bug
+was missing. "Correctly excluded" and "invisible to the reader" are different outcomes and only the
+first is acceptable.
+
+## Step 3 — Roll up features (script does this)
+
+```
+python3 scripts/relnotes/bug-tree.py --input /tmp/w.json --min-cluster 2
+```
+
+Work fans out: a New Tab widget is 6–7 bugs, a theming refresh 15+. **One candidate per feature,
+listing every contributing bug** — never one note per bug. The script clusters by meta-bug ancestry,
+whiteboard tag, summary prefix, shared subtree, and pref namespace, ranked by evidence quality
+(multi-signal > meta > whiteboard/prefix > path).
+
+Use its **completeness check**, which reads the meta bug's *full* dependency list rather than just
+in-window members:
+
+- `0 open` → the feature is complete; a note is in scope now.
+- `N open` → still in progress; usually hold, but still worth asking the developer about timing.
+- `dependencies landed OUTSIDE this window` → the feature predates the window. Say so; a cycle note
+  may belong to an earlier version, and this is a common source of wrong-version notes.
+
+It discloses what it refused to cluster (over-broad directories, tracking metas with >60
+dependencies). Pass that disclosure through — those are coverage gaps, not absences.
+
+## What the documented criteria say should be noted
+
+From the nomination page, changes that belong in release notes:
+
+* New features for end users **and web developers**
+* Important changes for end users and web developers
+* **Important stability and security fixes**
+* Important system requirements changes (for example, end of support for an OS version)
+* **New locales**
+
+Two of these are easy to forget: system-requirements changes and new locales rarely look like
+"features" in a commit log. Watch for them.
+
+Note the tension with the calibration below: the criteria admit "important stability and security
+fixes", but in practice the bar is high — Release Management's working guidance is that crash and
+performance fixes are generally *not* called out for a major release unless there is a bigger story.
+Both are true; "important" is doing the work.
+
+## Calibration from real passes (read this before tiering)
+
+Learned by comparing this skill's output against a Release Manager's own pass on the same build.
+Every item below is a case where the skill was wrong, so they carry more weight than intuition.
+
+**Signals that argue *against* a note:**
+
+- **Crash fixes are essentially never mainline notes.** "I can't imagine many situations where we'd
+  call out a crash fix in relnotes for a major release." Treat a crash fix as a drop unless it is
+  both very frequent and has a describable user-facing trigger. On that basis alone it can be
+  rejected — no impact analysis needed.
+- **Check how old the *regressor* is, not just the bug.** `bug-detail.py` resolves `regressed_by`
+  and reports the gap. Bug 2052660 (SVG `<use>`/`<symbol>`) looked strong — external reporter, a
+  duplicate naming a real site — until the regressing change turned out to have landed in **2019**.
+  Broken for six years with one duplicate is edge-case by evidence, whatever the symptom sounds
+  like. Do this before weighing the site name.
+- **A spec-conformance change with no describable user consequence is not a note** (bug 2053485,
+  scroll direction for `unicode-bidi: plaintext`). "We now match the spec" is not user impact.
+- **For a removal, the gate is the removed thing's default *before* removal — not how much code went
+  away.** Deleting a feature that was off by default has zero user-facing delta no matter how many
+  parts the removal has. Bug 2058143 removed cookie banner handling in ten parts (UI, about:prefs,
+  Fenix, Focus, GeckoView, Remote Settings rules, plus a profile-data bump to clear user exceptions)
+  and was still declined: `cookiebanners.service.mode` was **0** at both `FIREFOX_NIGHTLY_154_END` and
+  `FIREFOX_BETA_153_BASE`, so nothing users had was taken away. Reading the commit log tells you the
+  extent of the deletion, which is a different question — check the preference at a revision *before*
+  the removal landed, since afterwards the pref is gone and `--lookup` cannot see it. Same shape as
+  `svg.SVGAElement.text.enabled`, where the attribute was deleted while the pref was false.
+- **Longstanding and unnoticed means low impact.** A bug that existed for years without anyone
+  reporting it is edge-case *by evidence*, no matter how bad the symptom sounds. Bug 2050228 (page
+  text missing from printouts) was rejected on exactly this: "it looks like a very edge-case bug
+  given how long the bug has existed without anybody noticing it." Check the bug's age against
+  whether anyone actually hit it.
+- **A pending uplift request means the target version will move.** `approval-mozilla-* = ?` on the
+  bug's attachments. Two of three rejections on the first compared build were partly "very likely to
+  get uplifted." Don't file a note against Nightly N for something about to ship in N-1.
+  **The flag is the late signal, not the first one** — read the bug's discussion too. Bug 2058432 was
+  declined as "very likely to be uplifted per the comments in the bug" while no approval flag had
+  been requested yet, so the scan's `PENDING UPLIFT REQUESTS` section said nothing. For any
+  recent-regression candidate, `bug-detail.py <id> --comments` and look for anyone raising uplift,
+  a dot release, or an affected shipped branch before proposing it.
+- **No evidence of widespread impact.** A correct web-platform fix with no reports behind it isn't a
+  note (bug 2052949, `modulepreload` event correctness).
+- **A severe-sounding symptom on a niche configuration is still edge-case.** Bug 2059035 (invisible
+  tab titles, address bar and menu text on KDE Plasma) reads alarming and was affected in shipped
+  Release and Beta — and was still rejected as too edge-case. **A developer's opinion that it isn't
+  an uplift candidate doesn't settle it either**; it may remain one. Weigh the size of the affected
+  population, not how bad the symptom sounds in isolation.
+- **Non-user-facing internals should be dropped, not tiered.** Refactors, IPC cleanups, telemetry,
+  build fixes, stability assertions: "most look non user-facing which makes them extremely unlikely
+  to be interesting." A Tier 3 full of internals is noise that costs the reader time — if it isn't
+  user-facing, drop it with a reason.
+
+- **Performance fixes are in the same boat as crash fixes** — not called out unless there's a bigger
+  story to tell. And a measured win on an *internal Mozilla site* is not evidence of user impact
+  (bug 2055399, a 21-second Treeherder stall).
+- **A clarification that doesn't change behavior isn't a note.** Bug 2058276 corrected misleading
+  Private Browsing text; the behaviour was always the same. Rewording to describe reality more
+  accurately doesn't clear the bar.
+- **A recent regression being uplifted is a net non-event.** Bug 2057970 broke in 154, was fixed in
+  155, and the uplift was already on track — across shipped versions the user sees nothing. Two
+  related shapes: a regression that never shipped at all (`fx153=unaffected fx154=unaffected`) needs
+  no note either.
+- **Check precedent before proposing.** `fetch-shipped-notes.py --search '<regex>'` greps all 6,834
+  notes ever published. "I don't believe we've called out past ffmpeg updates" was verifiable in
+  seconds: exactly **one** note in the entire corpus mentions ffmpeg/libavcodec, and it was about
+  *blocking* old versions. If a class of change has no precedent across two decades, that's strong
+  evidence it isn't noted.
+- **Library and vendor bumps are dropped mechanically**, matched on the bug summary rather than the
+  landings, because a big bump like `Update to libwebrtc 151` carries hundreds of commits and a few
+  stray build fixes would otherwise keep the whole thing. They land in the dropped list, which the
+  report links for auditing.
+- **pdf.js version bumps: don't ping per update.** There can be several a week. Ignore them unless
+  the commit log linked from the bug's comment 0 shows a clear user-facing change.
+
+- **Filed internally with no duplicates is weak evidence, whatever the summary says.** This is the
+  single most repeated correction. Bugs 1975797 ("download progress only updates if another byte
+  arrives"), 2058585 (`view/scroll-timeline` on pseudo) and 1830603 (border-radius background
+  clipping, an *old* bug with `parity-chrome` and `regression`) were all rejected on it. `daily-pass.py`
+  now reports reporter domain, duplicate count, see_also and cc per survivor — **read that before
+  tiering.** Keywords, bug age and a severe-sounding title are not impact evidence; outside reporters
+  and duplicates are.
+- **A severe recent regression predicts an *uplift*, not a note.** `fx153=affected fx154=affected` on
+  something that broke recently means it will likely be fixed on those branches, leaving no
+  user-visible delta to describe. Bug 2054991 (unrecoverable certificate error) was proposed partly
+  *because* both channels were affected — that reasoning is backwards.
+- **Don't propose individual work items from a feature still under development.** The Vulkan video
+  decoding bugs are pieces of unshipped work; individual fixes within it aren't notes. Applies even
+  when the bugs don't cluster — judge the *area's* maturity, not just the bug.
+- **Changes delivered by a train-hop system add-on are not release-note candidates.** New Tab Page
+  work ships through the newtab system add-on, which rolls out to **all users outside the normal
+  release cycle**. There is no Firefox version the change "arrives in", so there is nothing to note
+  against. Bug 2046143 (the New Tab weather widget activating without opt-in) was rejected on this
+  despite being a genuine privacy fix with an outside reporter.
+  **The version flags actively mislead here:** it read `fx153=wontfix fx154=wontfix fx155=fixed`,
+  which describes the Gecko tree, not when users get the fix. Treat `Firefox :: New Tab Page` — and
+  any other component you know ships as a train-hop add-on — as delivered out-of-band, and check the
+  bug for uplift comments mentioning trainhop before proposing anything.
+- **Weigh the API's own reach, not just the change.** A correct improvement to a **niche, recently
+  shipped** web API is not a note on its own merits — bug 2040379 (Web Serial parity-error
+  detection) was rejected because Web Serial itself only recently reached stable and has a small
+  audience. Ask how many people use the surface before asking how good the change is.
+- **"Now configurable via a preference" is not a note.** Notes describe default behaviour; anything
+  requiring a manual `about:config` change is out of scope (bug 1418178, Ctrl-Tab preview count).
+  Check whether the *default* actually changed before treating a new preference as a candidate — in
+  1418178 the value had been hardcoded at 7 and the preference kept it at 7, so nothing changed for
+  anyone. A `pref-delta.py` line reading `None -> 7` means the preference is new, **not** that the
+  behaviour is.
+- **A fix for a Nightly-only or unshipped feature is not a note.** The broken behaviour never reached
+  users (bug 2045680, a fix to a Nightly-only Android feature). **For any fix, identify the feature
+  it belongs to and look up that feature's preference before proposing it** — not just the bug's own
+  gating. Bug 2022210 (HTML color picker popup) looked like a solid external-reporter fix until
+  `dom.forms.html_color_picker.enabled` turned out to be Nightly-only. One `pref-delta.py --lookup`
+  would have caught it, and this class shouldn't be flagged at all.
+
+**Two ways context can wrongly *suppress* a candidate — both cost real asks:**
+
+- **A watchlist entry is not an ask.** Bug 2056188 (`[155 early access] Enable browser.nova.enabled
+  for Nightly only`) was skipped because a `nova` feature entry already sat on the watchlist with
+  status `nightly-note-requested`. But nobody had pinged *that bug*. A tracked feature suppresses
+  **re-asking the same bug**; it must not suppress the bug that actually enables the feature. Ask
+  the question a fresh session would ask.
+- **A cluster marked "hold" should not silently bury a notable member — but the cluster context is
+  what decides.** Bug 1814460 (`Implement RTCError for DataChannel/sctp failures`) sat inside the
+  Interop 2026 WebRTC rollup, whose completeness check said hold, and went unmentioned. Raised on
+  its own it looked worth asking; once the rollup context was visible the call was to **defer and
+  revisit at the end of the Nightly cycle for a single rollup note**. So: surface the member *with*
+  its cluster and completeness state, and let the owner choose between an individual ask and a
+  cycle-end rollup. Don't hide it, and don't reflexively ask about it either.
+
+**Signals that argue *for* a note:**
+
+- **Duplicate or variant reports hanging off the bug.** Read what the `blocks`/`depends_on`/`see_also`
+  bugs *are*, not how many there are — `bug-detail.py` resolves them to summaries for this reason.
+  A fix can look minor while the bug it blocks is the long-standing annoyance users actually filed
+  about: bug 2056362 read as a modest Android autofill tweak until its blocker, bug 2040184 (itself
+  with a duplicate), showed what it partially addresses. Bug 2051354 was a borderline call that tipped to "ask" because
+  it blocks two independent user reports of the same data loss (`[Linux/Wayland] Data loss in M365
+  Word Online: Diacritic keys (å,ä,ö)…` and `sharepoint.com - Some part of the text disappears…`).
+  Raw counts don't discriminate — bug 1452337 had *more* links and was still rejected.
+- **A big site by name.** Narrow technical reproduction plus a major site (Microsoft 365, SharePoint)
+  can outweigh "only some environments."
+- **A new user-visible capability, even a small one** (bug 1477920, a Developer Tools toggle).
+- **A public bug describing a widely-known product shortcoming**, even when it carries security
+  keywords. Bug 1699444 (Android tabs opened by extensions *displayed* as private without actually
+  being private) has `sec-moderate` and `csectype-disclosure` — and is still worth asking about: it
+  is a public bug with three duplicates and a long discussion. **Security keywords do not
+  automatically mean "covered by the security advisory".** Weigh whether the *user-visible*
+  behaviour is a known shortcoming worth telling people was fixed.
+
+**Judge the landing, not the bug summary — this rule has already been broken once.** Bug 267369 is a
+2004 feature request ("put source URL into the saved file's properties") that was proposed as a
+Tier 1 candidate. Its **only** landing was `Document how Firefox records download origin metadata …
+DONTBUILD` — documentation, no code. An old bug suddenly showing activity is very often cleanup or
+docs, not the feature finally arriving. `DONTBUILD` and leading `Document…` are now mechanical
+drops, but the habit matters more than the patterns.
+
+**The reference outcome:** of 29 survivors on build 20260731085738, the Release Manager took **three**
+to ask developers about — 1477920, 2051354, 2058840. The skill had proposed two of those in Tier 1
+and one in Tier 2, plus four Tier 2 items and seven Tier 3 items that were all rejected. Erring
+toward inclusion is still right, but **internals and crash fixes are dead weight, not cheap
+over-inclusion.**
+
+## The `relnote-firefox` flag, including `nightly+`
+
+Field: `cf_tracking_firefox_relnote`.
+
+**Check it before proposing anything** — if it's already set, someone has made a call and the bug
+doesn't need another ask. `daily-pass.py` reads the flag for every survivor, so a normal pass already
+tells you. To go the other way and ask *which bugs carry a given value*, use
+`relnote-flag.py` — `--nominated` for the `?` queue (see above), `--approved N` and `--nightly` for
+what is already decided, `--declined` for the 234 bugs Release Management has said no to, which is
+the only negative calibration corpus available.
+
+**`nightly+` is a real, used value** for changes enabled on **Nightly only** that are still worth
+calling out, typically to invite testing and feedback. Verified examples: `Enable QUIC version
+negotiation`, `Implement alpha() function behind pref`, `Enable link-parameters on Nightly`,
+`Update tab context menu behind the pref in Nightly`.
+
+**This changes how gated features are handled.** A Nightly-only preference-gated feature is **not
+simply "hold"** — it is a candidate for a *Nightly* note. When a candidate resolves to "Nightly-only"
+in `pref-delta.py`, ask whether it wants `nightly+` rather than filing it away. Keep the mainline
+note for whenever it rides the trains.
+
+## Step 4 — Judge significance and tier the output
+
+Calibrate against the survey, not intuition. Then place each candidate in a tier that reflects
+**how confident you are that it merits asking**, since that is what the user acts on:
+
+- **Tier 1 — Ask the developer.** Clear user-facing change, or a pref flip making a feature live,
+  or a complete feature cluster. You verified the mechanism.
+- **Tier 2 — Probably worth asking.** Looks user-facing but you could not confirm scope, impact, or
+  gating. Say exactly what you couldn't confirm.
+- **Tier 3 — use sparingly, and expect it to be empty.** Across twelve calibrated days **not one
+  Tier 3 item was ever accepted**, and the reviewer's verdict was "none of the tier 3 bugs look
+  interesting". A long list of weak candidates is not cheap to skim — it is the main way this report
+  wastes the reader's time. If the only thing you can say for a candidate is "plausibly notable,
+  weak evidence", drop it with a reason instead. Reserve Tier 3 for something you genuinely expect
+  to be overruled on, and if you have more than one or two, you are padding.
+- **Watchlist — landed but not usable yet.** Parsing-only or phase-1 platform work, or a feature
+  gated off on every channel. Not a note now; note it when it ships (the way JPEG XL only appeared
+  once offered in Firefox Labs).
+- **Dropped.** Report what the audit *found*, not an inventory of everything dropped — see the
+  Output section. Plain text only: this is read in a terminal, so no HTML (`<details>`/`<summary>`
+  renders as literal tags).
+
+The recurring shapes that clear the bar, and the ones that never do, are characterized in the
+survey's `Fixed`-threshold section. Two calibration anchors from it: **platform-scoped is not
+disqualifying** when breakage is severe; **performance micro-wins and cosmetic corrections are
+absent entirely** from two years of notes.
+
+## Step 5 — Draft the one-liner, category, and screenshot call
+
+Categories and full style rules: `reference/release-notes/style-guide.md`. Keep drafts
+copy-pasteable; the user and the developer will edit. Median shipped note is ~20 words.
+
+**Lead with the symptom the user saw, never the mechanism.** The most common drafting failure is
+restating the patch. Two rejected drafts and their fixes:
+
+| Rejected draft | Why it failed | Better |
+|---|---|---|
+| *Added a Windows font collection so more characters render correctly in web content.* | Describes the change (adding a font list entry), not the experience. "More characters" says nothing. | *Fixed characters from some less common scripts appearing as empty boxes on web pages on Windows.* |
+| *Fixed text loss when typing with an input method on Linux, which could discard characters in some web applications.* | "Text loss" and "discard characters" are the same fact twice — the conflated-facts trap. Vague about where. | *Fixed text disappearing in Microsoft 365 Word Online on Linux when typing certain characters.* |
+
+**Keep the suggested wording on one line.** Bugzilla wraps text itself; hard-wrapping the blockquote
+just makes it awkward to copy.
+
+**No second person.** See `style-guide.md` — write "autofill prompts now dismiss when focus moves
+away", not "when you move focus away".
+
+**Cut the cause, keep the symptom.** Even an accurate mechanism clause gets trimmed. A proposed
+*"Fixed Firefox preventing Linux systems from sleeping or suspending after a long browsing session,
+caused by silent or muted videos holding a wake lock"* shipped as *"…after a long browsing session"* —
+everything explaining *why* was removed. Across the drafts reviewed so far the editor has trimmed
+several and lengthened none, so **write the shortest form that still identifies the symptom and who
+saw it**, and leave the diagnosis in the bug.
+
+**Naming a specific site is good practice, not a scoping error** — shipped notes do it (*"…on sites
+such as Squarespace, LinkedIn, and eBay"*). If the bug names a site users recognise, use it.
+
+Ask yourself: *what would the user have noticed before, and what do they notice now?* If the draft
+can't be read that way, it's describing the patch.
+
+### Where this fits in the documented process
+
+The canonical process is
+<https://wiki.mozilla.org/Release_Management/Release_Notes> — read it when a question isn't
+covered here. Its "Daily during the Nightly cycle" step is exactly what this skill automates:
+
+> Look through all patches that land in central via whattrainisitnow.com → identify if any patch is
+> a candidate for release note nomination → needinfo the bug assignee and request if it should be
+> considered for release note nomination.
+
+Two things follow that the skill should respect:
+
+- **The ask is a needinfo on the bug assignee**, not just a comment. The wiki's template is
+  the nomination page. This skill adds suggested wording and uses the house phrasing — see the ask
+  template below, which is the form to emit.
+- **The daily pass has a second half this skill does not cover.** The process also says Release
+  Management *monitors the `relnote-firefox` flag* for bugs developers nominated themselves, checks
+  their wording and gating, and adds them to Nucleus. This skill only does the discovery half
+  (scanning landings). Don't imply it covers the nomination queue.
+
+**Nightly-only lifecycle**, from the same page — relevant to every `nightly+` candidate:
+
+- Set `relnote-firefox` to `nightly+` and comment "Thanks, added to the Nightly release notes".
+- The note must name the version that introduced it ("Starting with Firefox 113, nightly builds…"),
+  which is why carry-forward notes cite an older version than the release they appear in.
+- `nightly+` means the bug is included in Nightly release notes **for 3 cycles, or until the feature
+  is enabled by default — whichever comes first.** At that point the flag is removed and the change
+  becomes a normal release-note request against the version it ships in. Revisit
+  `nightly-note-requested` watchlist entries on that schedule.
+- `X+` means Release Management has decided the bug is in Firefox X's notes; `?` means nominated and
+  awaiting their decision.
+
+### Expect the wording to be revised — that is the process working
+
+Developers and reporters will refine suggested wording most of the time. **This is normal and not a
+defect in the ask.** The suggestion exists to give them something concrete to react to; a nomination
+that arrives with better wording than you proposed is a success, not a miss. Do **not** tune toward
+wording nobody edits — the way to achieve that is to write vague notes, which are worse notes.
+
+So separate the two kinds of reply, and only learn from the first:
+
+**Real errors — worth changing how you work:**
+
+- **Direction reversed.** Bug 1699444's summary reads "Tabs opened by extensions are displayed as
+  private when they are not". The proposed note said tabs are *no longer shown as private*. The
+  actual fix is close to the opposite: extension-created tabs now **do** open in private browsing
+  when the user is in private browsing, and private opening is **blocked** for extensions without
+  the "Run in Private Browsing" permission. **A summary of the form "X is Y when it shouldn't be"
+  can be resolved in either direction.** Read the patch to find out which; if you can't, write the
+  ask without asserting a direction. This one was factually wrong, not merely differently worded.
+- **Asserting scope you did not verify.** Bug 2051354's note said "accented or non-Latin
+  characters"; the reporter said all Greek text was affected, including unaccented, and Google
+  Sheets as well as Microsoft 365. The lesson is not the specific breadth — it is that scope
+  inferred from a bug title and its blockers should be stated loosely, or flagged as unconfirmed,
+  rather than asserted precisely and wrongly.
+
+**Quibbles — expected, not lessons:** terminology preferences ("emulation" rather than
+"simulation"), house phrasing, a clause added or dropped. Note them and move on; don't generalise a
+rule from one person's stylistic preference.
+
+Whatever the developer puts in `[Suggested wording]` supersedes yours by default.
+
+### Emit the bug comment ready to paste
+
+The point of a candidate is a request on the bug, so produce that text — don't make the user compose
+it from a table.
+
+**The single most important thing the ask must do is get `relnote-firefox` set to `?`.** Nomination
+happens by flag, not by comment: Release Management monitors that flag, and setting it pops up a
+form in the Bugzilla comment box asking for suggested wording and a documentation URL. **A reply
+that doesn't set the flag is a nomination stranded in a comment thread** — nobody working the flag
+queue will ever see it.
+
+This is measured, not theoretical. Of the first eleven asks, three set the flag and two replied
+enthusiastically *without* setting it, leaving those nominations invisible to the process.
+
+So lead with the flag, link the instructions, and **needinfo the assignee** so it lands in their
+queue rather than a comment that may go unread.
+
+```
+Did you want to nominate this for the Fx155 relnotes? If so, set the relnote-firefox flag to "?"
+https://wiki.mozilla.org/Release_Management/Release_Notes_Nomination
+
+Possible wording:
+> Fixed characters from some less common scripts appearing as empty boxes on web pages on Windows.
+```
+
+The wiki's template reads *"could you please consider nominating this for a relnote?"* — **don't use
+that phrasing.** "Did you want to nominate this" is the house voice: direct, and it reads as a
+genuine question rather than a request being softened.
+
+Properties that are load-bearing:
+
+- **Ask for the flag explicitly.** "Set `relnote-firefox` to `?`" — not just "nominate this", which
+  people reasonably answer in prose.
+- **Needinfo the assignee**, so it lands in their queue.
+- **Link the nomination page**, which explains the form they will be asked to fill in.
+- **It asks, it doesn't assert.** The call stays with the developer.
+- **It names the version.** Use the *uplift-adjusted* version, not necessarily the Nightly.
+- **The wording is a blockquote**, clearly offered rather than imposed, and provisional.
+- **It stays short.** No rationale or impact analysis; the ask must be cheap to answer.
+
+**When note-worthiness hinges on an unresolved fact, ask the fact — not for a nomination.** Some
+candidates are ambiguous in a way only the developer can settle, and a nomination request presumes
+an answer. Bug 2057694 was asked as:
+
+```
+Does this mean we're shipping CT to Android Release for the first time? I'm having a hard time
+finding a remote pref flip for it otherwise.
+```
+
+No template, no suggested wording — because whether there is any user-visible change at all was the
+open question. Decide on the note once the answer arrives. Track these as `watching`, not `asked`.
+
+**Emit exactly that block. Do not add explanatory clauses.** It is two lines plus the wording, and
+it stays that way: no em-dash aside explaining what `nightly+` means, no extra paragraph naming the
+preference or noting that `dev-doc-needed` is set. The developer knows their own feature; the ask
+only has to be cheap to answer. If the change is Nightly-only, the one permitted variation is
+"nominate this for a Nightly relnote" in place of "for the FxNNN relnotes".
+
+Anything you learned that the developer might not know — the gating, the preference name, a related
+bug — belongs in *your report to the release manager*, not in the bug comment.
+
+(Setting the flag makes Bugzilla present the nomination form automatically, so there is no need to
+ask for `[Why is this notable]`, `[Affects Firefox for Android]` and the rest — they come with it.)
+
+**Follow up on stranded nominations.** A `replied` item whose flag is still `---` needs the flag set
+(Release Management can set it) or a nudge — otherwise the work of asking is wasted.
+`watchlist.py followup` lists every asked/replied item with its current flag state.
+
+**Then record the ask** so the next pass doesn't repeat it:
+
+```
+python3 scripts/relnotes/watchlist.py add <bug> --kind bug --status asked --release 155 \
+    --note "<short description>; asked dev <date> re: Fx155 relnote"
+```
+
+Carry the **bug number(s)** alongside every candidate even though mainline notes don't link bugs —
+the bug is where the user goes to ask.
+
+Suggest a screenshot when a visual would materially help: new or restyled visible UI. Say no for
+behavior, platform, and back-end changes with nothing to see. Briefly say why — it's a judgment
+call, not a rule.
+
+## Execution model
+
+- **Daily:** run all three scripts, then deep-dive survivors inline. Small enough to be exhaustive.
+- **Cycle:** run the scripts, then fan out subagents by area over the *ranked* clusters and the pref
+  flips — not over the raw survivor list. Give every subagent the freshness rules (read prefs from
+  `origin/main`), the truthfulness rules above, and the requirement to verify final FIXED state.
+  Then synthesize.
+
+Whichever you run, the funnel counts and the coverage caveats travel into the output.
+
+**Don't edit this skill during a pass.** A pass produces candidates; it is not tool-work time.
+Collect anything a run suggests and propose it after the window is closed and the verdicts are in,
+so it never competes with the reviewer's attention while they are working the day's list.
+
+**Expect to change this skill rarely.** Most verdicts are not skill bugs. Tiering is subjective and
+the user does not expect this skill to be right every time, so a declined candidate with a reasonable
+case behind it needs no rule added. Change the skill when a pass reveals a *fundamental* error that
+got overlooked — a check skipped, a signal never looked at, something reported as verified that
+wasn't — not because a judgment call went the other way. A rule per rejection turns calibration into
+overfitting, and every added rule costs attention on every future run.
 
 ## Output
 
-Lead with a one-line funnel (commits → FIXED → candidates → survivors) and the query window + Nightly version. Then:
+Lead with the funnel line (commits → bugs → FIXED → survivors → candidates), the window, and the
+Nightly version and channel mapping used. Then:
 
-1. **Live candidates that clear the bar** — a scannable table: category · bug(s) · one-liner · screenshot?
-2. **Gated** (landed but hidden) — same columns plus the gating mechanism; flag which the user must decide to hold.
-3. **Landed but not usable yet** — brief watchlist to note when it ships.
-4. **Dropped (too minor / noise)** — collapsed, one line each with the reason, so nothing is silently discarded.
+1. **Pref flips** — what became live or hidden, with per-channel defaults and bug numbers. First,
+   because it's the highest-signal section.
+2. **Tier 1 / Tier 2 / Tier 3 candidates** — table per tier: bug(s) · **the bug's Bugzilla summary,
+   verbatim** · product::component · category · draft one-liner · gated? · screenshot? ·
+   **basis (verified/inferred)**.
 
-Close with a short methodology note: the exact window, the Nightly version and channel mapping used, that the backout filter is Bugzilla-FIXED (with any land-then-reland cases called out), that preference defaults were read from `origin/main`, which lookups used the MCP vs REST, any security-restricted bugs skipped, and anything you could not determine (and why). Keep it a working queue, not an essay.
+   **Always print the bug summary, quoted exactly as Bugzilla has it — do not paraphrase, tidy,
+   or fix typos in it.** The user's next action is opening the bug to ask the developer, and the
+   verbatim summary is how they recognize it and match it against what they see there. Reproducing
+   it exactly also makes a wrong bug number obvious immediately. Keep it visually distinct from your
+   *draft note*, which is your proposed wording — never let a reader mistake one for the other.
+3. **Feature rollups** — cluster, member bugs, completeness, and whether to note now or hold.
+4. **Watchlist** — landed but not usable yet.
+5. **Drop-list audit findings** — *not* a list of everything dropped. A 45-item inventory of
+   internals, perf and cosmetic drops is noise nobody acts on; what matters is what the audit turned
+   up. Report only: any **false drop** (a real candidate the mechanical filter caught, with the
+   pattern that caught it), any item **you could not resolve** and would want revisited, and a bare
+   **count** of the rest by category — one line, e.g. "42 others dropped: internals 17, perf 2,
+   telemetry 1, cosmetic 2, tests 20". If the reader wants the full list they will ask, or run
+   `--show-dropped` themselves.
 
-## Gotchas learned from the trial
+   **Plain text, no HTML.** The output is read in a terminal, so `<details>`/`<summary>` renders as
+   literal tags rather than a collapsible block.
 
-- **No bug carries the `relnote-firefox` flag yet** on fresh landings — that flagging is the manual work this skill bootstraps, so classification is heuristic (component + type + subject + what the patch does), not flag-driven.
-- **The two highest-profile items can be fully off** — in the trial, both the Nova refresh and Smart Window were preference-off on *every* channel including Nightly, so nothing there was user-visible. Always confirm the default; don't assume a big feature is live because its code landed.
-- **The working tree lies about preference defaults.** Every subagent that read the on-disk file got a stale value; only `git show origin/main:...` was correct.
+**Include a Bugzilla buglist link for the candidates**, so every bug can be opened in one go
+rather than clicked one at a time:
+
+```
+https://bugzilla.mozilla.org/buglist.cgi?bug_id_type=anyexact&bug_id=<comma-separated ids>
+```
+
+`daily-pass.py` prints these for the survivor and dropped sets; build one for your tiered candidate
+list too, and one per tier when the list is long.
+
+Close with a short methodology note: exact window, Nightly version, **that uplift status was
+accurate only as of the run and needs re-checking before notes are finalized**, that the backout
+filter is Bugzilla-FIXED (naming any land-then-reland cases), that pref defaults were read from
+`origin/main`,
+which lookups used MCP vs REST, how many bugs were security-restricted, **which mode you ran and
+therefore what you did not look at**, and anything you could not determine and why.
+
+Keep it a working queue, not an essay.

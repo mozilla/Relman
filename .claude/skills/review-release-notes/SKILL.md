@@ -1,149 +1,181 @@
 ---
 name: review-release-notes
-description: Review draft Firefox release notes for style, tone, scoping, and audience-fit against the Mozilla Release Management Release Notes Style Guide. Use when the user wants release notes checked/edited before publishing — they may paste the notes, point to an exported file, or give a published-to-web Google Doc URL. Triggers on requests like "review these release notes", "check my relnotes draft", "do these notes follow the style guide".
+description: Review draft Firefox release notes for style, tone, scoping, and audience-fit against the Mozilla Release Management Release Notes Style Guide. Use when the user wants release notes checked/edited before publishing — they may paste the notes, point to an exported file, give a published-to-web Google Doc URL, or — for a dot release — a staging URL such as www-dev.springfield.moz.works. Also cross-checks note coverage against the bugs flagged for a release, reporting flagged bugs with no note and notes whose bug was never flagged. Triggers on requests like "review these release notes", "check my relnotes draft", "do these notes follow the style guide", "is our note coverage complete for 155".
 ---
 
 # Review Release Notes
 
-Review draft Firefox release notes against the Mozilla Release Management style guide, checking for consistent style, correct audience scoping, and proper categorization. Produce a clear, actionable critique with concrete suggested rewrites.
+Review draft Firefox release notes against the Release Management style guide, checking for
+consistent style, correct audience scoping, and proper categorization. Produce a clear, actionable
+critique with concrete suggested rewrites.
 
-**Scope: review only.** This skill assesses the notes and reports findings — it does not publish, schedule, push, or otherwise ship the notes anywhere; publishing is a separate step that happens later and is out of scope. When a review comes back clean, say the notes have no outstanding issues — not that they're "ready to publish" or anything implying you'll act on them.
+**Scope: review only.** Assess the notes and report findings — do not publish, schedule, push, or
+otherwise ship them anywhere. When a review comes back clean, say the notes have no outstanding
+issues, not that they're "ready to publish" or anything implying you'll act on them.
+
+## References — read these, don't restate them
+
+**Paths below are relative to the repository root, not this skill's directory.** From the repo root,
+`reference/release-notes/style-guide.md` resolves; `.claude/skills/…/reference/…` does not exist.
+
+| Topic | File |
+|---|---|
+| The style rules you are enforcing | `reference/release-notes/style-guide.md` |
+| What actually ships, for scoping calls | `reference/release-notes/shipped-notes-survey.md` |
+| Bug/patch lookup, REST vs MCP, platform scoping | `reference/release-notes/bugzilla-access.md` |
+| Whether a feature is really live | `reference/release-notes/gating.md` |
+| Command forms that don't trigger permission prompts | `reference/release-notes/command-forms.md` |
+
+`style-guide.md` is the authoritative working summary (the wiki wins on conflict) and covers
+audience, tense, full stops, links, tags including **Firefox Labs**, sections to skip, mobile rules,
+and the two recurring wording traps. Read it before reviewing rather than working from memory.
+
+Use `shipped-notes-survey.md` when a scoping or categorization call is genuinely uncertain — it has
+real shipped notes grouped by tag and sorted by length, which settles "is this the right register?"
+faster than argument. It also shows that `HTML5` is still in live use and that the `Fixed`-in-majors
+bar is moving, so don't flag either as anomalous.
+
+## Invoking commands
+
+Follow `reference/release-notes/command-forms.md` — no `cd`, scratch files under `/tmp` by absolute
+path, `curl -s "<url>"` with the URL first and flags after it, no shell loops. Written any other way,
+better than half these commands stop for a permission prompt on a fresh checkout.
+
+One rule specific to reviewing: **use WebFetch for a rendered page, and curl only when you need the
+raw bytes.** WebFetch answers a prompt against the page rather than handing you the markup, so it will
+paraphrase. Reach for curl whenever the review turns on exactly what is written — punctuation,
+`href` targets, whether a note's wording is really what a summarizer reported. On this skill's last
+run, WebFetch reported a note as `Improved Smart Window suggestions…` while the page actually rendered
+a broken-markdown fragment, `Improved Smart Window](https://…) suggestions…`. Only the raw HTML showed
+it, and it was the most serious finding of the review.
 
 ## Getting the draft
 
-The notes can come in three ways. Direct Google Drive access is **not** available in this environment (no Drive/Docs integration), so:
+Direct Google Drive access is **not** available here (no Drive/Docs integration), so:
 
-1. **Pasted text or an exported file** — the most reliable. Ask the user to paste the notes, or read an exported copy (`.txt`, `.md`, `.docx`, `.html`) they point you to with the Read tool.
-2. **A "Published to the web" Google Doc** — if the user did File → Share → Publish to web, the resulting public `docs.google.com/.../pub?...` URL can be read with WebFetch. A normal Drive share link (`/edit`, `/view`) is authenticated and will fail — ask them to publish to web or export instead.
-3. If you only have a private share link, tell the user it can't be opened directly and ask for a paste, export, or published-to-web URL.
+1. **Pasted text or an exported file** — most reliable. Ask for a paste, or read an export
+   (`.txt`, `.md`, `.docx`, `.html`) with the Read tool.
+2. **A "Published to the web" Google Doc** — if the author did File → Share → Publish to web, the
+   public `docs.google.com/.../pub?...` URL works with WebFetch. A normal share link (`/edit`,
+   `/view`) is authenticated and will fail — ask them to publish to web or export.
+3. If you only have a private share link, say it can't be opened and ask for a paste, export, or
+   published-to-web URL.
 
-**Dot releases come as a staging URL, not a Google Doc.** For a dot release (e.g. 151.0.4), the notes are generally provided as a rendered staging page on the dev server rather than a draft doc — e.g. `https://www-dev.springfield.moz.works/en-US/firefox/151.0.4/releasenotes/`. Read it with WebFetch like any public page. A couple of things follow from this:
-- It's the *rendered* page, so it already reflects the final layout/tags — review it as published output. The publish-lag/cache caveat below still applies when the author re-stages after edits (bust the WebFetch cache with a throwaway query param).
-- Remember dot releases **require bug links** (the opposite of mainline), so expect and check linked bugs rather than flagging them.
+**Dot releases come as a staging URL, not a Google Doc.** For a dot release (e.g. 151.0.4) the notes
+are generally a rendered staging page — e.g.
+`https://www-dev.springfield.moz.works/en-US/firefox/151.0.4/releasenotes/`. Read it with WebFetch
+like any public page. Two consequences:
 
-**Publish lag when re-checking edits.** The published `/pub` snapshot is regenerated on a delay (the doc header usually says "Updated automatically every 5 minutes"), so right after the author makes edits it can trail their live document by a few minutes. On top of that, WebFetch caches each URL for ~15 minutes, so re-fetching the *same* URL can return your own earlier (pre-edit) copy. So when you re-check whether requested changes were applied and the old text is still showing:
-- **Bust the WebFetch cache** by appending a throwaway query param (e.g. `…/pub?freshness=recheck2`) so it's treated as a new URL and actually re-fetched.
-- If the change *still* isn't there after a genuinely fresh fetch, it's most likely the `/pub` publish lag, not a missed edit — don't tell the author they forgot. Say you're seeing a stale published snapshot, wait a few minutes, and re-check before concluding anything.
+- It's the *rendered* page, so it already reflects final layout and tags — review it as published
+  output.
+- Dot releases **require bug links** (the opposite of mainline), so expect and check linked bugs
+  rather than flagging them.
 
-Before reviewing, confirm the **target**: which product (Firefox Desktop, Firefox for Android/iOS, Focus), which channel/version, and whether these are mainline, dot-release, beta, ESR/Enterprise, or known-issues notes. Audience scoping depends on it (see below).
+**Publish lag when re-checking edits.** The `/pub` snapshot regenerates on a delay (the doc header
+usually says "Updated automatically every 5 minutes"), and WebFetch caches each URL for ~15 minutes,
+so re-fetching the *same* URL can return your own earlier pre-edit copy. When you re-check whether
+changes were applied and the old text is still showing:
 
-## Source of truth
+- **Bust the WebFetch cache** with a throwaway query param (`…/pub?freshness=recheck2`) so it's
+  treated as a new URL.
+- If the change still isn't there after a genuinely fresh fetch, it's most likely publish lag, not a
+  missed edit. **Don't tell the author they forgot.** Say you're seeing a stale published snapshot,
+  wait a few minutes, and re-check before concluding anything.
 
-The authoritative guide is the wiki — consult it when a question isn't covered below or when you suspect the rules have changed:
-- Style guide: https://wiki.mozilla.org/Release_Management/Release_Notes#Release_Notes_Style_Guide
-- Published examples to model tone against: https://www.firefox.com/en-US/releases/ (individual versions at `/firefox/{VERSION}/releasenotes/`)
+Before reviewing, confirm the **target**: which product (Firefox Desktop, Firefox for Android/iOS,
+Focus), which channel/version, and whether these are mainline, dot-release, beta, ESR/Enterprise, or
+known-issues notes. Audience scoping depends on it.
 
-The rules below are a working summary; the wiki wins on any conflict.
+## Mapping notes to bugs
 
-## Looking up bug and patch context
+Drafts usually don't include bug numbers, but the author may ask whether two notes should be
+consolidated, recategorized, or rescoped. Answering well often needs to know what actually changed —
+see `bugzilla-access.md` for the REST-vs-MCP split, the query-link translation, and the **platform
+scoping rule** (a bug's component may name one OS while the fix is platform-agnostic; the changed
+file paths are definitive).
 
-Drafts usually don't include bug numbers, but the author may reference a bug (or two notes that came from related bugs) and ask whether they should be consolidated, recategorized, or rescoped. To answer well you often need to know what the change actually does. Pull that context from the Mozilla MCP server (`moz`):
+**Don't ask the author for a bug list — generate it.** `cf_tracking_firefox_relnote` is queryable
+over REST, so the flagged set for a release is one command:
 
-- **Bug:** read the MCP resource `@moz:bugzilla://bug/{bug_id}` (e.g. `@moz:bugzilla://bug/1138419`) for the summary, component, and status.
-- **Phabricator revision:** read `@moz:phabricator://revision/D{revision_id}` for the patch and its review comments. Find the revision ID in the commit log (`jj log -T builtin_log_detailed`, or `git log -v` in a Git checkout).
+```
+python3 scripts/relnotes/relnote-flag.py --approved 155        # bugs flagged 155+
+python3 scripts/relnotes/relnote-flag.py --coverage 155.0a1    # note set vs flagged bugs
+python3 scripts/relnotes/relnote-flag.py --coverage 153.0.3 --product "Firefox for Android"
+```
 
-Use this to confirm scoping (is it really user-facing?), to verify two notes describe the **same** underlying change before recommending a merge, and to ground rewrites in what shipped.
+`--coverage` reports both directions against the published note set: flagged bugs with no note, and
+notes whose bug was never flagged. Validated against Nightly 155 — 19 notes, 19 flagged bugs, exact
+correspondence both ways.
 
-**Caution on platform scoping:** a bug's component (e.g. `Widget: Cocoa`) or summary may name one OS while the actual fix is platform-agnostic — the underlying cause can be OS-specific even when the corrected behavior, the patch, or the reviewers aren't. Don't narrow a note to the component's platform on that basis.
+**Read its output with the four known distortions in mind**, all of which it labels rather than
+hides:
 
-The **definitive** check is the patch itself: read it and look at the paths of the changed files. Changes under platform-specific directories (`widget/cocoa`, `widget/gtk`, `widget/windows`, `*/mac`, `*/gtk`, `*/win`) are genuinely that-OS-only; changes under shared directories (`browser/`, `toolkit/`, `dom/`, `layout/`, `gfx/`) ship to every platform regardless of which OS the bug was reported on. Get the diff from:
-- **Phabricator (always available, use this by default)** — `@moz:phabricator://revision/D{revision_id}`. The `D` number is in the bug's commit comments, or in the `Differential Revision:` line of the Git commit message.
-- **A local Gecko checkout, only if one exists** — don't assume there is one or guess its path (it varies per user, and many people running this skill won't have one at all). If you know a checkout is present, `git -C <firefox-checkout> show --stat <commit_hash>` (commit hash is in the bug's pulsebot "Pushed by" comment) lists touched files; drop `--stat` for the full diff. Otherwise just use Phabricator.
+- **The flag is per-major**, so a bug flagged `153+` may be noted in 153.0 *or* any later dot
+  release. Coverage therefore spans every release of the major by default; `--scope release` narrows
+  it when you want to know what one release shipped.
+- **Nucleus stores one bug per note**, but a note can cite several. The check also reads bug links
+  out of the note text, and says when a match came only from there.
+- **A meta bug or a rollup note may carry the note** while the flag sits on an implementation bug.
+  One hop over `blocks`/`depends_on` explains those, reported separately from real gaps.
+- **`Fixed` and known-issue notes are normally unflagged** — Release Management writes dot-release
+  fixes without setting the flag, so they are counted, not listed as findings.
+- **The flag has no product dimension.** Pass `--product` for a mobile note set, or you will be shown
+  the desktop one for the same version number. Even then, "flagged but no note" is only reported for
+  desktop: a bug flagged `153+` is destined for whichever product Release Management chose, so
+  checking Android against it would report every desktop-flagged bug as a note owed on Android.
 
-Only when you genuinely can't read the diff, fall back to weighing the developer's suggested relnote wording (often deliberately generic) and reviewers; prefer the developer's intended scope and keep the note generic rather than adding a platform qualifier that might be wrong — raise it as a question instead.
+**Reviewing a release that hasn't shipped needs no special flag.** Notes on an unpublished Nucleus
+release are counted by default, because reviewing before a release goes live is the normal case and
+those notes are exactly what is under review. The header names any draft release it counted, so you
+can see what the number rests on. `--published-only` answers the narrower question of what has
+actually shipped — reach for it when auditing a past cycle, not when reviewing an upcoming one.
 
-To make these lookups possible without guesswork, **recommend the author provide a link to a Bugzilla query listing every bug flagged for the release's notes** (i.e. the bugs with the relnote tracking flag set for this version). With that query in hand you can map each note to its bug, spot duplicates and miscategorizations, and quote the suggested relnote wording the developer left on the bug. The query is per-release, so the link differs every time — ask the author for the current one rather than reusing a previous link. (An illustrative example of the shape: https://mzl.la/4okcqmf)
+Still ask the author for anything the flag cannot tell you: which draft is current, and the
+developer's suggested wording. And treat a coverage report as a prompt to look, never a verdict —
+security-restricted bugs are omitted by REST with no count, so it can never prove a flagged bug is
+absent.
 
-### Enumerating the query into bugs
-
-The `moz` MCP fetches a bug *by ID* but has no search/buglist tool, and the Bugzilla buglist HTML page won't render through WebFetch (it returns a JS "required part of this site couldn't load" error). So turn the query link into a list of bugs in three steps:
-
-1. **Get the query parameters.** The link may already be a direct `bugzilla.mozilla.org/buglist.cgi?...` URL — if so, the search params are right there (e.g. `f1=cf_tracking_firefox_relnote&o1=equals&v1=152%2B`); read them off and skip to step 2. If it's a shortlink (e.g. `mzl.la`), WebFetch it: WebFetch won't follow the cross-host redirect, but it reports the destination `buglist.cgi?...` URL, which carries the same params.
-2. **Hit the REST API for the ID list.** Rebuild those params against the JSON endpoint, which needs no browser: `https://bugzilla.mozilla.org/rest/bug?cf_tracking_firefox_relnote=152%2B&include_fields=id,summary,component`. That returns every matching bug's id, summary, and component. (This read-only enumeration is the one acceptable non-MCP Bugzilla call — it exists only because the MCP can't search. Don't use REST to pull individual bug *detail*; use the MCP for that.)
-3. **Fan out through the MCP.** For each note whose scoping, categorization, or consolidation you need to judge, read `@moz:bugzilla://bug/{id}` for the full picture. With the summaries from step 2 you can usually map most notes to bugs first and only deep-read the ones in question.
-
-A bonus of the full list: you can cross-check **coverage** — flag any relnote-flagged bug with no matching note (a missing note) and any note that maps to no flagged bug (possibly mis-scoped or needs a nomination).
-
-If the `moz` MCP server isn't connected in this session, the `@moz:` resources won't resolve — say so and ask the author for the bug summary (or which notes map to which bugs) rather than guessing. Beyond the query-enumeration REST call above, don't scrape Bugzilla through other means.
-
-## Style rules to check
-
-**Audience & focus**
-- Write for a broad, international, non-technical audience. Avoid technical jargon and colloquialisms that don't translate well.
-- For new or changed features, focus on **how it affects the user's experience**, not what the software is doing internally.
-- Avoid abbreviations and shortenings — spell terms out in full. E.g. "preference", not "pref"; "Developer Tools", not "DevTools". This applies even in the Developer/Web Platform sections.
-- Don't mention `about:config` preferences.
-
-**Wording & grammar**
-- **Fixed** notes start with a **past-tense verb**: "Fixed", "Removed", "Improved", "Updated".
-- **New** and **Changed** notes are usually **present-tense descriptive** — "X now does Y" ("Geolocation on Windows now respects the user's location permission…"). Don't flag a present-tense Changed/New note for not starting with a past-tense verb; that's the expected register. Only the **Fixed** section needs the past-tense verb lead.
-- End **every** note with a full stop (period) — including short ones.
-- Defer to MDN's writing conventions for capitalization, contractions, numbers/numerals, pluralization, apostrophes & quotation marks, commas, hyphens, and spelling.
-
-**Links**
-- De-localize all URLs — remove the `en-US/` (or other locale) segment.
-- Don't link to bugs in finalized mainline notes. **Exception:** dot releases require bug links.
-- When a bug link uses the word "Bug" in its anchor text, capitalize it ("Bug 2047850", not "bug 2047850").
-
-**Known issues**
-- Focus on user impact. If a workaround exists, give clear, step-by-step instructions.
-
-**Categorization (tags)** — every note should sit under the right tag:
-- **New** — new features
-- **Fixed** — resolved known issues / bugs
-- **Changed** — interface or behavior modifications
-- **Developer** / **Web Platform** — developer-facing or web-platform changes
-- **HTML5** — web platform issues (legacy tag; "Web Platform" is the modern equivalent — match what the target product uses)
-- **Firefox Labs** — experimental, opt-in features that ship pref'd-off by default and are enabled from the Firefox Labs panel in Settings (e.g. an experimental image format behind a pref). This is the right home for such features — don't move them to **New** or **Web Platform**, and don't treat the section as a stray/unknown tag. The note must make clear the feature is experimental and say how to enable it — and **front-load the experimental/off-by-default nature in the first sentence**. Don't open with "Firefox now supports X" and only clarify in a later sentence that it's opt-in: a reader who skims the first line is left with the false impression it's on by default. Lead with the qualifier instead (e.g. "Firefox now offers experimental support for X… You can enable it from the Firefox Labs panel in Settings.").
-- **Community** — community contributor work (note: this section is generated elsewhere — see "Sections to skip" below)
-
-**Sections to skip during review**
-- **Enterprise** — generally boilerplate (just a link to the separate enterprise release notes). Ignore it unless it contains more than that link, in which case review the extra content normally.
-- **Community contributions** — generated elsewhere, not hand-authored here. Disregard it entirely.
-- **Any empty section** — the draft is an intermediate staging document; the notes are later transferred into another system, where empty sections simply don't carry over. Ignore empty sections entirely (e.g. **Uncategorized**, **Unresolved**, or any tag with no notes under it). Don't flag them as "clear before publishing" or otherwise comment on them.
-
-## Mobile (Android & iOS)
-
-For Firefox for Android and iOS, we use generic, reusable release notes unless the Product team supplies their own:
-- **Generic notes** — these don't need review. Skip them.
-- **Product-supplied (non-generic) notes** — a **light review only**. Product generally provides these in the form they want, without our input, so flag only clear errors (typos, broken/localized links, obviously wrong scoping) and otherwise leave the wording alone. Don't apply the full desktop style critique.
-
-If it's unclear whether mobile notes are generic or Product-supplied, ask before reviewing.
-
-**Dot releases are the exception:** for a mobile **dot release**, the notes are authored by Release Management (us), not Product. Give these the **full desktop-style critique** — the light-touch rule above does not apply. (And as with all dot releases, expect and require bug links.)
-
-## Real-world tone reference (Firefox 151)
-
-Model phrasing on shipped notes. Examples of the expected register:
-- New: "Private Browsing Mode now allows you to instantly clear all data from your current session without closing the entire window."
-- New: "Local Firefox profile backups are now available on Linux in addition to Windows, and you can restore them across platforms."
-- Fixed: "Fixed incorrect screen resolution reporting to websites in multi-monitor setups."
-- Fixed: "Various security fixes." (standard catch-all)
-- Changed: "Geolocation on Windows now respects the user's Windows location permission setting, instead of overriding it, when the user grants location permission to a page."
-- Web Platform notes may reference APIs and use inline `code`/MDN links, since that audience is developers.
-
-Note the contrast: user-facing notes ("New", "Fixed", "Changed") stay plain-language and impact-focused; "Web Platform"/"Developer" notes can be technical and link to MDN.
+If the `moz` MCP isn't connected, `@moz:` resources won't resolve — say so and ask the author for
+the bug summary rather than guessing.
 
 ## Review process
 
-1. Acquire the draft (above) and confirm the target product/channel/version.
-2. Go through each note and check it against every applicable rule. Pay special attention to:
-   - **Scoping:** is a developer-only change sitting in a user-facing tag (or vice versa)? Is anything too internal/technical to belong in user notes at all?
-   - **Verb/tense and full stops.**
+1. Acquire the draft and confirm product/channel/version.
+2. Check each note against every applicable rule in `style-guide.md`. Pay special attention to:
+   - **Scoping** — is a developer-only change in a user-facing tag, or vice versa? Is anything too
+     internal to belong in user notes at all?
+   - **Verb/tense and full stops** — remembering that present-tense New/Changed notes are correct
+     and only **Fixed** needs the past-tense verb lead.
    - **Jargon, abbreviations, and `about:config` mentions.**
    - **Localized URLs and stray bug links** (allowed only for dot releases).
    - **Correct tag** for each entry.
-3. Watch for issues the style rules don't enumerate but that matter: duplicated/overlapping notes, inconsistent capitalization of feature names, vague impact ("improved performance" with no specifics), and notes that bury the user benefit.
-4. When a note reads awkwardly, check whether it's **compressing two distinct facts into one phrase** — often by stacking two modifiers on a single noun when each really describes a different thing (e.g. "more and smaller increments" → the change was *more zoom levels* **and** *smaller increments between them*, two facts attached to one noun). Tease them apart so each fact gets its own noun. Looking up the bug to see what actually changed is usually what reveals there were two facts to separate — and once split, the cleaner wording falls out (here: "now offers more zoom levels in smaller increments than before").
+3. Watch for issues the rules don't enumerate: duplicated or overlapping notes, inconsistent
+   capitalization of feature names, vague impact ("improved performance" with no specifics), and
+   notes that bury the user benefit.
+4. Apply the two wording traps from `style-guide.md` — conflated facts and buried benefit. Looking
+   up the bug is usually what reveals a note is compressing two distinct facts.
+
+**Don't guess.** Flag anything uncertain as a question rather than a hard correction, especially
+audience-scoping calls that depend on product context you don't have. If you couldn't read a bug or
+patch, say the scoping question is open rather than asserting a scope.
 
 ## Output
 
-Produce a review with:
 - A short summary (overall quality, biggest themes).
-- A per-note list of issues. **Walk the notes in the same order they appear in the document, top to bottom (by section, then by note within each section)** — the author reviews with the doc open and works straight down it, so matching that order lets them apply comments in place without hunting. Don't reorder by severity or theme, and don't group all the "jargon" or all the "consolidation" items together. For each note give: the original text, what's wrong (cite the rule), and a **concrete suggested rewrite**.
-- **Always show the full final note with all proposed changes applied — not just a description of the changes.** Even when the fix is a small tweak (a comma, an added bug link, one reworded clause), write out the complete note as it should read so the author can copy it straight in. Describing the change alone ("move the comma outside the quotes", "add a bug link") forces the author to reconstruct the result; show the finished note instead.
-- For a consolidation, raise it at the position of the **first** of the notes involved and name the other notes (and their positions) it merges with, so it still appears in reading order.
-- A short cross-cutting section *after* the in-order walk for anything that genuinely spans the whole doc (a coverage check against the bug query, a pattern like missing full stops throughout, terminology consistency). Keep per-note issues in the walk, not here.
-- Flag anything you're unsure about as a question rather than a hard correction — especially audience-scoping calls that depend on product/channel context. Keep these questions attached to their note in the walk; you may also restate them in a short list at the end.
+- A per-note list of issues, walking the notes **in the same order they appear in the document, top
+  to bottom** (by section, then by note). The author reviews with the doc open and works straight
+  down it, so matching that order lets them apply comments in place. Don't reorder by severity or
+  theme, and don't group all the "jargon" or all the "consolidation" items together.
+- For each note: the original text, what's wrong (cite the rule), and a concrete suggested rewrite.
+- **Always show the full final note with all changes applied — not just a description of the
+  changes.** Even for a small tweak (a comma, an added bug link, one reworded clause), write out the
+  complete note as it should read so the author can copy it straight in. Describing the change alone
+  forces them to reconstruct the result.
+- For a consolidation, raise it at the position of the **first** note involved and name the others
+  (and their positions) it merges with, so it stays in reading order.
+- A short cross-cutting section *after* the in-order walk for anything genuinely spanning the whole
+  document (a coverage check against the bug query, missing full stops throughout, terminology
+  consistency). Keep per-note issues in the walk.
+- Questions attached to their note in the walk; optionally restated in a short list at the end.
 
-Keep suggestions concrete and copy-pasteable so the author can apply them directly back into their draft.
+Keep suggestions concrete and copy-pasteable so the author can apply them directly.
