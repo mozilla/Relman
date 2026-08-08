@@ -305,8 +305,11 @@ It also reports the `Bash(git -C <clone> …:*)` permission entries needed for t
 them **every single gecko read prompts** — one pass ran `git grep` eleven times and `git show` six,
 all prompting, which is most of what makes a cold run feel like an approval treadmill.
 
-- If it reports a missing or unsaved path, ask the user where their clone is and run
-  `check-setup --repo <path>`.
+- **On a machine that has never been set up, every script exits with
+  `error: could not locate the Gecko checkout` and names this command.** That error is the signal —
+  don't work around it. Ask where their clone is and run `check-setup --repo <path>` once.
+- If it reports a path found only as the "legacy default", it is an unsaved guess: save it with
+  `check-setup --repo <path>` so the other scripts stop re-guessing.
 - If it reports missing permission entries, **show them and ask before writing.** `--write` merges
   them into the git-ignored `.claude/settings.local.json`; it is granting the session standing
   approval, so it is the user's call, not yours. Never add them to the shared `settings.json`.
@@ -355,9 +358,14 @@ python3 scripts/relnotes/daily-pass.py --build-day 20260801 --outdir /tmp/day01 
   is a file write needing its own approval, and do not pipe through `grep`/`head` when the Read tool
   will do.
 - Everything lands in `<outdir>/`: `report.txt`, `scan.txt` (survivors with their landings),
-  `prefs.txt`, `clusters.txt`, `flags.json`, `scan.json`.
+  `dropped.txt` (the complete drop list to audit), `prefs.txt`, `clusters.txt`, `flags.json`,
+  `scan.json`.
 - Window flags are the same as `scan-window.py` (`--build`, `--build-day`, `--from-build`, `--cycle`,
   `--since-last`), plus `--save-state` to record the watermark on success.
+- **Pass `--save-state` to this call rather than re-running `scan-window.py` afterwards to save it.**
+  `daily-pass.py` writes the watermark from the scan it already did; a second `scan-window.py
+  --save-state` re-enumerates the window and re-fetches every bug to record one line of state. A pass
+  did this and refetched 219 bugs for nothing.
 
 **Then keep the watchlist current** (`scripts/relnotes/watchlist.py`), because it is the only memory
 between passes:
@@ -377,8 +385,12 @@ allowlist and prompts every time. It lists only commits whose *subject* names th
 cross-references separately, so another bug's commit is never reported as this one's landing.
 
 `bug-detail.py <ids> [--comments]` gives the judgment fields for a candidate — version flags, relnote
-flag, reporter and whether they are internal, resolved duplicate/blocker summaries, regressor age,
-pending uplift requests. Reach for it instead of assembling Bugzilla queries by hand.
+flag, **open needinfo requests** (printed as `none` when there are none, so a clear bug is
+distinguishable from an unchecked one), reporter and whether they are internal, resolved
+duplicate/blocker summaries, regressor age, pending uplift requests. Reach for it instead of
+assembling Bugzilla queries by hand. `--comments` adds comment 0 and the newest, truncated to 400
+characters; `--comment N` (or `0,15,16`) prints those comments in full, which is what a developer's
+reasoning usually needs.
 
 ## Step 1 — Enumerate and funnel (script does this)
 
@@ -447,12 +459,20 @@ currently-FIXED bugs (the real backout filter — reverts are flagged, not trust
 mechanically-never-noteworthy landings. It prints the funnel counts; **carry those into your
 output** so the user can see the denominator.
 
-**Audit the mechanical drop list too — every pass.** `--show-dropped` prints it, and the report
-links a buglist for it. The drops are heuristics and they do get things wrong: bug 2047027, a real
+**Audit the mechanical drop list too — every pass.** `daily-pass.py` always writes it complete to
+`<outdir>/dropped.txt`, with the entry count in its header line — **Read that file.** Do not
+reconstruct the list by piping `scan-window.py --show-dropped` through `sed`/`head`: a pass did
+exactly that, received the 47 entries that fit under `head -95`, and reported that "all 86 mechanical
+drops were walked". The drops are heuristics and they do get things wrong: bug 2047027, a real
 Android tab-ungrouping menu item, was dropped as localization work because
 `android-l10n-reviewers` appeared in the commit's `r=` list. Skim the dropped summaries for anything
 that reads like user-facing work and rescue it. A false drop is invisible in the survivor list by
 construction, so this is the only place it can be caught.
+
+**Before reporting the audit, reconcile the count you actually read against the funnel's `mechanical`
+number.** Both come from the same scan, so they always agree — if you have seen fewer entries than
+the header announces, you are holding a truncated list and the audit has not happened yet. "No false
+drops" is a claim about every entry; it cannot be made about the ones that scrolled off.
 
 Judge the `landed:` lines, not the bug summary — a bug titled like test work often lands real
 changes and vice versa. Use `--show-dropped` when the user wants to rescue something; the drop list
@@ -505,6 +525,31 @@ first and then a single `--lookup` settled it:
 
 So: **if a survivor touches anything that looks preference-gated, `--lookup` its gate first.** Off
 everywhere means watchlist, and the workup was wasted either way. One call answers it.
+
+**"Looks gated" is too weak a trigger — resolve the gate for every feature-shaped survivor.** On two
+consecutive days the gate was missed and came from the release manager instead: the
+`mediaNotificationImprovements` Nimbus flag (2054954), then `browser.nova.enabled` (2043530). Neither
+bug looked gated, and on both days the same check ran correctly on *other* bugs in the same pass — so
+the rule isn't missing, it is being applied selectively. The two cases need different checks, and
+neither substitutes for the other:
+
+- **QA-filed bugs state the gate in comment 0**, in an explicit `**Preconditions**` block listing the
+  prefs to set — 2043530's named `browser.nova.enabled = true`. `bug-detail.py <ids> --comments`
+  prints comment 0, so add it to the batch call you are already making rather than deciding per bug
+  which ones deserve it.
+- **Developer-filed bugs usually say nothing at all.** All four comments on 2054954 are the
+  developer's one-line summary, his patch, and two push notices; none mentions the gate, which
+  existed only in `nimbus.fml.yaml`. **An empty Preconditions block is not evidence of no gate** —
+  and neither is a failed fetch, which `bug-detail.py` now says out loud. For anything in a
+  `Firefox for Android` or Fenix component, the FML check in `gating.md` is the check that answers it,
+  and comment 0 cannot stand in for it.
+
+**A diff can prove a gate exists; it cannot prove that none does.** On 2043530 the report claimed
+"verified ungated by reading the diff" because the button was added unconditionally in
+`FormAutofillPrompter.sys.mjs` — but the gate lived upstream of that hunk, in the pref comment 0 named.
+Reading a hunk establishes *no gate in that hunk*; the honest phrasing is "no gate found in `<file>`",
+labelled **inferred**. Reserve **verified** for a gate you positively located: a `--lookup` verdict, an
+FML block, a hardcoded `false`.
 
 **A gated-off bug still has to appear in the report** — as a watchlist line naming the gate. Bug
 2009909 was correctly excluded and then omitted entirely, so the user had to ask why a notable bug
@@ -922,6 +967,16 @@ ask for `[Why is this notable]`, `[Affects Firefox for Android]` and the rest �
 **Follow up on stranded nominations.** A `replied` item whose flag is still `---` needs the flag set
 (Release Management can set it) or a nudge — otherwise the work of asking is wasted.
 `watchlist.py followup` lists every asked/replied item with its current flag state.
+
+**Run `followup` in every pass, before you write anything asking the user to act.** Any line of the
+form "close the needinfo", "set the flag", "withdraw the ask" is a claim about live Bugzilla state and
+needs a live read — `followup` for the whole queue, or `bug-detail.py <bug>` for one, whose
+`open needinfo:` line prints `none` explicitly so a checked-and-clear bug is distinguishable from an
+unchecked one. **A watchlist status is never evidence of what is still open**; it records what *we*
+did, and the developer or release manager may have acted since. A pass led its report with "the
+needinfo needs closing" on bug 2058436, sourced from a stale `nightly-note-requested` status — the
+needinfo had already been cleared, and the `followup` output that proved it had been printed in the
+same session and misread.
 
 **Then record the ask** so the next pass doesn't repeat it:
 

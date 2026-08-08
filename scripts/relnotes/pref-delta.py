@@ -352,14 +352,17 @@ def effective_defaults(repo: Path, rev: str, channels: list[str], platforms: lis
                                        "mirror": info.get("mirror"),
                                        "via_define": info.get("via_define")})
             # The app-level file overrides StaticPrefList for the product that ships it.
+            # Compare the same string that gets appended: testing the full path while appending the
+            # basename meant the guard never matched, so the label grew one copy per config.
+            app_name = app_file[kind].rsplit("/", 1)[-1]
             for name, value in app.items():
                 table[name][(ch, plat)] = value
                 if name in meta:
                     src = meta[name]["source"]
-                    if app_file[kind] not in src:
-                        meta[name]["source"] = f"{src} + {app_file[kind].rsplit('/', 1)[-1]}"
+                    if app_name not in src:
+                        meta[name]["source"] = f"{src} + {app_name}"
                 else:
-                    meta[name] = {"source": app_file[kind].rsplit("/", 1)[-1], "type": None,
+                    meta[name] = {"source": app_name, "type": None,
                                   "mirror": None, "via_define": None}
     return {"table": table, "meta": meta}
 

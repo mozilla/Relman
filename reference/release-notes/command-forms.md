@@ -52,6 +52,11 @@ by matching recorded commands against the allowlist, not counts of prompts anyon
   Single quotes miss the double-quoted entries. Allowlisted hosts: `bugzilla.mozilla.org/rest`, `product-details`,
   `hg-edge`, `nucleus`, `whattrainisitnow`, `wiki.mozilla.org`, `www.firefox.com`, `www.mozilla.org`,
   `www-dev.springfield.moz.works`.
+- **Bug comments and flag state need no `curl` at all.** `bug-detail.py <ids> --comments` gives
+  comment 0 and the newest; `--comment 16` (or `15,16,17`) gives those comments in full with their line
+  breaks; the always-printed `open needinfo:` line gives live request state. Reach for these first —
+  every one of the four raw-curl reads in the 08-07 pass used the PROMPTS form above, because a
+  hand-built one-liner is shaped by the question rather than by the allowlist.
 - **No shell `for` loops** — 124 segments in the audit. Use one `python3 -` heredoc, or one tool call
   per item.
 - **No command substitution.** A `$(…)` subshell cannot be matched against a static prefix, so it

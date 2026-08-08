@@ -251,6 +251,26 @@ def main() -> None:
               *(["--show-dropped"] if args.show_dropped else [])])
     (outdir / "scan.txt").write_text(r2.stdout)
 
+    # The drop list as its own complete file, unconditionally: the audit is a required step every
+    # pass, and giving it a file removes the reason to rebuild the list through a pipe that can
+    # truncate it. Built from the scan JSON already in hand, so it costs nothing.
+    dropped = scan.get("dropped", [])
+    drop_lines = [f"Dropped as mechanical ({len(dropped)}):"]
+    for d in dropped:
+        drop_lines.append(f"  {d['bug']}  {d['summary'][:90]}")
+        drop_lines.append(f"        -> {d['drop_reason']}")
+    (outdir / "dropped.txt").write_text("\n".join(drop_lines) + "\n")
+    # The header count and the funnel come from different keys of the same scan, so they agree
+    # unless scan-window's JSON shape changes. Say so rather than leaving the reader to notice:
+    # a silent disagreement here reads as "nothing left to audit", which is the one conclusion
+    # this file exists to stop anyone drawing without evidence.
+    drop_mismatch = ""
+    if len(dropped) != scan["funnel"]["dropped_mechanical"]:
+        drop_mismatch = (f"dropped.txt lists {len(dropped)} entries but the funnel counts "
+                         f"{scan['funnel']['dropped_mechanical']} mechanical drops; the drop list "
+                         "is incomplete and the audit cannot be called done")
+        print(f"# WARNING: {drop_mismatch}", file=sys.stderr)
+
     # --- 2. preference flips over the identical range ------------------------
     r3 = run([sys.executable, str(HERE / "pref-delta.py"), "--range", rng, "--no-fetch",
               "--repo", str(trainlib.resolve_repo(args.repo))])
@@ -356,9 +376,14 @@ def main() -> None:
         print(f"    {buglist_url(dropped_ids)}")
     print()
 
-    print(f"Full output written to {outdir}/ (scan.json, scan.txt, prefs.txt, clusters.txt"
-          + (", flags.json" if flags else "") + ")")
+    print(f"Full output written to {outdir}/ (scan.json, scan.txt, dropped.txt, prefs.txt, "
+          "clusters.txt" + (", flags.json" if flags else "") + ")")
     print(f"Survivor list with landings: {outdir}/scan.txt")
+    print(f"Drop list to audit ({len(dropped)} entries): {outdir}/dropped.txt")
+    # Also in the report body, because report.txt is what gets re-read later and stderr is not
+    # captured into it.
+    if drop_mismatch:
+        print(f"WARNING: {drop_mismatch}")
 
     sys.stdout = real_stdout
     (outdir / "report.txt").write_text(tee.text())
@@ -375,6 +400,7 @@ def main() -> None:
         print("PREFS   " + ("; ".join(flips) if flips else "no preference changes"))
         print(f"\nFull report: {outdir}/report.txt")
         print(f"Survivors:   {outdir}/scan.txt")
+        print(f"Drops:       {outdir}/dropped.txt  ({len(dropped)} to audit)")
     else:
         print(f"\n(full report also written to {outdir}/report.txt)")
 

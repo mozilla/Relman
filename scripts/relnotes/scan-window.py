@@ -669,7 +669,8 @@ def main() -> None:
                 lines.append(f"        ... and {s['commit_count'] - len(shown)} more landings")
         if args.show_dropped:
             lines.append("")
-            lines.append("Dropped as mechanical:")
+            # The count is in the header so a truncated read of this list is self-evident.
+            lines.append(f"Dropped as mechanical ({len(dropped)}):")
             for d in dropped:
                 lines.append(f"  {d['bug']}  {d['summary'][:90]}")
                 lines.append(f"        -> {d['drop_reason']}")

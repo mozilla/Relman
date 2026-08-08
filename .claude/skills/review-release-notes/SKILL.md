@@ -35,6 +35,24 @@ real shipped notes grouped by tag and sorted by length, which settles "is this t
 faster than argument. It also shows that `HTML5` is still in live use and that the `Fixed`-in-majors
 bar is moving, so don't flag either as anomalous.
 
+## First run on a machine
+
+If any script exits with **`error: could not locate the Gecko checkout`**, this machine has not been
+set up. Ask where their Gecko clone is and run it once:
+
+```
+python3 scripts/relnotes/watchlist.py check-setup --repo <path to their clone>
+```
+
+That saves the path to per-user state for every script, and reports the `Bash(git -C <clone> …)`
+permission entries the gecko reads need. Show those entries and ask before running `--write`, which
+merges them into the git-ignored `.claude/settings.local.json` — it grants standing approval, so it is
+the user's call. Never add them to the shared `settings.json`.
+
+Reviewing rarely needs the clone (prefer Phabricator for patches, per `bugzilla-access.md`), so this
+may not come up — but when it does, it is the whole reason a first pass feels like an approval
+treadmill.
+
 ## Invoking commands
 
 Follow `reference/release-notes/command-forms.md` — no `cd`, scratch files under `/tmp` by absolute
