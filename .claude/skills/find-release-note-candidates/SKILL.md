@@ -367,14 +367,30 @@ python3 scripts/relnotes/daily-pass.py --build-day 20260801 --outdir /tmp/day01 
   --save-state` re-enumerates the window and re-fetches every bug to record one line of state. A pass
   did this and refetched 219 bugs for nothing.
 
-**Then keep the watchlist current** (`scripts/relnotes/watchlist.py`), because it is the only memory
-between passes:
+**Open every pass with the carried-over work, before the new window.** `resume` on the condition given
+above; `followup` and `replies` every time, in this order. `replies` is not optional — it is the only
+one that reads what developers actually said since you asked:
+
+```
+watchlist.py resume                      # briefing: where the last pass stopped
+watchlist.py followup                    # asked/replied bugs: nominated, awaiting, or needs chasing
+watchlist.py replies                     # what people said on asked/replied/watching bugs since we asked
+```
+
+**`followup`'s section headings are instructions, and its output is not a status report to skim.**
+Every `NEEDS CHASING` line and every `[follow up after <date>]` marker has to be resolved in your
+report — chased, closed, or explicitly deferred with a reason. Twice now a pass has printed that
+output and then contradicted it: 2058436 was reported as needing its needinfo closed when `followup`
+had already shown it clear, and 1699444 sat under `NEEDS CHASING [follow up after 2026-08-08]` while
+the report called it unresolved, when the developer had approved the wording that morning. Running
+`replies` answers the second case directly; nothing answers it if you skip it.
+
+**Then keep the watchlist current**, because it is the only memory between passes:
 
 ```
 watchlist.py summary                     # per-release counts and days reviewed
-watchlist.py followup                    # asked/replied bugs: nominated, awaiting, or needs chasing
-watchlist.py replies                     # developer replies received since each ask
 watchlist.py add <bug> --status asked --note "<what and when>"
+watchlist.py decline <bug> --note "<why>"   # short forms take --note; use it, the reason is the point
 watchlist.py days 20260801               # record the day as reviewed
 ```
 
@@ -536,7 +552,10 @@ neither substitutes for the other:
 - **QA-filed bugs state the gate in comment 0**, in an explicit `**Preconditions**` block listing the
   prefs to set — 2043530's named `browser.nova.enabled = true`. `bug-detail.py <ids> --comments`
   prints comment 0, so add it to the batch call you are already making rather than deciding per bug
-  which ones deserve it.
+  which ones deserve it. **Read comment 0; do not pipe it through `grep`** — a pass filtered a
+  `--comment 0` call for `see_also` and threw away the platform evidence in the same output. When the
+  preview marks a cut, `--comment 0` gives the whole thing, and `--comment last:5` or `all` gives the
+  discussion.
 - **Developer-filed bugs usually say nothing at all.** All four comments on 2054954 are the
   developer's one-line summary, his patch, and two push notices; none mentions the gate, which
   existed only in `nimbus.fml.yaml`. **An empty Preconditions block is not evidence of no gate** —
@@ -808,8 +827,18 @@ absent entirely** from two years of notes.
 
 ## Step 5 — Draft the one-liner, category, and screenshot call
 
-Categories and full style rules: `reference/release-notes/style-guide.md`. Keep drafts
-copy-pasteable; the user and the developer will edit. Median shipped note is ~20 words.
+**Read `reference/release-notes/style-guide.md` before drafting any wording** — not "consult it if
+unsure", read it, every pass. Categories and the full rules live there.
+
+**What follows is not a summary of that guide.** It is calibration from drafts that were rejected in
+*this* workflow, and a rule appears here only because it was already missed once. Two rules that had
+never been missed stayed in the guide and out of this list — spell abbreviations out ("Developer
+Tools", not "DevTools") and use inline `code` for API names in Developer and Web Platform notes — and
+a suggested wording then went out breaking both, on bugs 1856645 and 2060873, with the guide covering
+them the whole time. A list that grows only where the skill has already been caught reads like a
+checklist while being an incident log. The guide is the checklist; this is the incident log.
+
+Keep drafts copy-pasteable; the user and the developer will edit. Median shipped note is ~20 words.
 
 **Lead with the symptom the user saw, never the mechanism.** The most common drafting failure is
 restating the patch. Two rejected drafts and their fixes:
@@ -819,11 +848,16 @@ restating the patch. Two rejected drafts and their fixes:
 | *Added a Windows font collection so more characters render correctly in web content.* | Describes the change (adding a font list entry), not the experience. "More characters" says nothing. | *Fixed characters from some less common scripts appearing as empty boxes on web pages on Windows.* |
 | *Fixed text loss when typing with an input method on Linux, which could discard characters in some web applications.* | "Text loss" and "discard characters" are the same fact twice — the conflated-facts trap. Vague about where. | *Fixed text disappearing in Microsoft 365 Word Online on Linux when typing certain characters.* |
 
+**Platform scope is a claim about the bug, not a field you can read off it.** A summary names the
+platform the *reporter* was on. Bug 2053681 — *"…stops in Firefox Android when screen turns off"* —
+was drafted as an Android-only note, and comment 0 listed Ubuntu too, so the wording had to be widened
+after Release Management caught it. Before scoping a note to one platform, check the bug's own text,
+its `see_also` links, and its per-version status flags. Once two platforms are genuinely in play, the
+note is one object attached to both releases — see the cross-platform rule in `style-guide.md` — and
+the platform lead comes off the wording entirely.
+
 **Keep the suggested wording on one line.** Bugzilla wraps text itself; hard-wrapping the blockquote
 just makes it awkward to copy.
-
-**No second person.** See `style-guide.md` — write "autofill prompts now dismiss when focus moves
-away", not "when you move focus away".
 
 **Cut the cause, keep the symptom.** Even an accurate mechanism clause gets trimmed. A proposed
 *"Fixed Firefox preventing Linux systems from sleeping or suspending after a long browsing session,

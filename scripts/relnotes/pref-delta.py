@@ -31,7 +31,6 @@ import argparse
 import collections
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -650,8 +649,8 @@ def main() -> None:
     platforms = [x.strip() for x in args.platforms.split(",") if x.strip() in PLATFORMS]
 
     if not args.no_fetch:
-        print("# fetching origin...", file=sys.stderr)
-        subprocess.run(["git", "-C", str(repo), "fetch", "--quiet", "origin"], check=False)
+        trainlib.fetch_origin(repo, "Defaults below are resolved from a possibly stale "
+                                    f"{args.rev}; do not label them verified.")
 
     print(f"# resolving defaults from {args.rev}", file=sys.stderr)
     eff = effective_defaults(repo, args.rev, channels, platforms)

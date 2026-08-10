@@ -67,6 +67,51 @@ run, WebFetch reported a note as `Improved Smart Window suggestions…` while th
 a broken-markdown fragment, `Improved Smart Window](https://…) suggestions…`. Only the raw HTML showed
 it, and it was the most serious finding of the review.
 
+**Read the page with `note-page.py`, not with a hand-written regex.**
+
+```
+python3 scripts/relnotes/note-page.py <release-notes URL or a saved copy>
+python3 scripts/relnotes/note-page.py <src> --markup       # raw <p> HTML, for punctuation and links
+python3 scripts/relnotes/note-page.py <src> --audit        # code-formatting inconsistencies only
+python3 scripts/relnotes/note-page.py <src> --check-links  # resolve every link the authors wrote
+python3 scripts/relnotes/note-page.py --check-url <url>…   # resolve links you mean to suggest
+```
+
+It walks sections and notes in document order and reports each note's id, bug link and inline markup.
+Two reasons not to rebuild it inline: **inline Python prompts** — measured, see `command-forms.md`, so
+an ad-hoc snippet stops the review dead — and the snippets were wrong. Every hand-written version
+matched `id="note-\d+"`, which silently skips the `note-mdn` item the Developer section carries, so
+each pass quietly reviewed one note fewer than the page contains.
+
+The `--audit` pass flags calls like `getBBox()` and dotted names like `security.webauth.u2f` sitting in
+prose. It is deliberately narrow and says so in its own output: it does **not** see single-word API
+names such as `StylePropertyMap`, hyphenated keywords, or lowercase words like `protocol`. Rules broad
+enough to catch those flagged one shipped note in five, on `macOS` and `JavaScript` and
+`drag-and-drop`. A clean audit therefore means nothing *of those two shapes* — the abbreviation and
+code-formatting rules in `style-guide.md` still have to be read.
+
+**When an edit doesn't show up, ask Nucleus — don't re-fetch the page.** The rendered page is built
+from Nucleus on a delay, so straight after the author saves, "the change isn't there" has two causes
+that look identical from the page: it was never saved, or it hasn't published yet. Re-fetching cannot
+tell them apart, and a cache-busting query string appended to someone else's URL is not an answer:
+a pass fetched the page three times that way, twice with `?freshness=…`, before reasoning its way to
+publish lag. One call settles it, because Nucleus is where the edit lands first:
+
+```
+python3 scripts/relnotes/fetch-shipped-notes.py --channel Nightly --notes-for 155.0a1
+```
+
+Present in Nucleus but not on the page means published-pending. Absent from both means it was not
+saved. Say which one it is rather than asking the author to check again.
+
+**Check links with `--check-links`, and URLs you are about to suggest with `--check-url`; never
+`curl` per URL.** Notes link to 152 different hosts
+across the corpus — MDN, spec drafts, RFCs, Google Play, Connect — and only nine are on the `curl`
+allowlist, so a link sweep by `curl` prompts for approval on most of its URLs. `--check-links` fetches
+through Python, which needs no per-host entry, and it attributes each result to the note that carries
+the link. It separates a genuinely moved page from an equivalent redirect: MDN sends every locale-less
+URL to `/en-US/…`, which is how notes are supposed to link to it, so those are counted and not listed.
+
 ## Getting the draft
 
 Direct Google Drive access is **not** available here (no Drive/Docs integration), so:

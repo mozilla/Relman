@@ -52,13 +52,34 @@ by matching recorded commands against the allowlist, not counts of prompts anyon
   Single quotes miss the double-quoted entries. Allowlisted hosts: `bugzilla.mozilla.org/rest`, `product-details`,
   `hg-edge`, `nucleus`, `whattrainisitnow`, `wiki.mozilla.org`, `www.firefox.com`, `www.mozilla.org`,
   `www-dev.springfield.moz.works`.
-- **Bug comments and flag state need no `curl` at all.** `bug-detail.py <ids> --comments` gives
-  comment 0 and the newest; `--comment 16` (or `15,16,17`) gives those comments in full with their line
-  breaks; the always-printed `open needinfo:` line gives live request state. Reach for these first —
-  every one of the four raw-curl reads in the 08-07 pass used the PROMPTS form above, because a
-  hand-built one-liner is shaped by the question rather than by the allowlist.
-- **No shell `for` loops** — 124 segments in the audit. Use one `python3 -` heredoc, or one tool call
-  per item.
+- **Nothing else is allowlisted, and the answer is not to add hosts.** `developer.mozilla.org` prompts;
+  so do `drafts.csswg.org`, `www.rfc-editor.org`, `connect.mozilla.org` and `play.google.com`, all of
+  which the current Nightly notes link to. Release notes reference **152 distinct hosts** across the
+  shipped corpus, so a host list is a treadmill. When the task is checking links, use
+  `note-page.py --check-links`, which fetches through Python and needs no per-host approval.
+- **Bug comments, links and flag state need no `curl` at all.** `bug-detail.py <ids> --comments` gives
+  comment 0 and the newest; `--comment 16`, `--comment last:5` and `--comment all` give comments in
+  full with their line breaks; `see_also` URLs and the always-printed `open needinfo:` line come with
+  the default output. Reach for these first — every raw-curl read in the 08-07 pass used the PROMPTS
+  form above, and all three in the 08-08 pass existed only because the script could not yet answer
+  "the recent comments", "all the comments", or "the see_also URLs". It can now.
+- **No shell `for` loops** — 124 segments in the audit. Loop inside Python instead, in one of the
+  forms below.
+- **Inline Python goes on one line, as `python3 -c "…"`.** Verified 2026-08-09 by tool-call probes in
+  a clean session: `python3 -c "print('plain')"` and `python3 -c "print('<li>brackets</li>')"` both
+  ran without a prompt, so the payload's content — angle brackets included — is not the problem.
+- **`python3 - <<'EOF'` heredocs prompt**, despite `Bash(python3 - <<*)` existing. They interrupted a
+  real review pass. The exact trigger is unconfirmed; the likeliest explanation is that
+  the body lines are parsed as separate commands, none of which is allowlisted. Whatever the cause,
+  fold the snippet onto one `-c` line or put it in a script.
+- **`python3 /tmp/x.py` prompts too** — measured. `Read(//tmp/**)` and `Edit(//tmp/**)` govern reading
+  and writing those files, not running them, and no `Bash` entry matches `python3 /tmp/...`. `/tmp` is
+  still the right place to *hold* scratch Python; running it is not pre-approved.
+- **Anything you write twice belongs in `scripts/relnotes/`** — matched by prefix, and the reason
+  `bug-detail.py` and `note-page.py` exist.
+- **Measuring any of this requires a tool call.** Commands run with the `!` prefix execute in the
+  user's shell and never reach the permission layer, so they cannot prompt regardless of the rules.
+  One probe pair was run that way and its "no prompt" half meant nothing.
 - **No command substitution.** A `$(…)` subshell cannot be matched against a static prefix, so it
   prompts however well the entry is written — the same reason `cd` does. Measured on the 08-05 pass:
   with everything else covered, the only Bash prompts were three
@@ -84,8 +105,11 @@ Not oversights — leave these alone:
 
 ## One deliberate exception in the shared file
 
-`Bash(python3 -c:*)` and `Bash(python3 - <<:*)` pre-approve arbitrary Python, which is not read-only.
-Ad-hoc analysis snippets were the largest single source of prompts (~196 segments) and the only
-alternative was every user granting it locally and diverging. Project settings apply **only while
-working inside this repo**, and that scope is what makes it acceptable. The same caveat already
-applied to `sed`, `awk`, `echo` and `cat`, any of which can write through a shell redirect.
+`Bash(python3 -c:*)` pre-approves arbitrary Python, which is not read-only. Ad-hoc analysis snippets
+were the largest single source of prompts (~196 segments) and the only alternative was every user
+granting it locally and diverging. Project settings apply **only while working inside this repo**, and
+that scope is what makes it acceptable. The same caveat already applied to `sed`, `awk`, `echo` and
+`cat`, any of which can write through a shell redirect.
+
+`Bash(python3 - <<*)` is in the file for the same reason and does **not** work — heredocs prompt
+regardless, as measured above. It stays only because removing it changes nothing.

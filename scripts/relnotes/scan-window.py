@@ -33,7 +33,6 @@ import argparse
 import collections
 import json
 import re
-import subprocess
 import sys
 import urllib.parse as url_parse
 from pathlib import Path
@@ -518,8 +517,8 @@ def main() -> None:
     repo = trainlib.resolve_repo(args.repo)
 
     if not args.no_fetch:
-        print("# fetching origin...", file=sys.stderr)
-        subprocess.run(["git", "-C", str(repo), "fetch", "--quiet", "origin"], check=False)
+        trainlib.fetch_origin(repo, "The window may stop short of the newest landings, so a survivor "
+                                    "count from this run can be low without saying so.")
 
     nightly_now = nightly_version()
 

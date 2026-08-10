@@ -53,19 +53,41 @@ BUILDS_CACHE = CACHE_DIR / "firefoxreleases.json"
 BUILDS_CACHE_TTL = 3 * 3600
 
 
-def fetch_json(url: str, timeout: int = 120, attempts: int = 3):
-    """GET and parse JSON, retrying transient failures.
+def preview(text: str, limit: int = 1200) -> str:
+    """A comment flattened to one line, marked if anything was cut.
+
+    Shared so that every place a Bugzilla comment is summarised has the same guarantee: a cut is
+    always visible. A silent 400-character cap in one caller took the deciding line out of bug
+    2053681's comment 0 and a note shipped scoped to one platform; the same silent cap in another
+    caller would have hidden 2,000 characters of a developer's objection. The limit varies by
+    display context, the marker does not.
+    """
+    flat = " ".join((text or "").split())
+    if len(flat) <= limit:
+        return flat
+    return (f"{flat[:limit]} [+{len(flat) - limit} chars cut -- "
+            "bug-detail.py <bug> --comment N for the whole comment]")
+
+
+def fetch_text(url: str, timeout: int = 120, attempts: int = 3, errors: str = "strict") -> str:
+    """GET a URL as text, retrying transient failures.
 
     Nucleus in particular returns a 502 or times out fairly often and then serves the same
     request fine seconds later, so a single failed attempt is not evidence the endpoint is
     down. Only 5xx, 429 and connection errors are retried; a 4xx is a real answer.
+
+    Decoding is strict by default so that a body which does not match its declared charset fails
+    loudly. `errors="replace"` suits prose, where a mangled character is better than no page; it
+    does not suit data, where a substituted character silently becomes a bug summary that reads as
+    fact.
     """
     last = None
     for attempt in range(1, attempts + 1):
         req = url_request.Request(url, headers={"User-Agent": USER_AGENT})
         try:
             with url_request.urlopen(req, timeout=timeout) as r:
-                return json.load(r)
+                charset = r.headers.get_content_charset() or "utf-8"
+                return r.read().decode(charset, errors=errors)
         except url_error.HTTPError as e:
             last = RuntimeError(f"{url} returned HTTP {e.code} {e.reason}")
             if e.code < 500 and e.code != 429:
@@ -78,6 +100,11 @@ def fetch_json(url: str, timeout: int = 120, attempts: int = 3):
             print(f"# {last}; retrying in {delay}s ({attempt}/{attempts - 1})", file=sys.stderr)
             time.sleep(delay)
     raise last
+
+
+def fetch_json(url: str, timeout: int = 120, attempts: int = 3):
+    """GET and parse JSON. Retry behaviour is fetch_text's."""
+    return json.loads(fetch_text(url, timeout, attempts))
 
 
 def write_json_atomic(path: Path, data, pretty: bool = True) -> Path:
@@ -182,6 +209,26 @@ def resolve_repo_with_source(cli: str | None = None) -> tuple[Path, str]:
     )
 
 
+def fetch_origin(repo: Path, consequence: str) -> bool:
+    """Update the mirror, saying so if it failed. True when the mirror is current.
+
+    A failed fetch used to be discarded, which left every downstream answer describing a stale tree
+    while looking exactly like a good run: `pref-delta` resolves defaults from `origin/main` by
+    default and prints an `effective now:` verdict the skills quote as *verified*. `consequence` is
+    what a stale mirror means for the caller, because "fetch failed" alone does not tell the reader
+    whether to trust the numbers underneath it.
+    """
+    print("# fetching origin...", file=sys.stderr)
+    r = subprocess.run(["git", "-C", str(repo), "fetch", "--quiet", "origin"],
+                       capture_output=True, text=True, check=False)
+    if r.returncode == 0:
+        return True
+    sys.stderr.write(r.stderr)
+    print(f"# WARNING: git fetch exited {r.returncode}, so the mirror may be behind origin. "
+          f"{consequence}", file=sys.stderr)
+    return False
+
+
 def git(repo: Path, *args: str, check: bool = True) -> str:
     r = subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=False
@@ -247,10 +294,14 @@ def load_builds(refresh: bool = False) -> list[dict]:
     if fresh:
         try:
             return json.loads(BUILDS_CACHE.read_text())["builds"]
-        except (ValueError, KeyError):
-            pass
+        except (ValueError, KeyError) as e:
+            # Refetching repairs it, so this is not fatal -- but say so, because a write that keeps
+            # failing (a full disk) would otherwise refetch 12 MB on every run in silence.
+            print(f"# warning: rewriting unreadable builds cache {BUILDS_CACHE} ({e})",
+                  file=sys.stderr)
     payload = fetch_json(FIREFOX_RELEASES)
-    BUILDS_CACHE.write_text(json.dumps(payload))
+    # Atomic, and unindented: this is the bulk cache write_json_atomic's `pretty=False` exists for.
+    write_json_atomic(BUILDS_CACHE, payload, pretty=False)
     return payload["builds"]
 
 
@@ -301,7 +352,10 @@ def hg_to_git(node: str) -> str | None:
     """hg changeset -> git commit, via the `git_commit` field on json-rev."""
     try:
         rev = fetch_json(f"{HG_BASE}/json-rev/{node}")
-    except RuntimeError:
+    except RuntimeError as e:
+        # Name the reason: callers turn a None into "could not map the build boundaries to git
+        # commits", which describes a mapping problem when the cause was hg being unreachable.
+        print(f"# WARNING: could not map hg {node[:12]} to a git commit ({e})", file=sys.stderr)
         return None
     return rev.get("git_commit")
 

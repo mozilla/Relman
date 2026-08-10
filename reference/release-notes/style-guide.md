@@ -215,3 +215,11 @@ many more, grouped by tag and sorted by length.
    bug to see what actually changed is usually what reveals there were two facts.
 2. **Buried benefit.** Vague impact ("improved performance") with no specifics, or the user benefit
    arriving after a clause of mechanism. Lead with what the user gets.
+
+**A `Changed` note may lead with the change itself, and that is not the buried-benefit trap.** The
+trap is about vague impact and about mechanism arriving before meaning; it is not a ban on naming the
+change. When the subject of the note *is* a behavior Firefox now enforces differently, the clearer
+order is the change first, then how people encounter it — Release Management's framing, deciding this
+on bug 299116: *"Firefox changed something compared to what it used to do, and here's how that'll
+affect you."* The effect still has to be in the note. A `Changed` note that names the change and stops
+is squarely in the trap.

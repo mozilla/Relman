@@ -282,6 +282,21 @@ def main() -> None:
               "--repo", str(trainlib.resolve_repo(args.repo))])
     (outdir / "clusters.txt").write_text(r4.stdout)
 
+    # Only the first scan's exit status was ever checked, and the other three children feed sections
+    # whose empty form is an assertion: an exited pref-delta printed "No preference changes." with its
+    # error text dropped, which is the one sentence meaning "checked, nothing live". Collect the
+    # failures so both channels can say so -- stderr for whoever is watching, and the report body
+    # because report.txt is what gets re-read afterwards.
+    failures = []
+    for label, res, artifact in (("scan-window (survivor list)", r2, "scan.txt"),
+                                 ("pref-delta", r3, "prefs.txt"),
+                                 ("bug-tree", r4, "clusters.txt")):
+        if res.returncode != 0:
+            sys.stderr.write(res.stderr)
+            failures.append((label, res.returncode, artifact))
+            print(f"# WARNING: {label} exited {res.returncode}; {artifact} is incomplete and the "
+                  "matching report section is NOT evidence of absence", file=sys.stderr)
+
     # --- 4. uplift + relnote flags for the survivors -------------------------
     survivors = [s["bug"] for s in scan["survivors"]]
     flags = {}
@@ -305,7 +320,17 @@ def main() -> None:
           f"FIXED, {f['security_restricted']} security-restricted, {f.get('uplifted', 0)} uplifted)")
     print()
 
-    print(r3.stdout.rstrip() or "No preference changes.")
+    if failures:
+        print("INCOMPLETE STEPS -- the matching sections below are not evidence of absence:")
+        for label, code, artifact in failures:
+            print(f"  {label} exited {code}; {artifact} is incomplete")
+        print()
+
+    if r3.returncode != 0:
+        print(f"PREFERENCE DELTA UNAVAILABLE -- pref-delta exited {r3.returncode}. This is not "
+              "'no preference changes'; the window was never checked for flips.")
+    else:
+        print(r3.stdout.rstrip() or "No preference changes.")
     print()
 
     if flags:
@@ -364,7 +389,11 @@ def main() -> None:
                   f"{it.get('summary','')}")
         print()
 
-    print(r4.stdout.rstrip() or "No feature clusters.")
+    if r4.returncode != 0:
+        print(f"FEATURE CLUSTERS UNAVAILABLE -- bug-tree exited {r4.returncode}. This is not "
+              "'no feature clusters'; the survivors were never clustered.")
+    else:
+        print(r4.stdout.rstrip() or "No feature clusters.")
     print()
     print("BUGZILLA LINKS (open them all at once):")
     if survivors:

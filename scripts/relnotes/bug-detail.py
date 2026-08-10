@@ -7,9 +7,9 @@ workflow never settles. A stable script under scripts/relnotes/ is allowlisted b
 interrupting.
 
 Shows, per bug: per-version status flags across the live trains, the relnote flag, open needinfo
-requests, reporter (and whether they are internal), duplicate/see_also counts, keywords, whether the
-bug is public, and any pending uplift approval requests -- i.e. the impact-evidence and gating signals
-the skill weighs.
+requests, reporter (and whether they are internal), resolved duplicates and blockers, see_also links,
+keywords, whether the bug is public, and any pending uplift approval requests -- i.e. the
+impact-evidence and gating signals the skill weighs.
 
 The `open needinfo:` line prints even when there is nothing open, and that is deliberate: telling the
 user to "close the needinfo" or "withdraw the ask" is a claim about live Bugzilla state, and an absent
@@ -22,6 +22,8 @@ Usage:
   bug-detail.py 2046143 2056032 2057384
   bug-detail.py 2046143 --comments        # also comment 0 and the newest comment
   bug-detail.py 2046143 --comment 16      # one comment in full, untruncated (also 15,16,17)
+  bug-detail.py 2046143 --comment last:5  # the five most recent, for "what has been said lately"
+  bug-detail.py 2046143 --comment all     # the whole discussion
   bug-detail.py 2046143 --full            # every field, as JSON
 """
 
@@ -36,6 +38,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import trainlib  # noqa: E402
 
 REST = "https://bugzilla.mozilla.org/rest"
+
+# How much of comment 0 and the newest comment `--comments` shows. A cap keeps a multi-bug batch
+# scannable, but a *silent* cap loses evidence: at 400 this cut bug 2053681's comment 0 twelve
+# characters before "On Firefox Nightly Ubuntu, playback stops...", and the note went out scoped to
+# Android alone. trainlib.preview marks every cut, so this number is a display choice, not a limit
+# on what can be found.
+COMMENT_PREVIEW = 1200
 
 
 def version_fields(trains: dict) -> list[str]:
@@ -170,11 +179,13 @@ def main() -> None:
     p.add_argument("bugs", nargs="+")
     p.add_argument("--comments", action="store_true", help="also show comment 0 and the newest")
     p.add_argument("--comment", metavar="N",
-                   help="show these comments in full, untruncated, keeping their line breaks "
-                        "(one number, or 15,16,17). --comments truncates to 400 characters, which "
-                        "cuts a developer's reasoning off mid-sentence. Numbers are per bug, so "
-                        "these are only comparable across a batch for --comment 0, which is every "
-                        "bug's description")
+                   help="show comments in full, untruncated, keeping their line breaks. Takes "
+                        "numbers (16, or 15,16,17), `last:5` for the most recent five, and `all`; "
+                        "these combine. `last:N` is the form for \"what has been said lately\", "
+                        "which needs no knowledge of the numbering. Numbers are per bug, so they "
+                        "are only comparable across a batch for --comment 0, every bug's "
+                        "description; `all` is a single-bug tool -- across a batch it prints every "
+                        "comment of every bug")
     p.add_argument("--full", action="store_true", help="dump raw JSON")
     p.add_argument("--width", type=int, default=110)
     p.add_argument("--landings", metavar="A..B",
@@ -188,13 +199,23 @@ def main() -> None:
     ids = [i for arg in args.bugs for i in str(arg).replace(",", " ").split() if i]
     args.bugs = ids
     wanted_comments: list[int] = []
+    want_all = False
+    tail = 0
     if args.comment:
-        nums = [n for n in str(args.comment).replace(",", " ").split() if n]
-        bad = [n for n in nums if not n.isdigit()]
-        if bad:
-            p.error(f"--comment takes comment numbers, e.g. --comment 16 or --comment 15,16,17; "
-                    f"not: {', '.join(bad)}")
-        wanted_comments = [int(n) for n in nums]
+        for tok in str(args.comment).replace(",", " ").split():
+            low = tok.lower()
+            if low == "all":
+                want_all = True
+            elif low.startswith("last:"):
+                n = low.split(":", 1)[1]
+                if not n.isdigit() or int(n) < 1:
+                    p.error(f"--comment last: takes a positive count, e.g. last:5; not: {tok}")
+                tail = int(n)
+            elif tok.isdigit():
+                wanted_comments.append(int(tok))
+            else:
+                p.error(f"--comment takes comment numbers, `last:N` or `all`; not: {tok}")
+    wants_comments = bool(wanted_comments or want_all or tail)
     if args.landings:
         if ".." not in args.landings:
             p.error("--landings takes a git range, e.g. --landings 28b5e86da948..fcddc9cb649c")
@@ -260,6 +281,13 @@ def main() -> None:
                 continue
             for rb in rel_bugs:
                 print(f"    {label}: {rb['id']} [{rb['status']}] {rb['summary'][:78]}")
+        # The URLs, not just the count: see_also is where the same symptom on another platform or
+        # in another tracker shows up, which is evidence about a note's scope. A count cannot be
+        # read for that.
+        for url in (b.get("see_also") or [])[:8]:
+            print(f"    see_also: {url}")
+        if len(b.get("see_also") or []) > 8:
+            print(f"    see_also: ... and {len(b['see_also']) - 8} more")
         ev = (f"dupes={len(b.get('duplicates') or [])} "
               f"see_also={len(b.get('see_also') or [])} "
               f"blocks={len(b.get('blocks') or [])} "
@@ -301,7 +329,7 @@ def main() -> None:
         elif up:
             print(f"    PENDING UPLIFT REQUESTS: {', '.join(up)}")
         # One fetch serves both flags; they read the same endpoint.
-        cs = comments(bid) if (args.comments or wanted_comments) else []
+        cs = comments(bid) if (args.comments or wants_comments) else []
         # Per bug, not per run: one bug's failed fetch must not disable the flag for the rest.
         unread = cs is None
         if unread:
@@ -310,23 +338,34 @@ def main() -> None:
             print("    comments: COULD NOT READ -- nothing below is evidence about this bug's "
                   "comments")
             cs = []
-        if args.comments and cs:
-            first = " ".join(cs[0]["text"].split())
-            print(f"    comment 0 ({cs[0]['creator']}): {first[:400]}")
-            if len(cs) > 1:
-                last = " ".join(cs[-1]["text"].split())
-                print(f"    newest #{cs[-1]['count']} ({cs[-1]['creator']}): {last[:400]}")
-        if wanted_comments and not unread:
+        # Resolve the full-text selection first, so the previews below can skip anything that is
+        # about to be printed whole -- `--comments --comment all` otherwise shows comment 0 twice.
+        selected = {}
+        if wants_comments and not unread:
             by_count = {c["count"]: c for c in cs}
+            if want_all:
+                selected.update(by_count)
+            if tail:
+                selected.update({c["count"]: c for c in cs[-tail:]})
             for n in wanted_comments:
                 c = by_count.get(n)
                 if not c:
                     highest = max(by_count) if by_count else "none"
                     print(f"    comment #{n}: NOT FOUND (highest comment number is {highest})")
                     continue
-                print(f"    comment #{n} ({c['creator']}, {(c.get('creation_time') or '')[:10]}):")
-                for line in c["text"].splitlines():
-                    print(f"        {line}")
+                selected[n] = c
+        if args.comments and cs:
+            if cs[0]["count"] not in selected:
+                print(f"    comment 0 ({cs[0]['creator']}): "
+                      f"{trainlib.preview(cs[0]['text'], COMMENT_PREVIEW)}")
+            if len(cs) > 1 and cs[-1]["count"] not in selected:
+                print(f"    newest #{cs[-1]['count']} ({cs[-1]['creator']}): "
+                      f"{trainlib.preview(cs[-1]['text'], COMMENT_PREVIEW)}")
+        for n in sorted(selected):
+            c = selected[n]
+            print(f"    comment #{n} ({c['creator']}, {(c.get('creation_time') or '')[:10]}):")
+            for line in c["text"].splitlines():
+                print(f"        {line}")
         print()
 
     if missing:

@@ -31,6 +31,7 @@ Usage:
 
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -138,6 +139,10 @@ def cmd_add(args) -> None:
     })
     if args.due:
         item["due"] = args.due
+    # Same reason as in set_status: record the ask date once, so re-recording an item later to
+    # revise its note cannot narrow the reply window.
+    if item["status"] in ("asked", "replied"):
+        item.setdefault("asked_on", item.get("added") or now())
     if args.note:
         item["log"].append({"date": now(), "text": args.note})
     b["items"][key] = item
@@ -165,9 +170,20 @@ def set_status(args, status: str) -> None:
     rel, item = hit
     item["status"] = status
     item["updated"] = now()
-    item.setdefault("log", []).append({"date": now(), "text": f"status -> {status}"})
+    # --note here rather than only on `add`: the reason a thing was declined is the part worth
+    # keeping, and without it the short form silently drops it. `add --status declined --note ...`
+    # works but overwrites the item's summary with the reason, which is a different record.
+    # First ask wins, and later transitions must not move it: `replies` uses this as the cutoff for
+    # "what has been said since", and a cutoff that drifts forward hides the replies it exists to
+    # find. Derived from the log instead, bug 1699444's window started three days after the ask and
+    # skipped a 2,400-character objection from the developer.
+    if status in ("asked", "replied"):
+        item.setdefault("asked_on", item.get("added") or now())
+    note = getattr(args, "note", None)
+    text = f"status -> {status}" + (f": {note}" if note else "")
+    item.setdefault("log", []).append({"date": now(), "text": text})
     save(data)
-    print(f"[{rel}] {args.key} -> {status}")
+    print(f"[{rel}] {args.key} -> {status}" + (" (reason logged)" if note else ""))
 
 
 def cmd_rm(args) -> None:
@@ -370,19 +386,45 @@ def cmd_days(args) -> None:
     print(f"[{rel}] {len(days)} day(s) reviewed: {', '.join(days) or 'none'}")
 
 
-def render(rel: str, b: dict, show_all: bool, verbose: bool) -> None:
+def render(rel: str, b: dict, show_all: bool, verbose: bool, status: str = None) -> None:
     items = b["items"]
-    rows = [(k, v) for k, v in items.items() if show_all or v.get("status") not in CLOSED]
+    if status:
+        # An explicit status implies wanting it whatever it is, so this ignores show_all: `declined`
+        # is a closed status and asking for it should not also require --all.
+        rows = [(k, v) for k, v in items.items() if v.get("status") == status]
+    else:
+        rows = [(k, v) for k, v in items.items() if show_all or v.get("status") not in CLOSED]
     rows.sort(key=lambda kv: (kv[1].get("status", ""), kv[0]))
     days = b.get("days_reviewed", [])
-    print(f"== Firefox {rel} — {len(rows)} open of {len(items)} tracked"
-          + (f", {len(days)} day(s) reviewed" if days else ""))
+    if status:
+        print(f"== Firefox {rel} — {len(rows)} with status '{status}' of {len(items)} tracked"
+              + (f", {len(days)} day(s) reviewed" if days else ""))
+        if not rows:
+            # Say which statuses exist rather than printing nothing: an empty list from a typo and an
+            # empty list from a genuinely empty bucket look identical.
+            present = sorted({v.get("status", "?") for v in items.values()})
+            print(f"   none. Statuses in use for this release: {', '.join(present)}")
+    else:
+        print(f"== Firefox {rel} — {len(rows)} open of {len(items)} tracked"
+              + (f", {len(days)} day(s) reviewed" if days else ""))
     for key, it in rows:
         print(f"  {key:<12} [{it.get('status','?')}] {it.get('kind','')}")
         if it.get("due"):
             print(f"      follow up after {it['due']}")
         if it.get("summary"):
             print(f"      {it['summary']}")
+        # For a closed item the summary describes the bug, not the outcome, so surface the last log
+        # line too -- that is where `decline --note "<why>"` puts the reason, and needing --verbose
+        # to see why something was declined makes the reason easy to lose.
+        if not verbose and it.get("status") in CLOSED and it.get("log"):
+            # The most recent *status* entry, not the most recent entry: a plain `note` added after
+            # the decision would otherwise displace the reason for it.
+            last = next((e for e in reversed(it["log"])
+                         if e.get("text", "").startswith("status -> ")), it["log"][-1])
+            # Items closed with `add --status declined --note ...` stored the same text as both the
+            # summary and the log entry; printing it twice is worse than not printing it at all.
+            if last.get("text") != it.get("summary"):
+                print(f"      {last['date']}  {last['text']}")
         if verbose:
             for e in it.get("log", [])[-6:]:
                 print(f"        {e['date']}  {e['text']}")
@@ -404,7 +446,7 @@ def cmd_list(args) -> None:
             return
         rels = [rel]
     for rel in rels:
-        render(rel, data["releases"][rel], args.all, args.verbose)
+        render(rel, data["releases"][rel], args.all, args.verbose, args.status)
         print()
 
 
@@ -507,11 +549,37 @@ def cmd_followup(args) -> None:
     print("  none" if not chase else "")
 
 
+# `bmo.tld` is a reserved fake domain BMO gives its service accounts -- pulsebot, phab-bot and the
+# rest -- so no person has an address there. Naming the bots individually missed phab-bot's uplift
+# mail, which then reported itself as a comment "from people".
+BOT_CREATOR = re.compile(r"@bmo\.tld|@bots\.|pulsebot|bugzilla-daemon", re.IGNORECASE)
+
+
+def automated(comment: dict) -> bool:
+    """Whether a comment is machine-generated rather than someone answering.
+
+    Push notices, attachment mail and bare revision URLs are the bulk of a busy bug's comment
+    stream and none of them is a reply. Matched on the author where possible and on the body's
+    opening otherwise, because a push can be attributed to the developer who landed it.
+    """
+    body = " ".join((comment.get("text") or "").split())
+    return (bool(BOT_CREATOR.search(comment.get("creator", "")))
+            or body.startswith("Created attachment")
+            or body.startswith(("https://hg.mozilla.org", "https://github.com")))
+
+
 def cmd_replies(args) -> None:
-    """New replies on asked/replied bugs, since our ask.
+    """New comments on asked/replied/watching bugs since we asked.
 
     Replaces looping curl over each bug by hand -- the same reason bug-detail.py exists:
     a stable script is allowlisted once, ad-hoc shell prompts every time.
+
+    The cutoff comes from *our own record* of when the item was asked, not from trying to
+    recognise our own comments on the bug. Recognising them meant matching a hardcoded Bugzilla
+    login, which worked for exactly one person and, when it failed, failed silently: no ask found
+    meant every bug was skipped and the command printed nothing, which reads identically to
+    "nothing to chase". The date is day-granular, so a same-day ask can appear in its own results
+    -- over-inclusion, which is the safe direction for a check meant to catch things.
     """
     data = load()
     rel = args.release or current_release()
@@ -524,6 +592,10 @@ def cmd_replies(args) -> None:
     if not targets:
         print("Nothing to check.")
         return
+    checked = 0
+    with_replies = 0
+    own_only = 0
+    bots_only = 0
     for r, k, v in sorted(targets, key=lambda t: t[1]):
         try:
             payload = trainlib.fetch_json(
@@ -534,16 +606,44 @@ def cmd_replies(args) -> None:
         cs = []
         for vv in (payload.get("bugs") or {}).values():
             cs = vv.get("comments", [])
-        ours = [i for i, c in enumerate(cs) if "relnote" in c.get("text", "").lower()
-                and c.get("creator", "").startswith("ryanvm")]
-        after = cs[ours[-1] + 1:] if ours else []
+        # Recorded at the ask if we have it, else when the item was added -- an item cannot have
+        # been asked before it existed, so `added` is never *late*. Never `updated`: any later edit
+        # bumps it, which silently moves the window past the replies it exists to find. Erring early
+        # costs noise; erring late costs the answer. An empty cutoff would include everything, which
+        # is the harmless direction.
+        since = v.get("asked_on") or v.get("added") or ""
+        checked += 1
+        after = [c for c in cs if (c.get("creation_time") or "")[:10] >= since]
         if not after:
             continue
-        print(f"=== Fx{r} bug {k}  [{v.get('status')}]  {len(after)} repl(y/ies) since the ask")
-        for c in after[-2:]:
-            body = " ".join(c["text"].split())
-            print(f"    #{c['count']} {c['creator']}: {body[:400]}")
+        # Show what people said; count everything. Push notices and attachment mail are volume, not
+        # answers, and with only two lines shown they crowded the answers out: on bug 2056931 both
+        # displayed comments were a pulsebot push and an attachment notice while the one human
+        # comment in the window stayed invisible.
+        human = [c for c in after if not automated(c)]
+        if not human:
+            bots_only += 1
+            continue
+        # For an asked item, a single human comment dated the ask day is the ask itself -- the
+        # day-granular cutoff cannot exclude it by time. Watched items were never asked, so the
+        # rule does not apply to them.
+        if (v.get("status") in ("asked", "replied") and len(human) == 1
+                and (human[0].get("creation_time") or "")[:10] == since):
+            own_only += 1
+            continue
+        with_replies += 1
+        extra = f", {len(human)} from people" if len(human) != len(after) else ""
+        print(f"=== Fx{r} bug {k}  [{v.get('status')}]  {len(after)} comment(s) since {since}"
+              f"{extra}")
+        for c in human[-3:]:
+            print(f"    #{c['count']} {c['creator']}: {trainlib.preview(c['text'], 600)}")
         print()
+    # Always say what was covered, including what was held back: an empty run has to be
+    # distinguishable from a broken one, and a suppressed item from an absent one.
+    print(f"checked {checked} item(s) for comments since the ask (or since added, for watched "
+          f"items); {with_replies} with replies"
+          + (f"; {own_only} with only our own ask" if own_only else "")
+          + (f"; {bots_only} with only automated updates" if bots_only else ""))
 
 
 def main() -> None:
@@ -583,6 +683,8 @@ def main() -> None:
                      ("replied", "replied"), ("noted", "noted")):
         sp = add_parser(name, help=f"mark as {st}")
         sp.add_argument("key")
+        sp.add_argument("--note", default=None,
+                        help="why -- appended to the item's log with the status change")
         sp.set_defaults(func=lambda args, _st=st: set_status(args, _st))
 
     r = add_parser("rm")
@@ -611,6 +713,9 @@ def main() -> None:
 
     lst = add_parser("list")
     lst.add_argument("--all", action="store_true", help="include done/declined/noted")
+    lst.add_argument("--status", choices=STATUSES, default=None,
+                    help="only items with this status. Implies --all, so `--status declined` needs "
+                         "nothing else")
     lst.add_argument("--all-releases", action="store_true")
     lst.add_argument("-v", "--verbose", action="store_true")
     lst.set_defaults(func=cmd_list)
