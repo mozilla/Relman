@@ -71,7 +71,7 @@ it, and it was the most serious finding of the review.
 
 ```
 python3 scripts/relnotes/note-page.py <release-notes URL or a saved copy>
-python3 scripts/relnotes/note-page.py <src> --markup       # raw <p> HTML, for punctuation and links
+python3 scripts/relnotes/note-page.py <src> --markup       # raw <p> HTML: read it, never echo it back
 python3 scripts/relnotes/note-page.py <src> --audit        # code-formatting inconsistencies only
 python3 scripts/relnotes/note-page.py <src> --check-links  # resolve every link the authors wrote
 python3 scripts/relnotes/note-page.py --check-url <url>…   # resolve links you mean to suggest
@@ -241,4 +241,13 @@ patch, say the scoping question is open rather than asserting a scope.
   consistency). Keep per-note issues in the walk.
 - Questions attached to their note in the walk; optionally restated in a short list at the end.
 
-Keep suggestions concrete and copy-pasteable so the author can apply them directly.
+**A suggestion has to be pasteable without being edited first, which takes two specific things —
+"copy-pasteable" on its own is not an instruction and both of these have gone wrong under it.**
+
+- **Markdown, not the rendered HTML.** Nucleus notes are *authored* in Markdown, so a rewrite uses
+  `` `code` ``, `[text](url)` and `*emphasis*`. `--markup` shows the note's *output*: hand back
+  `<code>`, `<a href="…">` or `&lt;a&gt;` and the author has to translate tags and entities before
+  pasting. Read the HTML to check punctuation and link targets; write Markdown.
+- **One unwrapped line per suggested note**, however long it runs. Wrapping at ~80 columns looks
+  tidy in a terminal and bakes real newlines into what gets pasted, so the author re-joins every
+  line by hand — which cancels out showing the full note in the first place.

@@ -24,8 +24,10 @@ Two optional passes hit the Bugzilla REST API for context Nucleus does not have:
                 version and contrast it with the handful that earned a note.
                 This is the empirical significance bar: the denominator.
 
-Read-only. Network JSON is cached in a work directory (a mktemp dir unless
---workdir is given) so repeat runs and multiple --format passes are cheap.
+Read-only. Network JSON is cached under `$XDG_CACHE_HOME/relman-relnotes/nucleus`
+so repeat runs and multiple --format passes are cheap -- `--workdir` moves it,
+`--refresh` bypasses it. Nucleus is live data and expires in 15 minutes; Bugzilla
+answers about shipped majors are settled history and are kept for a day.
 
 Usage:
   fetch-shipped-notes.py --format md -o reference/release-notes/shipped-notes-survey.md \\
@@ -40,7 +42,7 @@ import json
 import re
 import statistics
 import sys
-import tempfile
+import time
 import urllib.parse as url_parse
 from pathlib import Path
 
@@ -80,12 +82,30 @@ NON_AUTHORED_TAGS = {"Community", "Enterprise"}
 # alongside real Fixed notes doubles the apparent Fixed-in-majors rate.
 BOILERPLATE_RE = re.compile(r"^(various\s+)?security fix", re.IGNORECASE)
 
+# A stable per-user directory rather than a fresh mktemp each run. With mkdtemp the cache could
+# never be reused, so every invocation refetched the whole ~7 MB payload *and* abandoned a copy:
+# twenty-five orphaned directories totalling 172 MB accumulated in one day of ordinary use. Same
+# idiom as trainlib's builds cache, and it respects XDG_CACHE_HOME through it.
+DEFAULT_CACHE = trainlib.CACHE_DIR / "nucleus"
+# Nucleus is live data. The cache exists to spare one pass from refetching megabytes on each of the
+# several calls it makes, not to serve yesterday's notes -- a note published mid-pass must not stay
+# invisible, so this is deliberately short.
+NUCLEUS_CACHE_TTL = 15 * 60
+# Bugzilla answers about *shipped* majors are settled history: the fixed-bug count for 150.0 does
+# not move. These are also the slow half of a survey regeneration, so they are worth keeping a day.
+BUGZILLA_CACHE_TTL = 24 * 3600
+# Set once from --refresh. Module-level because it is a constant for the process, and threading it
+# through compute_areas/compute_negative and their two fetch helpers would touch four signatures to
+# carry a value none of them decide.
+_FORCE_REFRESH = False
 
-def fetch_json(url: str, cache: Path | None, label: str) -> Any:
-    """GET url as JSON, memoized on disk under cache/label.json."""
-    if cache is not None:
+
+def fetch_json(url: str, cache: Path | None, label: str,
+               ttl: int = NUCLEUS_CACHE_TTL) -> Any:
+    """GET url as JSON, memoized on disk under cache/label.json for `ttl` seconds."""
+    if cache is not None and not _FORCE_REFRESH:
         blob = cache / f"{label}.json"
-        if blob.exists():
+        if blob.exists() and (time.time() - blob.stat().st_mtime) < ttl:
             try:
                 return json.loads(blob.read_text())
             except ValueError as e:
@@ -204,7 +224,8 @@ def fetch_bug_fields(bug_ids: list[int], fields: str, cache: Path | None, label:
     batches = [bug_ids[i : i + batch_size] for i in range(0, len(bug_ids), batch_size)]
     for i, batch in enumerate(batches):
         qs = url_parse.urlencode({"id": ",".join(str(b) for b in batch), "include_fields": fields})
-        payload = fetch_json(f"{BUGZILLA_REST}?{qs}", cache, f"{label}-{i}")
+        payload = fetch_json(f"{BUGZILLA_REST}?{qs}", cache, f"{label}-{i}",
+                             ttl=BUGZILLA_CACHE_TTL)
         for bug in payload.get("bugs", []):
             out[bug["id"]] = bug
     return out
@@ -220,7 +241,8 @@ def fetch_fixed_in_version(version: str, cache: Path | None) -> list[dict]:
             "limit": "0",
         }
     )
-    payload = fetch_json(f"{BUGZILLA_REST}?{qs}", cache, f"fixed-{major}")
+    payload = fetch_json(f"{BUGZILLA_REST}?{qs}", cache, f"fixed-{major}",
+                         ttl=BUGZILLA_CACHE_TTL)
     return payload.get("bugs", [])
 
 
@@ -340,10 +362,16 @@ def summarize(pairs: list[tuple[dict, dict]], scoped: dict[str, dict]) -> dict:
 
 
 def pick_examples(cleaned: list[str], k: int = 5) -> list[str]:
-    """A spread of examples: shortest, longest, and evenly-spaced middles."""
+    """A spread of examples: shortest, longest, and evenly-spaced middles.
+
+    The sort key is total -- word count *and then the text* -- because word count alone leaves ties
+    to be broken by `set` iteration order, which varies with PYTHONHASHSEED from one process to the
+    next. That made this whole report unreproducible: two runs over identical data resampled every
+    tag's examples, so a refresh diff mixed real movement with noise and could not be reviewed.
+    """
     if not cleaned:
         return []
-    ordered = sorted(set(cleaned), key=lambda c: len(c.split()))
+    ordered = sorted(set(cleaned), key=lambda c: (len(c.split()), c))
     if len(ordered) <= k:
         return ordered
     idx = [round(i * (len(ordered) - 1) / (k - 1)) for i in range(k)]
@@ -361,6 +389,18 @@ def emit_markdown(s: dict, meta: dict, areas: dict | None, negative: dict | None
         f"{meta['channel']}** note published since **{meta['since'][:10]}**, pulled from Nucleus "
         f"and joined to its release."
     )
+    w("")
+    if meta.get("window_months"):
+        w(
+            f"**That floor is a rolling {meta['window_months']}-month window** (`--months`), not a "
+            "fixed date: a refresh drops the oldest releases as well as adding new ones. So the "
+            "absolute counts here move in both directions, and a corpus that *shrank* between two "
+            "revisions of this file is the window sliding rather than data going missing. The "
+            "medians and rates are the parts meant to be quoted."
+        )
+    else:
+        w(f"That floor was pinned with `--since {meta['since'][:10]}`, so it does not move between "
+          "refreshes.")
     w("")
     w(
         "Regenerate with `scripts/relnotes/fetch-shipped-notes.py --format md "
@@ -676,6 +716,25 @@ def emit_markdown(s: dict, meta: dict, areas: dict | None, negative: dict | None
         w(f"- Bugzilla REST used for {'component lookup' if areas else ''}"
           f"{' and ' if areas and negative else ''}{'fixed-bug denominators' if negative else ''}.")
     w(f"- Generated by `scripts/relnotes/fetch-shipped-notes.py`; counts are as of the run date.")
+    w("")
+    w("### Measuring this corpus yourself")
+    w("")
+    w("Ad-hoc counts over the Nucleus payload drive calibration decisions, and two mistakes have "
+      "produced a confident wrong answer:")
+    w("")
+    w(f"- **Exclude `{'`, `'.join(sorted(NON_AUTHORED_TAGS))}`** — the `NON_AUTHORED_TAGS` set in "
+      "`fetch-shipped-notes.py`. Both are generated boilerplate rather than team writing, so their "
+      "markup, length and phrasing are not evidence of house practice. Leaving them in is what "
+      "makes raw HTML links look like current convention.")
+    w("")
+    w("- **Markdown links come in two forms, and the reference form dominates.** Inline "
+      "`[text](url)` is the one people write regexes for; `[text][1]` with a `[1]: url` definition "
+      "below is what the notes actually use. Measured over notes authored since 2024: **1,135 "
+      "reference-style against 19 inline**, so an inline-only pattern sees under 2% of them.")
+    w("")
+    w("Together the two turn *zero* raw `<a href>` in team-authored notes into an apparent even "
+      "split with Markdown. A count of *absence* is the kind most worth re-deriving before acting "
+      "on it, because absence is what becomes a rule.")
     return "\n".join(o) + "\n"
 
 
@@ -826,8 +885,10 @@ def main() -> None:
     p.add_argument(
         "--workdir",
         default=None,
-        help="cache directory for fetched JSON (default: a fresh mktemp dir, left in place)",
+        help=f"cache directory for fetched JSON (default: {DEFAULT_CACHE})",
     )
+    p.add_argument("--refresh", action="store_true",
+                   help="ignore the cache and refetch everything")
     p.add_argument("--areas", action="store_true", help="resolve noted bugs to Bugzilla components")
     p.add_argument(
         "--negative",
@@ -859,7 +920,9 @@ def main() -> None:
         )
         since = cutoff.strftime("%Y-%m-01T00:00:00Z")
 
-    workdir = Path(args.workdir) if args.workdir else Path(tempfile.mkdtemp(prefix="relnotes-"))
+    global _FORCE_REFRESH
+    _FORCE_REFRESH = args.refresh
+    workdir = Path(args.workdir).expanduser() if args.workdir else DEFAULT_CACHE
     workdir.mkdir(parents=True, exist_ok=True)
     print(f"# cache: {workdir}", file=sys.stderr)
 
@@ -964,6 +1027,10 @@ def main() -> None:
         "since": since,
         "pairs": pairs,
         "outpath": args.output or "reference/release-notes/shipped-notes-survey.md",
+        # None when --since pinned the floor, a month count when it was derived from --months. The
+        # difference is not cosmetic: a derived floor moves forward on every run, so the report has
+        # to say which kind it is rather than printing a date that looks fixed either way.
+        "window_months": None if args.since else args.months,
     }
 
     if args.format == "md":
