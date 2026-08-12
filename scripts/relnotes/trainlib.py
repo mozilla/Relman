@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 import sys
+import textwrap
 import time
 import urllib.error as url_error
 import urllib.request as url_request
@@ -209,7 +210,7 @@ def resolve_repo_with_source(cli: str | None = None) -> tuple[Path, str]:
     )
 
 
-def fetch_origin(repo: Path, consequence: str) -> bool:
+def fetch_origin(repo: Path, consequence: str, timeout: int | None = None) -> bool:
     """Update the mirror, saying so if it failed. True when the mirror is current.
 
     A failed fetch used to be discarded, which left every downstream answer describing a stale tree
@@ -217,10 +218,20 @@ def fetch_origin(repo: Path, consequence: str) -> bool:
     default and prints an `effective now:` verdict the skills quote as *verified*. `consequence` is
     what a stale mirror means for the caller, because "fetch failed" alone does not tell the reader
     whether to trust the numbers underneath it.
+
+    `timeout` is for callers on the critical path of something else, where the fetch is a courtesy
+    rather than the point -- offline or off-VPN, an unreachable remote would otherwise hang them.
+    It defaults off because a legitimate Gecko fetch can take minutes and cutting one short would
+    turn a slow answer into a wrong one.
     """
     print("# fetching origin...", file=sys.stderr)
-    r = subprocess.run(["git", "-C", str(repo), "fetch", "--quiet", "origin"],
-                       capture_output=True, text=True, check=False)
+    try:
+        r = subprocess.run(["git", "-C", str(repo), "fetch", "--quiet", "origin"],
+                           capture_output=True, text=True, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print(f"# WARNING: git fetch did not finish within {timeout}s, so the mirror may be behind "
+              f"origin. {consequence}", file=sys.stderr)
+        return False
     if r.returncode == 0:
         return True
     sys.stderr.write(r.stderr)
@@ -229,15 +240,355 @@ def fetch_origin(repo: Path, consequence: str) -> bool:
     return False
 
 
-def git(repo: Path, *args: str, check: bool = True) -> str:
+def git_rc(repo: Path, *args: str) -> tuple[int, str, str]:
+    """(exit status, stdout, stderr), for callers where "no output" and "it failed" differ.
+
+    `git` collapses both to "", which suits a value with a sensible default and is wrong for
+    anything a safety check reads: an empty file list from a failed `diff` is indistinguishable
+    from nothing having changed, and reads as the reassuring answer.
+    """
     r = subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=False
     )
-    if r.returncode != 0:
+    return r.returncode, r.stdout, r.stderr
+
+
+def git(repo: Path, *args: str, check: bool = True) -> str:
+    rc, out, err = git_rc(repo, *args)
+    if rc != 0:
         if check:
-            raise RuntimeError(f"git {' '.join(args)} failed: {r.stderr.strip()}")
+            raise RuntimeError(f"git {' '.join(args)} failed: {err.strip()}")
         return ""
-    return r.stdout
+    return out
+
+
+# ------------------------------------------------------------------- tooling version
+
+# This repo's own release-note surface, split by *what it costs to pick up a change* -- which is
+# not the same for every file, and that difference is the whole reason the check earns its keep.
+#
+# Everything here reloads on its own except a skill body. Scripts are subprocessed and reference
+# docs are read from disk per call. Permissions look like they would need a restart and do not:
+# per the Claude Code docs (checked 2026-08-11), "Claude Code watches your settings files and
+# reloads them when they change, so edits to most keys apply to the running session without a
+# restart. This includes permissions, hooks, and credential helpers".
+#
+# Unrelated skills are deliberately excluded -- a commit to triage-user-bugs should not interrupt
+# a release-note pass.
+#
+# Reference docs are live in the sense that matters -- re-reading one picks up the change, no
+# /clear -- but they are *not* free, so they are named apart. A copy already read into a
+# conversation is exactly as stale as a skill body, and the skill mandates reading the style guide
+# before drafting any wording, so a pull that touches these is reported by name rather than waved
+# through with the scripts.
+TOOLING_DOCS = ("reference/release-notes",)
+TOOLING_LIVE = (".claude/settings.json", "scripts/relnotes") + TOOLING_DOCS
+# The one exception, and the reason the loud banner exists. A skill body is loaded when the skill
+# is invoked and then lives in the conversation, so a pull cannot replace the copy this session
+# already read -- and re-invoking would stack a second, contradicting copy beside the first. What
+# that produces is nasty precisely because it is quiet: new scripts driven by old instructions,
+# mid-pass, with nothing on screen saying so.
+#
+# `/clear` is the fix and the whole fix: it starts a new conversation with empty context, and the
+# system prompt carrying the skill descriptions is "rebuilt on /clear or restart" (same docs). So
+# the next invocation reads the new file and only the new file. Quitting the process also works
+# and is not necessary -- say `/clear`, because an instruction that overcharges gets ignored.
+TOOLING_RECLEAR = (".claude/skills/find-release-note-candidates",
+                   ".claude/skills/review-release-notes")
+TOOLING_PATHS = TOOLING_RECLEAR + TOOLING_LIVE
+
+
+RELMAN_ROOT = Path(__file__).resolve().parents[2]
+
+
+def relman_root() -> Path | None:
+    """The Relman checkout these scripts live in, or None if they were copied out of one.
+
+    Not configurable, and deliberately not resolve_repo's business: this is the repo the running
+    code came from, so it is always knowable from __file__ without asking anyone. The Gecko clone
+    is the opposite case -- somewhere different on every machine, and it has to be told.
+
+    Callers that only need somewhere to write (settings.local.json) want RELMAN_ROOT; callers
+    asking git a question want this, because outside a checkout the honest answer is "unknown"
+    rather than a path whose every git query fails.
+    """
+    return RELMAN_ROOT if (RELMAN_ROOT / ".git").exists() else None
+
+
+def _under(path: str, roots: tuple[str, ...]) -> bool:
+    """Is `path` one of `roots` or inside one? Prefix matching alone would put
+    `.claude/settings.json.bak` under `.claude/settings.json`."""
+    return any(path == r or path.startswith(r + "/") for r in roots)
+
+
+def tooling_stamp() -> dict:
+    """{"commit", "dirty", "version"} -- what is running here, with no upstream question asked.
+
+    Two git calls, no network, no comparison. This is what labelling an artifact needs, and it is
+    separated from tooling_status because that one spends five more subprocesses working out
+    whether the revision is *behind*, which a stamp does not care about and scan-window pays for
+    on every run.
+    """
+    root = relman_root()
+    if root is None:
+        return {"commit": "unknown", "dirty": [], "dirty_known": True, "version": "unknown"}
+    commit = git(root, "rev-parse", "--short", "HEAD", check=False).strip() or "unknown"
+    rc, out, _ = git_rc(root, "status", "--porcelain", "--", *TOOLING_PATHS)
+    # Porcelain v1 is `XY <path>`, so the path starts at column 3. Untracked files are excluded to
+    # match pull_blocker's reading: `-dirty` means the committed tooling was edited, and a stray
+    # scratch file or editor backup under scripts/ drains the marker of exactly that meaning.
+    dirty = sorted(ln[3:] for ln in out.splitlines() if ln[3:] and not ln.startswith("??"))
+    # The marker rides on the version rather than being reported beside it. A local edit is the
+    # single most likely explanation for a transcript that does not match the committed skill, and
+    # it only explains anything if it travels with the revision it modifies. `-dirty?` is the third
+    # state: the check itself failed, so "clean" was never established.
+    suffix = "-dirty" if dirty else ("" if rc == 0 else "-dirty?")
+    return {"commit": commit, "dirty": dirty, "dirty_known": rc == 0,
+            "version": commit + suffix}
+
+
+def tooling_status(fetch: bool = True, upstream: str = "origin/main") -> dict:
+    """Which revision of the release-note tooling is running, and whether it is behind origin.
+
+    `fetch=False` skips the network but still compares against the mirror, which is what an offline
+    or already-fetched caller wants. For the stamp alone -- no comparison at all -- use
+    tooling_stamp().
+    """
+    root = relman_root()
+    if root is None:
+        return {"available": False,
+                "reason": f"{RELMAN_ROOT} is not a git checkout, so the running tooling cannot "
+                          "be identified"}
+
+    st: dict = {"available": True, "repo": str(root), "upstream": upstream, "fetched": None}
+    if fetch:
+        st["fetched"] = fetch_origin(
+            root, "The 'behind' count below may miss anything pushed since the last successful "
+                  "fetch, so an up-to-date verdict here is not evidence of one.", timeout=30)
+
+    st.update(tooling_stamp())
+
+    st["upstream_known"] = bool(
+        git(root, "rev-parse", "--verify", "--quiet", upstream, check=False).strip())
+    if not st["upstream_known"]:
+        return st
+
+    def count(rev_range: str, scoped: bool) -> int | None:
+        out = git(root, "rev-list", "--count", rev_range,
+                  *(("--", *TOOLING_PATHS) if scoped else ()), check=False).strip()
+        return int(out) if out.isdigit() else None
+
+    # `ahead` keeps someone developing the tooling on a branch from being told to pull their own
+    # unmerged work; `behind_any` separates "nothing for you" from "nothing at all", so a quiet
+    # verdict is not mistaken for a check that did not run.
+    st["behind"] = count(f"HEAD..{upstream}", True)
+    st["behind_any"] = count(f"HEAD..{upstream}", False)
+    st["ahead"] = count(f"{upstream}..HEAD", True)
+    # Three dots: what upstream has added since the merge base. Two would fold in this branch's own
+    # commits, listing work you already have as changes waiting to be pulled.
+    rc, out, _ = git_rc(root, "diff", "--name-only", f"HEAD...{upstream}", "--", *TOOLING_PATHS)
+    st["changed"] = sorted(out.splitlines())
+    # This one drives the banner, so its failure mode is the feature's failure mode. An empty list
+    # from a `diff` that errored (unrelated histories after a re-pointed remote, say) is
+    # indistinguishable from nothing having changed, and classifies a stale skill as harmless.
+    # Recorded rather than guessed at: an unclassifiable change is reported in words and the pass
+    # continues, since the older tooling still works and refusing to start would cost more than the
+    # rare miss. Note `behind > 0 and not changed` is NOT evidence of failure on its own -- an
+    # upstream revert pair produces it legitimately.
+    st["changed_known"] = rc == 0
+    st["needs_clear"] = [f for f in st["changed"] if _under(f, TOOLING_RECLEAR)]
+    st["changed_docs"] = [f for f in st["changed"] if _under(f, TOOLING_DOCS)]
+    return st
+
+
+def tooling_summary(st: dict, pull_attempted: bool = False) -> list[str]:
+    """`tooling_status` as display lines, first line headline. Shared so that the pass briefing and
+    the standalone check cannot drift into two verdicts for the same repo state.
+
+    `pull_attempted` means a pull already ran and printed its own outcome, so this must neither
+    repeat that reason nor suggest the command that just produced it.
+    """
+    if not st.get("available"):
+        return [f"unknown -- {st['reason']}"]
+
+    head = st["version"]
+    if st.get("ahead"):
+        head += f" (+{st['ahead']} local)"
+    if not st.get("upstream_known"):
+        return [f"{head}; no {st['upstream']} ref here, so there is nothing to compare against"]
+
+    behind = st.get("behind")
+    if behind is None:
+        lines = [f"{head}; could not count commits against {st['upstream']}"]
+    elif behind == 0:
+        unrelated = st.get("behind_any") or 0
+        lines = [f"{head}, current with {st['upstream']}"
+                 + (f" ({unrelated} commit{'' if unrelated == 1 else 's'} behind, none touching "
+                    "the tooling)" if unrelated else "")]
+        if st.get("fetched") is False:
+            lines.append("the fetch failed, so 'current' means only current with what was already "
+                         "mirrored")
+    else:
+        lines = [f"{head}, {behind} commit{'' if behind == 1 else 's'} behind {st['upstream']} "
+                 "touching the tooling"]
+        # The skill case gets the banner instead of a line here -- a one-liner among six others is
+        # exactly how "you are running the wrong instructions" gets skimmed past.
+        if not st.get("changed_known", True):
+            lines.append("could NOT list which files changed (`git diff` failed), so whether the "
+                         "skills are among them is unknown. The older tooling still runs -- carry "
+                         "on, but if this pass reads oddly, /clear and start it again")
+        elif not st["needs_clear"]:
+            if pull_attempted:
+                # Reaching here after a pull means it did not happen -- a successful one leaves
+                # nothing behind to report. Not fatal: the older scripts still run. Saying so is
+                # the whole job, since the alternative is recommending the command that just failed.
+                advice = ("the pull above did not happen, so this pass runs on the older copy. "
+                          "That works -- but say so when reporting results")
+            else:
+                blocker = pull_blocker(st)
+                advice = (f"but {blocker}" if blocker
+                          else "run `check-updates --pull` and carry on in this session")
+            lines.append("scripts, docs and settings only, all of which reload on their own -- "
+                         + advice)
+
+    if st["dirty"]:
+        more = len(st["dirty"]) - 3
+        lines.append(f"uncommitted here: {', '.join(st['dirty'][:3])}"
+                     + (f" and {more} more" if more > 0 else ""))
+    elif not st.get("dirty_known", True):
+        lines.append("could not check for local edits (`git status` failed), so the absence of a "
+                     "-dirty marker above proves nothing")
+    return lines
+
+
+def pull_blocker(st: dict) -> str:
+    """Why a fast-forward pull would be unsafe here, or "" when it is fine to run.
+
+    Three conditions, and `--ff-only` alongside them is what makes pulling on someone's behalf
+    reasonable at all: it cannot invent a merge commit and cannot leave a conflicted tree behind
+    mid-pass. The other two stop it moving work that is not this tooling. Everything else is a
+    human's call, because the cost of guessing wrong is a broken checkout in the middle of a pass.
+    """
+    root = Path(st["repo"])
+    # Derived from the upstream this status was built against, not hardcoded: a blocker judged
+    # against origin/main while the counts came from somewhere else is worse than no check.
+    upstream = st.get("upstream", "origin/main")
+    want = upstream.split("/", 1)[1] if "/" in upstream else upstream
+    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False).strip()
+    if branch != want:
+        where = f"on {branch}" if branch and branch != "HEAD" else "on a detached HEAD"
+        return (f"this checkout is {where}, not {want}. Pulling would move a branch nobody asked "
+                f"to move -- switch to {want}, or pull by hand if that branch is deliberate")
+    modified = [ln for ln in git(root, "status", "--porcelain", check=False).splitlines()
+                if not ln.startswith("??")]
+    if modified:
+        return (f"{len(modified)} tracked file(s) have uncommitted changes. Commit or stash them "
+                "first; pulling over work in progress is not a trade to make on someone's behalf")
+    ahead = git(root, "rev-list", "--count", f"{upstream}..HEAD", check=False).strip()
+    if ahead and ahead != "0":
+        return (f"{want} here has {ahead} commit(s) origin does not, so this cannot fast-forward. "
+                "Push or rebase them first")
+    return ""
+
+
+def pull_tooling(st: dict) -> dict:
+    """Fast-forward this checkout to origin/main. Returns {"pulled": bool, "message": str}.
+
+    Refuses rather than improvises: see pull_blocker for the conditions. A refusal is not a
+    failure of the pass, it is a fact about the checkout, so it reports and lets the caller decide.
+    """
+    blocker = pull_blocker(st)
+    if blocker:
+        return {"pulled": False, "message": f"not pulling: {blocker}."}
+    root = Path(st["repo"])
+    try:
+        r = subprocess.run(["git", "-C", str(root), "pull", "--ff-only"],
+                           capture_output=True, text=True, check=False, timeout=120)
+    except subprocess.TimeoutExpired:
+        return {"pulled": False,
+                "message": "not pulled: git pull --ff-only did not finish within 120s; the "
+                           "checkout is unchanged."}
+    if r.returncode != 0:
+        return {"pulled": False,
+                "message": f"not pulled: git pull --ff-only exited {r.returncode} and the "
+                           f"checkout is unchanged:\n{(r.stderr or r.stdout).strip()}"}
+    after = git(root, "rev-parse", "--short", "HEAD", check=False).strip()
+    return {"pulled": True, "message": f"pulled: {st.get('commit')} -> {after}"}
+
+
+def tooling_banner(st: dict, stale: list[str] | None = None, pulled: bool = False,
+                   pull_attempted: bool = False) -> list[str]:
+    """The unmissable block, or [] when nothing needs it.
+
+    Separate from tooling_summary so it prints flush left under either caller's label column, and
+    so the quiet cases stay quiet: a banner that fires when a script changed is a banner people
+    learn to scroll past, and then it is not there for the one case that matters.
+
+    Every remaining step is stated at once, because /clear destroys the context that would
+    otherwise deliver the step after it. `stale` is passed explicitly once a pull has happened:
+    the status then reads "current", but what needs clearing is a fact about the transition, not
+    about the state left behind it.
+    """
+    stale = st.get("needs_clear") if stale is None else stale
+    if not stale:
+        return []
+
+    # Phrased for the user to say, not for a session to run: /clear destroys the context these
+    # instructions live in, so whatever comes after it has to survive as a sentence a person
+    # repeats. It names the work rather than being a bare "carry on" because the fresh session has
+    # to route it, and this repo holds more than one skill.
+    resume_step = 'then say:  "let\'s keep looking for release notes"'
+    if pulled:
+        steps = ["The new files are on disk. This session is still running the old ones.",
+                 "",
+                 "    1.  /clear                       <-- REQUIRED, now",
+                 f"    2.  {resume_step}"]
+    else:
+        if pull_attempted:
+            # A pull ran and did not land; it printed why. Pointing at that beats restating it in
+            # different words ten lines later, and beats suggesting the command that produced it.
+            first = "    1.  the pull did not happen -- see the message above"
+        else:
+            blocker = pull_blocker(st)
+            first = (f"    1.  CANNOT PULL AUTOMATICALLY -- {blocker}" if blocker
+                     else "    1.  watchlist.py check-updates --pull")
+        steps = ["The skill instructions driving it are out of date.",
+                 "",
+                 first,
+                 "    2.  /clear                       <-- REQUIRED",
+                 f"    3.  {resume_step}"]
+
+    body = (["STOP -- do not start a pass in this session."] + steps
+            + ["",
+               "Pulling on its own is NOT enough. A skill body is loaded into",
+               "the conversation when the skill is invoked and stays there, so",
+               "a new file cannot replace the copy this session already read.",
+               "",
+               "/clear IS enough. You do not need to quit Claude Code."])
+    return _box(body) + [f"out of date here: {', '.join(stale)}"]
+
+
+def _box(lines: list[str], width: int = 62) -> list[str]:
+    """Frame `lines`, wrapping any that run long and sizing the frame to what results.
+
+    Both halves are load-bearing. A hardcoded frame width breaks the first time someone edits a
+    line past it; sizing to the content instead lets one interpolated sentence -- a pull blocker
+    naming a branch -- stretch the frame to 190 columns. A box that has come apart reads as broken
+    output, which is the opposite of what a message this size is for.
+    """
+    wrapped: list[str] = []
+    for ln in lines:
+        if len(ln) <= width:
+            wrapped.append(ln)
+            continue
+        # A wrapped step hangs under its text rather than its number, so it still reads as one
+        # step; flush-left prose just keeps wrapping flush left.
+        lead = len(ln) - len(ln.lstrip())
+        indent = " " * (lead + 4) if lead else ""
+        wrapped.extend(textwrap.wrap(ln, width=width, subsequent_indent=indent))
+    w = max(len(ln) for ln in wrapped)
+    rule = "*" * (w + 10)
+    return [rule] + [f"***  {ln.ljust(w)}  ***" for ln in wrapped] + [rule]
 
 
 # --------------------------------------------------------------------------- trains

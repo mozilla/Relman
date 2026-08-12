@@ -1,6 +1,6 @@
 ---
 name: find-release-note-candidates
-description: Scan what landed on firefox-main over a window (a day, a week, or a whole Nightly cycle) and surface the changes worth asking a developer about for a release note — with bug numbers, whether the change is gated and how, feature rollups across many bugs, and a draft one-liner. Use when the user wants to find release-note candidates, work the daily "what landed overnight" pass, review a full cycle before a merge, or asks things like "what should we note from the last day", "anything user-facing land this week", "find pref flips". Also works the relnote-flag nomination queue — bugs someone flagged `relnote-firefox?` that are waiting on a decision — and answers which bugs carry a given flag value ("what's in the nomination queue", "anything waiting on a relnote decision", "what has been declined for notes"). Complements review-release-notes (which critiques an existing draft); this one produces the candidate list from scratch.
+description: Scan what landed on firefox-main over a window (a day, a week, or a whole Nightly cycle) and surface the changes worth asking a developer about for a release note — with bug numbers, whether the change is gated and how, feature rollups across many bugs, and a draft one-liner. Use when the user wants to find release-note candidates, work the daily "what landed overnight" pass, review a full cycle before a merge, or asks things like "what should we note from the last day", "anything user-facing land this week", "find pref flips". Also works the relnote-flag nomination queue — bugs someone flagged `relnote-firefox?` that are waiting on a decision — and answers which bugs carry a given flag value ("what's in the nomination queue", "anything waiting on a relnote decision", "what has been declined for notes"). Also use when picking release-note work back up in a fresh or just-cleared session — "let's keep looking for release notes", "continue the release note pass", "where did we get to". Complements review-release-notes (which critiques an existing draft); this one produces the candidate list from scratch.
 ---
 
 # Find Release Note Candidates
@@ -324,7 +324,8 @@ all prompting, which is most of what makes a cold run feel like an approval trea
 python3 scripts/relnotes/watchlist.py resume
 ```
 
-**Run this before anything else on any pass you did not personally start.** Release-note work spans a
+**Run this before any scanning on any pass you did not personally start** (only `check-updates`
+comes earlier — see below). Release-note work spans a
 six-week cycle, and the session doing it will be compacted — probably more than once — and may be
 replaced entirely. Nothing in a conversation survives that; the per-user state on disk does. `resume`
 prints the scan position and the exact command to continue, days reviewed, status counts, what is
@@ -343,6 +344,37 @@ Two habits make that briefing worth reading, and without them it decays into a s
   `days <YYYYMMDD>` when a day is done, `replied`/`decline`/`noted` as things move, and
   `log "<text>"` for context belonging to no single bug — a notes review, a decision, an open
   question. A declined bug with no recorded reason will simply be re-proposed next cycle.
+
+### The TOOLING line — act on it before reading the rest
+
+`resume` opens with the revision of this tooling you are running and whether it is behind
+`origin/main`. Several people edit these skills and scripts, so the copy driving your pass can be
+days older than the one its author is describing, and nothing else in a run would say so.
+
+**Open every pass with `check-updates --pull`**, before `resume`. It fast-forwards this checkout
+when it is behind — refusing if the tree is dirty, on a branch, or cannot fast-forward, and saying
+which — so the ordinary case of "someone improved a script yesterday" fixes itself silently.
+
+**One rule covers everything it prints: a `STOP` banner halts the pass, and every other line is
+context to act on and carry into what you report.** Those lines say what they mean and need no
+decoder here — a pull that did not land, a `-dirty` or `-dirty?` marker, a check that could not
+run, a reference doc to re-read. **None of them is a reason to stop.** The older tooling still
+works, and a run nobody else can reproduce should arrive with the reason already attached.
+
+The banner is the exception, and it is not a judgement call:
+
+- **Stop. Tell the user to `/clear`, then to ask for the release-note work again in the fresh
+  session.** Do not continue, and do not offer to continue. A skill body is loaded into the
+  conversation and stays there, so the pulled file does not replace the copy already in front of
+  you — you would be running new scripts against old rules with no way to tell which of your own
+  instructions were wrong.
+- **`/clear` is enough. Do not tell the user to quit Claude Code.** It starts a new conversation
+  with empty context and rebuilds the system prompt, so the next invocation reads the new file.
+- **Only you can see any of this**, so relaying it is the whole job. `check-updates` also exits 1
+  on a stale skill, so it reads as a failed command rather than a paragraph.
+
+Drop `--pull` to ask the same question without changing anything, and add `--quiet` to print
+nothing when there is nothing to act on.
 
 ## Run it: one command
 
@@ -373,7 +405,8 @@ above; `followup` and `replies` every time, in this order. `replies` is not opti
 one that reads what developers actually said since you asked:
 
 ```
-watchlist.py resume                      # briefing: where the last pass stopped
+watchlist.py check-updates --pull        # self-update first; exits 1 and shows a STOP banner if /clear is needed
+watchlist.py resume                      # briefing: where the last pass stopped, and the TOOLING line
 watchlist.py followup                    # asked/replied bugs: nominated, awaiting, or needs chasing
 watchlist.py replies                     # what people said on asked/replied/watching bugs since we asked
 ```
@@ -389,6 +422,7 @@ the report called it unresolved, when the developer had approved the wording tha
 **Then keep the watchlist current**, because it is the only memory between passes:
 
 ```
+watchlist.py check-updates --pull        # self-update; drop --pull to only report, --quiet to speak only when acting
 watchlist.py summary                     # per-release counts and days reviewed
 watchlist.py list --status asked         # or declined, gated, noted -- implies --all
 watchlist.py add <bug> --status asked --note "<what and when>"

@@ -235,6 +235,10 @@ def cmd_resume(args) -> None:  # noqa: C901
 
     print(f"=== RESUME BRIEFING — Firefox {rel} ===\n")
 
+    # First, because it is the one line that can invalidate the rest: if the skill driving this
+    # pass is behind the one on origin, the answer is to restart before reading any further.
+    print_tooling(trainlib.tooling_status(fetch=not args.no_fetch))
+
     repo = trainlib.resolve_repo(args.repo)
     st = trainlib.watermark_status(repo, trainlib.read_watermark(),
                                    int(rel) if rel.isdigit() else 0)
@@ -287,7 +291,7 @@ def cmd_resume(args) -> None:  # noqa: C901
 # checkout/reset/commit against someone's working tree.
 GECKO_GIT_SUBCOMMANDS = ("log", "show", "diff", "grep", "rev-list", "rev-parse", "merge-base",
                          "for-each-ref", "tag", "fetch", "ls-tree", "cat-file")
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = trainlib.RELMAN_ROOT
 LOCAL_SETTINGS = REPO_ROOT / ".claude" / "settings.local.json"
 SHARED_SETTINGS = REPO_ROOT / ".claude" / "settings.json"
 
@@ -301,6 +305,90 @@ def _allow_entries(repo: Path) -> list[str]:
     """
     forms = [str(repo)] + ([f'"{repo}"'] if any(c.isspace() for c in str(repo)) else [])
     return [f"Bash(git -C {form} {sub}:*)" for form in forms for sub in GECKO_GIT_SUBCOMMANDS]
+
+
+def print_tooling(st: dict, label: str = "TOOLING", pad: int = 15,
+                  stale: list[str] | None = None, pulled: bool = False,
+                  pull_attempted: bool = False) -> None:
+    """The tooling verdict as a labelled block, continuation lines aligned under the first.
+
+    The banner deliberately breaks that alignment and prints flush left: it is not a detail of the
+    TOOLING line, it is a stop sign for the whole pass.
+    """
+    # One value to both: they agree today only because the banner reads it solely on the not-pulled
+    # path, which is a coincidence an edit could break.
+    failed_pull = pull_attempted and not pulled
+    lines = trainlib.tooling_summary(st, pull_attempted=failed_pull)
+    print(f"{label.ljust(pad)}{lines[0]}")
+    for extra in lines[1:]:
+        print(f"{''.ljust(pad)}{extra}")
+    banner = trainlib.tooling_banner(st, stale=stale, pulled=pulled,
+                                     pull_attempted=failed_pull)
+    if banner:
+        print()
+        print("\n".join(banner))
+        print()
+
+
+def cmd_check_updates(args) -> None:
+    """Is the release-note tooling in this checkout behind origin, and does that need a restart?
+
+    Distinct from check-setup, which is once per machine. This is once per pass: as soon as more
+    than one person is editing the skill, the copy driving a pass can be days behind the one its
+    author is describing, and nothing in the run or its transcript would say so.
+
+    `--pull` fast-forwards the checkout, under the conditions in trainlib.pull_blocker. Bringing
+    the tooling up to date is the point of noticing it is behind, and leaving it as an instruction
+    for a human is how it gets skipped on the pass that needed it.
+
+    Exit 1 means one thing: the skills are stale and this session must `/clear` (matching
+    doc-flag-audit.py's "non-zero means act"). That holds whether or not the pull succeeded, since
+    a pull leaves the new text on disk but not in this conversation.
+
+    A pull that does *not* land is loud but not fatal, so it does not change the exit code: the
+    older scripts still work, and the pass is better off continuing on them than refusing to start
+    because a laptop was off VPN. What it must not do is read as success, which is why the summary
+    says the pull did not happen rather than suggesting it again.
+    """
+    st = trainlib.tooling_status(fetch=not args.no_fetch)
+    # The revision this session started on, kept whole. A successful pull rebinds `st` to the new
+    # one, and every question below -- did the skills change, which docs moved, was any of it even
+    # classifiable -- is about the transition rather than the state left behind it. Held as one
+    # object rather than a field at a time: that list grew by one on each of the last two passes
+    # over this function, which is the shape being wrong rather than a field being forgotten.
+    before = st
+    stale = list(before.get("needs_clear") or [])
+    pulled = attempted = False
+    if args.pull and st.get("behind"):
+        attempted = True
+        result = trainlib.pull_tooling(st)
+        pulled = result["pulled"]
+        print(result["message"])
+        if pulled:
+            # Re-read rather than patch: HEAD moved, so every count in the old status is stale.
+            st = trainlib.tooling_status(fetch=False)
+            if not before.get("changed_known", True):
+                # The pull went through but its contents were never classifiable, so the new status
+                # reads "current" and cannot say whether a skill moved. Not a stop -- the same
+                # loud-but-open call as a failed pull -- but it must not pass in silence.
+                print("...though the file list could not be read beforehand, so whether the skills "
+                      "were among the changes is unknown. Carry on; /clear if this pass reads oddly")
+            docs = before.get("changed_docs") or []
+            if docs:
+                # Re-reading is enough here -- no /clear -- but it has to actually happen. Anything
+                # already read into this conversation is now the old text.
+                print("re-read before relying on them, a copy already in this conversation is now "
+                      "stale: " + ", ".join(docs))
+    # --quiet exists for a check that runs at the top of every pass: say nothing when there is
+    # nothing to act on. Anything unresolved -- no checkout, no upstream ref, a failed fetch --
+    # still speaks, because a check that could not run must not look like one that came back clean.
+    if (args.quiet and not stale and st.get("available") and st.get("upstream_known")
+            and st.get("fetched") is not False
+            and not st.get("behind") and not st.get("dirty")):
+        return
+    print_tooling(st, pad=9, stale=stale, pulled=pulled, pull_attempted=attempted)
+    if stale:
+        sys.exit(1)
 
 
 def cmd_check_setup(args) -> None:
@@ -706,7 +794,22 @@ def main() -> None:
 
     rs = add_parser("resume", help="briefing for a fresh or post-compaction session")
     rs.add_argument("--repo", default=None)
+    rs.add_argument("--no-fetch", action="store_true",
+                    help="skip the origin fetch behind the TOOLING line (offline runs)")
     rs.set_defaults(func=cmd_resume)
+
+    cu = add_parser("check-updates",
+                    help="is this checkout's release-note tooling behind origin? exits 1 if the "
+                         "skills changed and the session needs /clear")
+    cu.add_argument("--pull", action="store_true",
+                    help="fast-forward to origin/main when behind; refuses unless the checkout is "
+                         "on main, clean, and can fast-forward")
+    cu.add_argument("--no-fetch", action="store_true",
+                    help="compare against the mirror as-is, without fetching first")
+    cu.add_argument("--quiet", action="store_true",
+                    help="print nothing when the tooling is current and clean, for a check that "
+                         "only speaks up when there is something to do")
+    cu.set_defaults(func=cmd_check_updates)
 
     cs = add_parser("check-setup",
                         help="locate/save the Gecko checkout and report missing permissions")
