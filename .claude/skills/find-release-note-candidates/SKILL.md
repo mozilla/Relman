@@ -114,6 +114,7 @@ Use one of these instead:
 | Daily pass, resuming where you left off | `--since-last` (stored watermark) |
 | Exactly one nightly build | `--build <id>` |
 | From a chosen build up to now | `--from-build <id>` |
+| Up to a chosen build, for reproducing a past window | `--to-build <id>` |
 | A whole cumulative cycle | `--cycle N` |
 
 ### The daily pass — show state, then ask
@@ -389,8 +390,13 @@ the report called it unresolved, when the developer had approved the wording tha
 
 ```
 watchlist.py summary                     # per-release counts and days reviewed
+watchlist.py list --status asked         # or declined, gated, noted -- implies --all
 watchlist.py add <bug> --status asked --note "<what and when>"
+watchlist.py add <bug> --status watching --due 2026-09-01   # sets the "follow up after" date that
+                                                            # resume and followup both display
 watchlist.py decline <bug> --note "<why>"   # short forms take --note; use it, the reason is the point
+watchlist.py noted <bug> --note "<where it shipped>"   # the note is live in Nucleus
+watchlist.py log "<pass summary>"        # release-level context; resume replays these
 watchlist.py days 20260801               # record the day as reviewed
 ```
 
@@ -490,6 +496,13 @@ number.** Both come from the same scan, so they always agree — if you have see
 the header announces, you are holding a truncated list and the audit has not happened yet. "No false
 drops" is a claim about every entry; it cannot be made about the ones that scrolled off.
 
+**At cycle scale, audit by group.** The file opens with a `SHAPE` table — every distinct drop reason
+with its count, summing to the total — and then lists the entries grouped under each reason. A cycle
+pass drops over a thousand, and reading that as a flat list is how one pass logged "1145 mechanical
+drops, all audited" having never displayed the first 399 of them. Work down the groups, and say which
+reasons you reviewed and how: "wpt-sync (620) sampled, the four behaviour-shaped groups read in full"
+is an auditable claim, where "all audited" is not.
+
 Judge the `landed:` lines, not the bug summary — a bug titled like test work often lands real
 changes and vice versa. Use `--show-dropped` when the user wants to rescue something; the drop list
 is auditable by design.
@@ -499,7 +512,12 @@ is auditable by design.
 ```
 python3 scripts/relnotes/pref-delta.py --range <start>..<end>
 python3 scripts/relnotes/pref-delta.py --lookup browser.nova.enabled,layout.css.attr.enabled
+python3 scripts/relnotes/pref-delta.py --lookup <pref> --rev FIREFOX_153_0_RELEASE
 ```
+
+`--rev` resolves defaults at any revision instead of `origin/main`, which is how you answer "was this
+gate on when 153 shipped" rather than "is it on now" — the question a dot-release or carry-forward
+note actually turns on.
 
 **A flip is only as meaningful as the feature it configures.** Check the *feature's* gate, not just
 the flipped preference's own default. `browser.smartwindow.mistralRelease` flipped to `true` on every
@@ -712,10 +730,12 @@ Every item below is a case where the skill was wrong, so they carry more weight 
   which describes the Gecko tree, not when users get the fix. Treat `Firefox :: New Tab Page` — and
   any other component you know ships as a train-hop add-on — as delivered out-of-band, and check the
   bug for uplift comments mentioning trainhop before proposing anything.
-- **Weigh the API's own reach, not just the change.** A correct improvement to a **niche, recently
-  shipped** web API is not a note on its own merits — bug 2040379 (Web Serial parity-error
+- **Weigh the surface's own reach, not just the change.** A correct improvement to a **niche, recently
+  shipped** surface is not a note on its own merits — bug 2040379 (Web Serial parity-error
   detection) was rejected because Web Serial itself only recently reached stable and has a small
-  audience. Ask how many people use the surface before asking how good the change is.
+  audience. Ask how many people use the surface before asking how good the change is. **This applies
+  to UI surfaces as much as to web APIs**: scoped to APIs, the rule reads past a candidate like bug
+  2051292 (long-press an Android toolbar shortcut to edit it), which went out with reservations.
 - **"Now configurable via a preference" is not a note.** Notes describe default behaviour; anything
   requiring a manual `about:config` change is out of scope (bug 1418178, Ctrl-Tab preview count).
   Check whether the *default* actually changed before treating a new preference as a candidate — in
@@ -786,7 +806,8 @@ doesn't need another ask. `daily-pass.py` reads the flag for every survivor, so 
 tells you. To go the other way and ask *which bugs carry a given value*, use
 `relnote-flag.py` — `--nominated` for the `?` queue (see above), `--approved N` and `--nightly` for
 what is already decided, `--declined` for the 234 bugs Release Management has said no to, which is
-the only negative calibration corpus available.
+the only negative calibration corpus available. Those four are shorthands; `--value <v>` queries any
+flag value directly, including ones no shorthand covers.
 
 **`nightly+` is a real, used value** for changes enabled on **Nightly only** that are still worth
 calling out, typically to invite testing and feedback. Verified examples: `Enable QUIC version

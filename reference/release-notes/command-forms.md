@@ -49,6 +49,14 @@ by matching recorded commands against the allowlist, not counts of prompts anyon
   curl -s -o /dev/null -w "%{http_code}\n" "<url>"                               # PROMPTS
   ```
 
+- **Always double-quote a URL, on every command, not just `curl`.** Two independent reasons. On zsh --
+  the macOS default -- an unquoted `?` is a glob, and zsh *errors* on no match instead of passing the
+  word through as bash does, so the command dies before it starts:
+  `(eval):1: no matches found: https://bugzilla.mozilla.org/show_bug.cgi?id=2059647`, observed on a
+  colleague's machine. And the allowlist carries double-quoted entries, which single quotes miss.
+  Everything else measured in this file was measured on bash/Linux; treat platform-specific claims
+  here as unverified on macOS until someone runs them there.
+
   Single quotes miss the double-quoted entries. Allowlisted hosts: `bugzilla.mozilla.org/rest`, `product-details`,
   `hg-edge`, `nucleus`, `whattrainisitnow`, `wiki.mozilla.org`, `www.firefox.com`, `www.mozilla.org`,
   `www-dev.springfield.moz.works`.

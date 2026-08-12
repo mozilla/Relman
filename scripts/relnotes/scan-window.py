@@ -49,6 +49,21 @@ REVERT_RE = re.compile(r"^\s*(Revert\b|Backed out\b|backout\b)", re.IGNORECASE)
 
 # Products/components that reliably produce nothing. Grounded in the survey's
 # zero-yield analysis rather than intuition.
+#
+# "Reliably" is not "never", and this was measured rather than assumed: checking all 3,306 noted bugs
+# in the Nucleus corpus against these predicates finds 69 published notes that this list would drop,
+# 10 of them in Firefox 140 or newer. They cluster in `Firefox Build System :: General`,
+# `Release Engineering :: General` and `:: Release Automation`, and they are packaging, installer,
+# update-staging and platform-support changes -- bug 2058594 (partial-update crash, 153.0.3),
+# bug 1987132 (32-bit Linux support dropped, 145) and bug 213920 (.rpm packages, 149-151).
+#
+# **Deliberately left as-is, by Release Management, 2026-08-11.** A release-note-worthy change from
+# these products is rare enough that the developer nominates the bug themselves without prompting, so
+# the flag queue catches it: relnote-flag.py applies none of these filters, which makes `--nominated`
+# and `--coverage` a complete path for exactly this case. Widening the funnel instead would admit ~98
+# bugs per cycle, mostly from components that have never produced a note (Task Configuration,
+# Toolchains, Bootstrap Configuration, Mach Core). Do not re-propose narrowing this to the component
+# level without new evidence -- the measurement above is the answer, not an oversight.
 DROP_PRODUCTS = {
     "Testing",
     "Firefox Build System",
@@ -314,6 +329,55 @@ def strip_reviewers(subject: str) -> str:
     return REVIEWER_SUFFIX_RE.sub("", subject).strip()
 
 
+def tidy_subject(subject: str) -> str:
+    """A landing subject without the redundant `Bug NNNN - ` prefix or the reviewer suffix.
+
+    Handles `Bug N - `, `Bug N: ` and the `Bug N p2 - ` part convention.
+    """
+    subject = re.sub(r"^\s*[Bb]ug\s+\d+\s*(?:[pP](?:art)?\s*\d+)?\s*[-:.]\s*", "", subject)
+    return strip_reviewers(subject)
+
+
+def render_dropped(dropped: list[dict]) -> list[str]:
+    """The mechanical drop list, grouped by reason, as lines.
+
+    Grouped rather than flat because a cycle pass drops over a thousand: a flat list of those is
+    what "audited all 1145" was claimed against when a third had never been displayed. Grouping
+    gives a summary that fits on a screen, lets the audit run per category, and stops every entry
+    repeating a reason string that runs past 200 characters because it embeds the regex.
+
+    Each entry shows its landings, not only its summary. The drop was decided on the landings and
+    deliberately not on the summary, so showing the summary alone hands the auditor the field the
+    decision ignored: `Group all media simulation UI` reads user-facing until you see that its one
+    landing is `Renamed "simulation" to "emulation" for media emulations`.
+    """
+    by_reason: dict[str, list] = {}
+    for d in dropped:
+        by_reason.setdefault(d["drop_reason"], []).append(d)
+    order = sorted(by_reason.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+
+    lines = [f"Dropped as mechanical ({len(dropped)}):", "",
+             f"SHAPE -- {len(order)} distinct reason(s). These counts sum to the total above; "
+             "reconcile that against the funnel before calling the audit done."]
+    for reason, items in order:
+        # Truncated here only: a subject reason embeds its regex and runs past 200 characters,
+        # which makes the shape table unreadable. Each group below repeats the reason in full.
+        short = reason if len(reason) <= 104 else reason[:104] + "..."
+        lines.append(f"  {len(items):>5}  {short}")
+    lines.append("")
+    for reason, items in order:
+        lines.append(f"== {len(items)} dropped: {reason}")
+        for d in items:
+            lines.append(f"     {d['bug']}  {d['summary'][:90]}")
+            landings = [c for c in d.get("landings", []) if not REVERT_RE.match(c["subject"])]
+            for c in landings[:2]:
+                lines.append(f"              landed: {tidy_subject(c['subject'])[:88]}")
+            if len(landings) > 2:
+                lines.append(f"              ... and {len(landings) - 2} more landings")
+        lines.append("")
+    return lines
+
+
 def drop_reason(bug: dict, subjects: list[str]) -> str | None:
     product = bug.get("product", "")
     component = bug.get("component", "")
@@ -510,6 +574,9 @@ def main() -> None:
                         "plain two-dot range pulls in every merged main ancestor (71,678 commits "
                         "for 153 instead of 682)")
     p.add_argument("--show-dropped", action="store_true")
+    p.add_argument("--dropped-out", metavar="PATH", default=None,
+                   help="also write the grouped drop list to PATH. One renderer serves this and "
+                        "--show-dropped, so the audit file and the inline listing cannot drift.")
     p.add_argument("--format", choices=["text", "json"], default="text")
     p.add_argument("-o", "--output", default=None)
     args = p.parse_args()
@@ -561,13 +628,20 @@ def main() -> None:
     bugs, missing = fetch_bugs(sorted(by_bug), nightly, esrs)
 
     survivors, dropped = [], []
-    not_fixed = 0
+    # Ids, not just counts. These two buckets used to be numbers with nothing to look at, so a pass
+    # auditing coverage had to re-derive them by listing the window's bugs from git and subtracting
+    # survivors and dropped -- which is also easy to get wrong, since survivor records key on `bug`
+    # rather than `id`. Security-restricted bugs in particular are the window's largest blind spot,
+    # and the skill asks for them to be reported, so they have to be nameable.
+    not_fixed_ids = []
     for bug_id, landings in sorted(by_bug.items(), key=lambda x: -len(x[1])):
         bug = bugs.get(bug_id)
         if bug is None:
-            continue  # security-restricted; counted separately
+            continue  # security-restricted; listed via `missing`
         if not is_fixed(bug, nightly):
-            not_fixed += 1
+            not_fixed_ids.append({"bug": bug_id, "status": bug.get("status"),
+                                  "resolution": bug.get("resolution") or "",
+                                  "summary": bug.get("summary", "")})
             continue
         # Judge the bug on its non-revert landings.
         subjects = [c["subject"] for c in landings if not c["is_revert"]]
@@ -605,13 +679,17 @@ def main() -> None:
             "commits": len(commits),
             "distinct_bugs": len(by_bug),
             "security_restricted": len(missing),
-            "not_currently_fixed": not_fixed,
+            "not_currently_fixed": len(not_fixed_ids),
             "dropped_mechanical": len(dropped),
             "survivors": len(survivors),
             "uplifted": sum(1 for s in survivors if s["uplifted"]),
         },
         "survivors": survivors,
         "dropped": dropped,
+        # Named apart from the funnel's counts of the same buckets: `funnel.not_currently_fixed` is
+        # an int and this is a list, and one name for both invites len() on the number.
+        "not_fixed_bugs": not_fixed_ids,
+        "security_restricted_bugs": sorted(missing),
     }
 
     if args.format == "json":
@@ -628,6 +706,22 @@ def main() -> None:
             f"{f['not_currently_fixed']} not currently FIXED, "
             f"{f['security_restricted']} security-restricted)"
         )
+        # Name both, because a count cannot be audited. Security-restricted bugs are the window's
+        # largest blind spot and the skill asks for them in the report; a not-currently-FIXED bug is
+        # a candidate that may simply land its resolution later.
+        # Capped, because a cycle pass reaches ~330 not-FIXED bugs and an uncapped line is a wall
+        # nobody reads. The count comes first and the remainder is named, which is how every other
+        # capped listing here behaves.
+        def capped(items: list[str], limit: int = 40) -> str:
+            shown = ", ".join(items[:limit])
+            return shown + (f", ... and {len(items) - limit} more (see scan.json)"
+                            if len(items) > limit else "")
+        if missing:
+            lines.append(f"Security-restricted, not fetchable ({len(missing)}): "
+                         + capped(sorted(missing)))
+        if not_fixed_ids:
+            lines.append(f"Not currently FIXED ({len(not_fixed_ids)}): "
+                         + capped([f"{r['bug']} [{r['status']}]" for r in not_fixed_ids]))
         lines.append("")
         areas = collections.Counter(f"{s['product']} :: {s['component']}" for s in survivors)
         lines.append(f"Survivors by area ({len(areas)} areas):")
@@ -657,23 +751,19 @@ def main() -> None:
             lines.append(f"        bug: {s['summary'][:140]}")
             shown = [c for c in s["landings"] if not REVERT_RE.match(c["subject"])][:3]
             for c in shown:
-                # Strip the redundant "Bug NNNN - " prefix and the reviewer suffix.
-                # Handles "Bug N - ", "Bug N: ", and the "Bug N p2 - " part convention.
-                subj = re.sub(
-                    r"^\s*[Bb]ug\s+\d+\s*(?:[pP](?:art)?\s*\d+)?\s*[-:.]\s*", "", c["subject"]
-                )
-                subj = re.sub(r"\s+r[=?][\w#,.\- ]+$", "", subj)
-                lines.append(f"        landed: {subj[:140]}")
+                lines.append(f"        landed: {tidy_subject(c['subject'])[:140]}")
             if s["commit_count"] > len(shown):
                 lines.append(f"        ... and {s['commit_count'] - len(shown)} more landings")
         if args.show_dropped:
             lines.append("")
-            # The count is in the header so a truncated read of this list is self-evident.
-            lines.append(f"Dropped as mechanical ({len(dropped)}):")
-            for d in dropped:
-                lines.append(f"  {d['bug']}  {d['summary'][:90]}")
-                lines.append(f"        -> {d['drop_reason']}")
+            lines += render_dropped(dropped)
         out = "\n".join(lines) + "\n"
+
+    # Independent of --format: the drop list is the audit artifact, and a JSON run still needs it.
+    if args.dropped_out:
+        Path(args.dropped_out).write_text("\n".join(render_dropped(dropped)) + "\n")
+        print(f"# wrote {args.dropped_out} ({len(dropped)} mechanical drops to audit)",
+              file=sys.stderr)
 
     if args.output:
         Path(args.output).write_text(out)

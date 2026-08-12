@@ -246,20 +246,31 @@ def main() -> None:
     window = scan["window"]
     rng = f"{window['start']}..{window['end']}"
 
-    # Human-readable survivor list, same window.
+    # Human-readable survivor list, same window. The drop list comes out of the same run via
+    # --dropped-out: the audit needs it every pass, and asking the owner of the data to render it
+    # keeps one shape rather than a second copy of the formatting here.
     r2 = run([sys.executable, str(HERE / "scan-window.py"), *wargs,
+              "--dropped-out", str(outdir / "dropped.txt"),
               *(["--show-dropped"] if args.show_dropped else [])])
     (outdir / "scan.txt").write_text(r2.stdout)
 
     # The drop list as its own complete file, unconditionally: the audit is a required step every
     # pass, and giving it a file removes the reason to rebuild the list through a pipe that can
     # truncate it. Built from the scan JSON already in hand, so it costs nothing.
+    # scan-window renders and writes it, via --dropped-out on the run above: one renderer, so the
+    # audit file and `--show-dropped` cannot drift into two shapes for the same data. The count is
+    # still read from the scan JSON here, for the footer and the reconciliation warning below.
     dropped = scan.get("dropped", [])
-    drop_lines = [f"Dropped as mechanical ({len(dropped)}):"]
-    for d in dropped:
-        drop_lines.append(f"  {d['bug']}  {d['summary'][:90]}")
-        drop_lines.append(f"        -> {d['drop_reason']}")
-    (outdir / "dropped.txt").write_text("\n".join(drop_lines) + "\n")
+    # Check the count in the file, not just that a file is there. scan-window writes it only on a
+    # successful run, and the survivor pass does its own Bugzilla fetch, so it can fail while the
+    # JSON pass succeeded -- leaving a previous run's dropped.txt in a reused outdir to satisfy an
+    # existence test. The header carries the count, so one comparison catches both cases.
+    drop_file = outdir / "dropped.txt"
+    header = drop_file.read_text().splitlines()[0] if drop_file.exists() else ""
+    if f"({len(dropped)})" not in header:
+        print(f"# WARNING: {drop_file} is missing or stale -- its header reads {header!r} while this "
+              f"window has {len(dropped)} mechanical drops. The drop-list audit has no valid input.",
+              file=sys.stderr)
     # The header count and the funnel come from different keys of the same scan, so they agree
     # unless scan-window's JSON shape changes. Say so rather than leaving the reader to notice:
     # a silent disagreement here reads as "nothing left to audit", which is the one conclusion

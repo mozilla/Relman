@@ -265,10 +265,15 @@ def main() -> None:
         oversized = sorted(
             ((st, len(m)) for st, m in path_members.items() if len(m) > args.max_path_cluster),
             key=lambda x: -x[1],
-        )[:8]
+        )
         if oversized:
-            print("# directory-level (too broad to be one feature, not clustered): "
-                  + ", ".join(f"{st} ({n})" for st, n in oversized), file=sys.stderr)
+            # Name the biggest few, but give the total: this line is the only record of what was
+            # excluded from clustering, and without a denominator it reads as the whole list.
+            shown = oversized[:8]
+            more = f", and {len(oversized) - len(shown)} more" if len(oversized) > len(shown) else ""
+            print(f"# directory-level, too broad to be one feature, not clustered "
+                  f"({len(oversized)} director{'y' if len(oversized) == 1 else 'ies'}): "
+                  + ", ".join(f"{st} ({n})" for st, n in shown) + more, file=sys.stderr)
     else:
         print(f"# note: {repo} not a checkout; skipping path clustering", file=sys.stderr)
 

@@ -38,14 +38,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import trainlib  # noqa: E402
 
 STATIC_PREF_LIST = "modules/libpref/init/StaticPrefList.yaml"
+# The other half of the shared base. StaticPrefList holds prefs with C++ mirrors; everything else
+# with a default lives here -- 1,968 `pref()` declarations, including whole families like
+# `captivedetect.*`. Omitting it made `--lookup captivedetect.canonicalURL` answer
+# "NOT FOUND at origin/main" for a preference three lines long in the tree, and made every flip in
+# this file invisible to a scan that calls FLIPPED ON the strongest signal there is. It is not rare
+# churn either: 7, 17, 5 and 31 commits touched it in the 151-154 cycles.
+ALL_JS = "modules/libpref/init/all.js"
 FIREFOX_JS = "browser/app/profile/firefox.js"
 # Android's counterpart to firefox.js. Ships with GeckoView/Fenix, so it is where a preference is
 # turned on for Android alone, with nothing changing in any file a desktop-only scan reads.
 GECKOVIEW_JS = "mobile/android/app/geckoview-prefs.js"
-PREF_FILES = [STATIC_PREF_LIST, FIREFOX_JS, GECKOVIEW_JS]
+PREF_FILES = [STATIC_PREF_LIST, ALL_JS, FIREFOX_JS, GECKOVIEW_JS]
 
-# firefox.js: pref("name", value);  (also user_pref/sticky_pref variants)
-JS_PREF_RE = re.compile(r"""^\s*(?:sticky_)?pref\(\s*["']([^"']+)["']\s*,\s*(.+?)\s*\)\s*;""")
+# firefox.js: pref("name", value);  (also user_pref/sticky_pref variants, and a third argument
+# `sticky` or `locked`). The modifier must be captured separately or it lands in the value: without
+# the optional group, `pref("general.smoothScroll", true, sticky);` parsed as the value
+# `'true, sticky'`, which overrode StaticPrefList's correct `true` and would read as a value change
+# the moment a commit added or removed the modifier. It is worth keeping rather than discarding --
+# a `locked` pref cannot be changed by a user, which bears on whether a flip reaches anyone.
+JS_PREF_RE = re.compile(
+    r"""^\s*(?:sticky_)?pref\(\s*["']([^"']+)["']\s*,\s*(.+?)\s*"""
+    r"""(?:,\s*(sticky|locked)\s*)?\)\s*;""")
 # StaticPrefList.yaml entry fields
 YAML_NAME_RE = re.compile(r"^\s*-\s+name:\s*(\S+)")
 YAML_VALUE_RE = re.compile(r"^\s*value:\s*(.+?)\s*$")
@@ -88,6 +102,23 @@ AT_DEFINE_RE = re.compile(r"^@(\w+)@$")
 # Preprocessors created during a run, so unparseable guards can be reported once at
 # the end rather than swallowed per-expression.
 _EVAL_FAILURES: list = []
+
+# StaticPrefList entries seen versus kept, per parse, collected the same way. A guard count is not a
+# consequence: two unevaluable guards at FIREFOX_110 hid 1,018 of 2,098 preferences, and "2 guards"
+# is not something a reader turns into "half the file".
+_SPL_ENTRY_STATS: list = []
+
+
+class CannotEvaluate(Exception):
+    """A `#if` expression that does not evaluate -- which means it is probably not a `#if`.
+
+    `is_directive` decides whether a `#`-line is a real directive from its shape alone, and shape
+    cannot separate a guard from prose that happens to read like one: `# if and only if ATOK is
+    active TIP.` passes, because ATOK satisfies the "references a symbol" test. Treated as a false
+    guard it opens a block with no `#endif`, and everything after it in the file goes inactive --
+    measured at 1,018 of 2,098 preferences lost. Treated as prose it costs nothing, because a real
+    guard that does not evaluate would be a Gecko build failure.
+    """
 
 # Channel guard truth tables. EARLY_BETA_OR_EARLIER is true on nightly and the
 # first half of a beta cycle; RELEASE_OR_BETA is the complement of nightly.
@@ -218,7 +249,7 @@ class Preprocessor:
             return bool(eval(e, {"__builtins__": {}}, {}))  # noqa: S307 - fixed vocabulary
         except Exception:
             self.eval_failures.append(expr.strip()[:100])
-            return False
+            raise CannotEvaluate(expr.strip()[:100])
 
     def run(self, text: str):
         """Yield (line, active) for every line, honouring #if/#else/#endif nesting."""
@@ -234,12 +265,20 @@ class Preprocessor:
                     elif kind == "ifndef":
                         val = not (self._defined(rest.strip().split()[0]) if rest.strip() else True)
                     else:
-                        val = self._eval(rest)
+                        try:
+                            val = self._eval(rest)
+                        except CannotEvaluate:
+                            # Prose, not a guard -- see CannotEvaluate. Fall through and treat the
+                            # line as ordinary text, opening no block.
+                            continue
                     stack.append({"active": parent and val, "taken": val, "parent": parent})
                 elif kind == "elif":
                     if stack:
                         f = stack[-1]
-                        val = self._eval(rest)
+                        try:
+                            val = self._eval(rest)
+                        except CannotEvaluate:
+                            continue
                         f["active"] = f["parent"] and (not f["taken"]) and val
                         f["taken"] = f["taken"] or val
                 elif kind == "else":
@@ -271,7 +310,10 @@ def parse_static_pref_list(text: str, symbols: dict[str, bool]) -> dict[str, dic
     _EVAL_FAILURES.append(pp)
     prefs: dict[str, dict] = {}
     cur: dict | None = None
+    seen = 0
     for line, active in pp.run(text):
+        if YAML_NAME_RE.match(line):
+            seen += 1
         if not active:
             # An inactive entry means the pref does not exist for this build at all.
             if YAML_NAME_RE.match(line):
@@ -303,18 +345,20 @@ def parse_static_pref_list(text: str, symbols: dict[str, bool]) -> dict[str, dic
         mm = YAML_MIRROR_RE.match(line)
         if mm:
             cur["mirror"] = mm.group(1)
+    _SPL_ENTRY_STATS.append((seen, len(prefs)))
     return prefs
 
 
-def parse_firefox_js(text: str, symbols: dict[str, bool]) -> dict[str, str]:
+def parse_firefox_js(text: str, symbols: dict[str, bool]) -> dict[str, dict]:
+    """{pref: {value, modifier}} -- shaped like parse_static_pref_list, so callers merge alike."""
     pp = Preprocessor(symbols)
-    prefs: dict[str, str] = {}
+    prefs: dict[str, dict] = {}
     for line, active in pp.run(text):
         if not active:
             continue
         m = JS_PREF_RE.match(line)
         if m:
-            prefs[m.group(1)] = m.group(2).strip()
+            prefs[m.group(1)] = {"value": m.group(2).strip(), "modifier": m.group(3)}
     return prefs
 
 
@@ -332,6 +376,7 @@ def effective_defaults(repo: Path, rev: str, channels: list[str], platforms: lis
     a shared default -- see `reference/release-notes/gating.md`.
     """
     spl_text = show(repo, rev, STATIC_PREF_LIST)
+    all_text = show(repo, rev, ALL_JS)
     app_text = {
         "desktop": show(repo, rev, FIREFOX_JS),
         "android": show_optional(repo, rev, GECKOVIEW_JS) or "",
@@ -339,30 +384,38 @@ def effective_defaults(repo: Path, rev: str, channels: list[str], platforms: lis
     app_file = {"desktop": FIREFOX_JS, "android": GECKOVIEW_JS}
     table: dict[str, dict[tuple[str, str], str]] = collections.defaultdict(dict)
     meta: dict[str, dict] = {}
+
+    def apply(parsed: dict, label: str, ch: str, plat: str) -> None:
+        """Later files win, and every file a preference appears in is named in its source.
+
+        Compare the same string that gets appended: testing a full path while appending the
+        basename meant the guard never matched, so the label grew one copy per configuration.
+        """
+        for name, info in parsed.items():
+            table[name][(ch, plat)] = info["value"]
+            if name in meta:
+                if label not in meta[name]["source"]:
+                    meta[name]["source"] = f"{meta[name]['source']} + {label}"
+            else:
+                meta[name] = {"source": label, "type": None,
+                              "mirror": None, "via_define": None}
+            if info.get("modifier"):
+                meta[name]["modifier"] = info["modifier"]
+
     for ch in channels:
         for plat in platforms:
             symbols = {**CHANNELS[ch], **PLATFORMS[plat]}
             kind = "desktop" if plat in DESKTOP else "android"
-            spl = parse_static_pref_list(spl_text, symbols)
-            app = parse_firefox_js(app_text[kind], symbols)
-            for name, info in spl.items():
+            for name, info in parse_static_pref_list(spl_text, symbols).items():
                 table[name][(ch, plat)] = info["value"]
                 meta.setdefault(name, {"source": "StaticPrefList", "type": info.get("type"),
                                        "mirror": info.get("mirror"),
                                        "via_define": info.get("via_define")})
-            # The app-level file overrides StaticPrefList for the product that ships it.
-            # Compare the same string that gets appended: testing the full path while appending the
-            # basename meant the guard never matched, so the label grew one copy per config.
-            app_name = app_file[kind].rsplit("/", 1)[-1]
-            for name, value in app.items():
-                table[name][(ch, plat)] = value
-                if name in meta:
-                    src = meta[name]["source"]
-                    if app_name not in src:
-                        meta[name]["source"] = f"{src} + {app_name}"
-                else:
-                    meta[name] = {"source": app_name, "type": None,
-                                  "mirror": None, "via_define": None}
+            # all.js is the shared base and applies to every product; the app-level file then
+            # overrides both for the product that ships it.
+            apply(parse_firefox_js(all_text, symbols), "all.js", ch, plat)
+            apply(parse_firefox_js(app_text[kind], symbols),
+                  app_file[kind].rsplit("/", 1)[-1], ch, plat)
     return {"table": table, "meta": meta}
 
 
@@ -658,9 +711,22 @@ def main() -> None:
           f"{len(channels)}x{len(platforms)} build configurations", file=sys.stderr)
     bad = sorted({e for pp in _EVAL_FAILURES for e in pp.eval_failures})
     if bad:
+        # Quantified, because a guard count is not a consequence: two of these once hid 1,018 of
+        # 2,098 preferences, and the worst case is the whole rest of the file.
+        # The ratio of the maxima is not the maximum ratio: a window comparison resolves both
+        # endpoints, so `max(seen)` and `max(seen - kept)` can come from different revisions and
+        # understate the one that is actually truncated. Pick the worst single configuration.
+        seen_at_worst, kept_at_worst = max(_SPL_ENTRY_STATS, key=lambda sk: (sk[0] - sk[1]) / (sk[0] or 1),
+                                      default=(0, 0))
+        worst = seen_at_worst - kept_at_worst
+        pct = (100 * worst / seen_at_worst) if seen_at_worst else 0
         print(f"# *** WARNING: {len(bad)} preprocessor guard(s) could not be evaluated and were "
-              "treated as false. Preferences inside them are MISSING from this run:",
-              file=sys.stderr)
+              f"treated as prose rather than as a condition.\n"
+              f"#     Sanity check: {worst} of {seen_at_worst} StaticPrefList entries ({pct:.0f}%) are "
+              f"inactive in the worst configuration. Most of that is normal -- measured across the "
+              f"110-155 revisions, platform and channel guards leave 8-10% inactive -- so a much "
+              f"larger share means the file was truncated and this run should not be trusted. "
+              f"The unevaluable expressions were:", file=sys.stderr)
         for e in bad[:10]:
             print(f"#     {e}", file=sys.stderr)
 
@@ -690,7 +756,10 @@ def main() -> None:
                 print(f"{r['pref']}")
                 print(f"  {r['summary']}")
                 print(f"  source: {m.get('source')}{via}"
-                      + (f", mirror: {m['mirror']}" if m.get("mirror") else ""))
+                      + (f", mirror: {m['mirror']}" if m.get("mirror") else "")
+                      # `locked` means a user cannot change it, which decides whether a flip is
+                      # something they can opt out of.
+                      + (f", {m['modifier']}" if m.get("modifier") else ""))
                 for k, v in r["values"].items():
                     print(f"    {k:<20} {v}")
         return

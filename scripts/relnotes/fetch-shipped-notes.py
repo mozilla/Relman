@@ -55,6 +55,10 @@ BUGZILLA_REST = "https://bugzilla.mozilla.org/rest/bug"
 
 USER_AGENT = "Relman-relnotes-survey/1.0 (+release-note skill calibration)"
 
+# How many matches `--search` lists. A broad term matches hundreds ('performance' matches 242), and
+# the point of the search is precedent calibration, which a wall of output does not help.
+SEARCH_LIST_LIMIT = 40
+
 # Nucleus release URLs look like .../rna/releases/1550/?format=json
 RELEASE_ID_RE = re.compile(r"/releases/(\d+)/")
 # A major release is X.0 exactly; X.0.Y is a dot release.
@@ -84,8 +88,10 @@ def fetch_json(url: str, cache: Path | None, label: str) -> Any:
         if blob.exists():
             try:
                 return json.loads(blob.read_text())
-            except ValueError:
-                pass  # a half-written cache is recoverable: refetch rather than crash
+            except ValueError as e:
+                # Refetching repairs a half-written cache, so this is not fatal -- but say so, or a
+                # write that keeps failing refetches megabytes on every run in silence.
+                print(f"# warning: rewriting unreadable cache {blob} ({e})", file=sys.stderr)
     # Nucleus 502s and times out often enough that a single attempt is not evidence it is down;
     # trainlib.fetch_json retries 5xx/429/timeouts, which is why this does not open its own request.
     try:
@@ -100,6 +106,28 @@ def fetch_json(url: str, cache: Path | None, label: str) -> Any:
 def release_id(url: str) -> str | None:
     m = RELEASE_ID_RE.search(url)
     return m.group(1) if m else None
+
+
+def print_notes_for(rel: dict, targets: set, notes: list) -> None:
+    """Every public note attached to one release, in Nucleus order."""
+    sel = [n for n in notes if n.get("is_public")
+           and any(release_id(u) in targets for u in n.get("releases", []))]
+    sel.sort(key=lambda n: (n.get("sort_num", 0), n.get("tag") or "", n["id"]))
+    print(f"{rel['product']} {rel['version']} ({rel['channel']})  "
+          f"released {(rel.get('release_date') or '')[:10]}  "
+          f"public={rel.get('is_public')}")
+    print(f"{len(sel)} note(s) attached\n")
+    for i, n in enumerate(sel, 1):
+        bug = f"  bug {n['bug']}" if n.get("bug") else "  (no bug)"
+        extra = []
+        if n.get("is_known_issue"):
+            extra.append("KNOWN ISSUE")
+        if n.get("progressive_rollout"):
+            extra.append("progressive rollout")
+        flags = ("  [" + ", ".join(extra) + "]") if extra else ""
+        print(f"{i:>2}. [{n.get('tag') or '(untagged)'}]{bug}{flags}")
+        print(f"    {' '.join((n.get('note') or '').split())}")
+        print()
 
 
 def is_major(version: str) -> bool:
@@ -808,8 +836,10 @@ def main() -> None:
     )
     p.add_argument("--notes-for", default=None,
                    help="print every note attached to this version (e.g. 155.0a1) for the given "
-                        "--product/--channel, in Nucleus order. This is the input to a review "
-                        "pass; use it instead of fetching and filtering Nucleus by hand.")
+                        "--product/--channel, in Nucleus order. Accepts a comma list "
+                        "(153.0.1,153.0.2,153.0.3) so a dot-release series needs one call, not a "
+                        "shell loop. This is the input to a review pass; use it instead of fetching "
+                        "and filtering Nucleus by hand.")
     p.add_argument("--search", default=None,
                    help="case-insensitive regex: show every shipped note matching it, across ALL "
                         "channels and years. Use this to check precedent before proposing a "
@@ -838,36 +868,43 @@ def main() -> None:
 
     if args.notes_for:
         rel_by_id = {release_id(r["url"]): r for r in releases}
-        targets = {
-            i for i, r in rel_by_id.items()
-            if r.get("product") == args.product and r.get("channel") == args.channel
-            and r.get("version") == args.notes_for
-        }
-        if not targets:
-            avail = sorted({r["version"] for r in rel_by_id.values()
-                            if r.get("product") == args.product
-                            and r.get("channel") == args.channel})[-6:]
-            sys.exit(f"error: no {args.product} {args.channel} release {args.notes_for!r}. "
-                     f"Recent: {', '.join(avail)}")
-        rel = rel_by_id[sorted(targets)[0]]
-        sel = [n for n in notes if n.get("is_public")
-               and any(release_id(u) in targets for u in n.get("releases", []))]
-        sel.sort(key=lambda n: (n.get("sort_num", 0), n.get("tag") or "", n["id"]))
-        print(f"{rel['product']} {rel['version']} ({rel['channel']})  "
-              f"released {(rel.get('release_date') or '')[:10]}  "
-              f"public={rel.get('is_public')}")
-        print(f"{len(sel)} note(s) attached\n")
-        for i, n in enumerate(sel, 1):
-            bug = f"  bug {n['bug']}" if n.get("bug") else "  (no bug)"
-            extra = []
-            if n.get("is_known_issue"):
-                extra.append("KNOWN ISSUE")
-            if n.get("progressive_rollout"):
-                extra.append("progressive rollout")
-            flags = ("  [" + ", ".join(extra) + "]") if extra else ""
-            print(f"{i:>2}. [{n.get('tag') or '(untagged)'}]{bug}{flags}")
-            print(f"    {' '.join((n.get('note') or '').split())}")
-            print()
+        # A comma list, so comparing a dot-release series does not need a shell loop around this
+        # script -- `--notes-for 153.0.1,153.0.2,153.0.3` is one invocation.
+        wanted = [v.strip() for v in args.notes_for.replace(",", " ").split() if v.strip()]
+        for pos, version in enumerate(wanted):
+            targets = {
+                i for i, r in rel_by_id.items()
+                if r.get("product") == args.product and r.get("channel") == args.channel
+                and r.get("version") == version
+            }
+            if not targets:
+                # Sorted as versions, not as strings: lexically "99.0" beats "153.0", so a plain
+                # sort offered 98.0 and 99.0 as the most recent Firefox releases. Nucleus also
+                # carries non-numeric versions ('duplicate-26.0'), hence the tolerant key.
+                def vkey(v: str):
+                    parts = re.findall(r"\d+", v)
+                    return ([int(x) for x in parts] if parts else [-1], v)
+                avail = sorted({r["version"] for r in rel_by_id.values()
+                                if r.get("product") == args.product
+                                and r.get("channel") == args.channel}, key=vkey)[-6:]
+                if avail:
+                    sys.exit(f"error: no {args.product} {args.channel} release {version!r}. "
+                             f"Recent: {', '.join(avail)}")
+                # No releases at all for that product/channel means the *product* is the mistake, and
+                # filtering the hint by it leaves nothing -- so name what does exist instead.
+                products = sorted({r.get("product") or "?" for r in rel_by_id.values()})
+                channels = sorted({r.get("channel") or "?" for r in rel_by_id.values()
+                                   if r.get("product") == args.product})
+                sys.exit(f"error: no releases at all for --product {args.product!r} "
+                         f"--channel {args.channel!r}.\n"
+                         f"       products in Nucleus: {', '.join(products)}\n"
+                         + (f"       channels for {args.product!r}: {', '.join(channels)}"
+                            if channels else
+                            "       (that product name matches nothing; note the full form, "
+                            "e.g. 'Firefox for Android' rather than 'Android')"))
+            if pos:
+                print()
+            print_notes_for(rel_by_id[sorted(targets)[0]], targets, notes)
         return
 
     if args.search:
@@ -888,7 +925,11 @@ def main() -> None:
               f"{len(notes)} notes (all products, channels, years)")
         if not hits:
             print("  NO PRECEDENT -- this kind of change has never been noted.")
-        for vers, n in hits[:40]:
+        # The header above carries the real total, but the listing is what gets read and precedent
+        # counts get quoted from it, so a capped list has to say it is capped.
+        if len(hits) > SEARCH_LIST_LIMIT:
+            print(f"  showing the first {SEARCH_LIST_LIMIT}; narrow the search to see the rest")
+        for vers, n in hits[:SEARCH_LIST_LIMIT]:
             where = ", ".join(vers[:3]) or "(unattached)"
             # The bug number is the point of a precedent search: a carry-forward candidate needs to
             # cite the earlier note's bug, and looking it up by hand afterwards is the whole cost

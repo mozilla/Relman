@@ -166,7 +166,12 @@ def set_status(args, status: str) -> None:
     data = load()
     hit = find(data, str(args.key), args.release)
     if not hit:
-        sys.exit(f"error: {args.key} is not tracked")
+        # Name the recovery: a transition on something never added is the common first move for an
+        # item the pass has only just decided about, and `add` both creates and sets the status.
+        rel_hint = f" --release {args.release}" if args.release else ""
+        sys.exit(f"error: {args.key} is not tracked, so there is no status to change. To record it "
+                 f"now:\n  watchlist.py{rel_hint} add {args.key} --status {status} "
+                 f"--note \"<why>\"")
     rel, item = hit
     item["status"] = status
     item["updated"] = now()

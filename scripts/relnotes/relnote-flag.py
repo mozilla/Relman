@@ -67,8 +67,10 @@ def cached_json(url: str, name: str, refresh: bool = False):
     if not refresh and path.exists() and (time.time() - path.stat().st_mtime) < NUCLEUS_TTL:
         try:
             return json.loads(path.read_text())
-        except ValueError:
-            pass
+        except ValueError as e:
+            # Refetching repairs it, so this is not fatal -- but say so, or a write that keeps
+            # failing refetches megabytes on every run in silence.
+            print(f"# warning: rewriting unreadable cache {path} ({e})", file=sys.stderr)
     try:
         data = trainlib.fetch_json(url)
     except RuntimeError as e:
