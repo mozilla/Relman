@@ -245,7 +245,7 @@ def cmd_resume(args) -> None:  # noqa: C901
     if st.get("known"):
         stale = "  *** STALE: predates the current train ***" if st.get("stale_train") else ""
         print(f"SCAN POSITION  watermark {st['commit'][:12]} ({st['date']}), "
-              f"{st['commits_behind']} commits behind origin/main{stale}")
+              f"{st['commits_behind']} commits behind {st.get('upstream', 'upstream')}{stale}")
         print(f"               resume with: daily-pass.py --since-last --save-state --brief")
     else:
         print("SCAN POSITION  no usable watermark; run scan-window.py --show-state and pick a build")
@@ -391,11 +391,32 @@ def cmd_check_updates(args) -> None:
         sys.exit(1)
 
 
+def save_upstream(repo: Path) -> None:
+    """Work out which ref tracks Gecko upstream in `repo`, save it, and say which one it is.
+
+    Locating the clone is not enough on its own. Every window count and every preference default is
+    read from this ref, and the remote that carries it is only called `origin` by convention -- the
+    more common GitHub layout puts your own fork there. Under that layout nothing fails: the fetch
+    succeeds, `git show <ref>:<file>` succeeds, and the defaults are simply a fork's, which on one
+    real clone meant 13,947 commits of drift with nothing on screen saying so. So it is resolved
+    here, once, and recorded next to the path.
+    """
+    ref, why = trainlib.detect_gecko_upstream(repo)
+    if not ref:
+        sys.exit(f"error: cannot tell which ref tracks Gecko upstream in {repo} -- {why}.\n"
+                 "Add a remote for the canonical repository and fetch it, then re-run. Every\n"
+                 "preference default and window count is read from that ref, so guessing here\n"
+                 "would produce confidently wrong answers rather than an error.")
+    path = trainlib.write_config(gecko_upstream=ref)
+    print(f"GECKO UPSTREAM  {ref}  ({why})\n                saved to {path}")
+
+
 def cmd_check_setup(args) -> None:
     """Resolve the Gecko checkout once, save it, and report the permission entries it needs.
 
     The clone lives somewhere different on every machine, so neither the scripts nor the
-    shared settings.json can hardcode it. This is the one place that learns the path.
+    shared settings.json can hardcode it. This is the one place that learns the path -- and the
+    upstream ref, which is per-machine for the same reason. See save_upstream.
     """
     if args.repo:
         candidate = Path(args.repo).expanduser()
@@ -416,6 +437,11 @@ def cmd_check_setup(args) -> None:
         if not saved:
             print("                save it with: check-setup --repo "
                   f"{repo}")
+
+    # Re-detected on every run rather than only when writing the path: a remote added or renamed
+    # after setup would otherwise leave the stored ref pointing at something that no longer tracks
+    # upstream, and this is the only command anyone re-runs to check their setup.
+    save_upstream(repo)
 
     # A malformed settings file must not read as "no entries present": the entries may all be
     # there, and reporting them missing sends the reader after the wrong problem. Matches the

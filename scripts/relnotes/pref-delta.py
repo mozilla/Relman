@@ -17,7 +17,7 @@ Two jobs, both of which the release-note discovery pass gets wrong by hand:
    preprocessor over the file once per (channel, platform) and reports what each channel actually
    gets.
 
-Everything is read from `origin/main` via `git show`, never the working tree -- the working tree is
+Everything is read from the upstream ref via `git show`, never the working tree -- the tree is
 routinely on another branch and reports pre-landing defaults.
 
 Usage:
@@ -683,7 +683,9 @@ def main() -> None:
     )
     p.add_argument("--repo", default=None,
                    help="Gecko checkout (default: saved by watchlist.py check-setup)")
-    p.add_argument("--rev", default="origin/main", help="revision to read defaults from")
+    p.add_argument("--rev", default=trainlib.gecko_upstream(),
+                   help="revision to read defaults from (default: the upstream ref "
+                        "check-setup detected)")
     p.add_argument("--range", dest="rev_range", default=None, help="explicit START..END")
     p.add_argument("--lookup", default=None,
                    help="comma-separated preference names to resolve (skips flip detection)")
@@ -702,7 +704,8 @@ def main() -> None:
     platforms = [x.strip() for x in args.platforms.split(",") if x.strip() in PLATFORMS]
 
     if not args.no_fetch:
-        trainlib.fetch_origin(repo, "Defaults below are resolved from a possibly stale "
+        trainlib.fetch_origin(repo, remote=trainlib.gecko_remote(),
+                              consequence="Defaults below are resolved from a possibly stale "
                                     f"{args.rev}; do not label them verified.")
 
     print(f"# resolving defaults from {args.rev}", file=sys.stderr)

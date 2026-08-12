@@ -422,7 +422,7 @@ def show_state(repo: Path, nightly: int) -> None:
         print(f"Stored watermark : {st['commit'][:12]}  ({st['date']})")
         print(f"  saved at       : {st.get('saved_at')}"
               + (f"  note: {st['note']}" if st.get("note") else ""))
-        print(f"  commits behind origin/main: {st['commits_behind']}")
+        print(f"  commits behind {st.get('upstream', 'upstream')}: {st['commits_behind']}")
         if st["stale_train"]:
             print(f"  *** STALE: predates {st['current_cycle_start']}, i.e. an earlier release "
                   "train. Resuming from here would sweep in a whole shipped cycle. "
@@ -543,7 +543,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Funnel a firefox-main window to note candidates.")
     p.add_argument("--repo", default=None,
                    help="Gecko checkout (default: saved by watchlist.py check-setup)")
-    p.add_argument("--rev", default="origin/main")
+    p.add_argument("--rev", default=trainlib.gecko_upstream(),
+                   help="window end, and the head for an in-progress --cycle "
+                        "(default: the upstream ref check-setup detected)")
     p.add_argument("--range", dest="rev_range", default=None, help="explicit START..END")
     p.add_argument("--no-fetch", action="store_true")
     p.add_argument("--version", type=int, default=None,
@@ -584,7 +586,8 @@ def main() -> None:
     repo = trainlib.resolve_repo(args.repo)
 
     if not args.no_fetch:
-        trainlib.fetch_origin(repo, "The window may stop short of the newest landings, so a survivor "
+        trainlib.fetch_origin(repo, remote=trainlib.gecko_remote(),
+                              consequence="The window may stop short of the newest landings, so a survivor "
                                     "count from this run can be low without saying so.")
 
     nightly_now = nightly_version()

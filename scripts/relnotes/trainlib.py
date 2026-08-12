@@ -30,6 +30,13 @@ import urllib.error as url_error
 import urllib.request as url_request
 from pathlib import Path
 
+if sys.version_info < (3, 10):
+    # `X | None` in an annotation is evaluated when the function is defined, so on 3.9 this module
+    # dies with a TypeError from whichever helper happens to be defined first. Say what is wrong
+    # instead, since every script here imports this one.
+    sys.exit(f"error: these scripts need Python 3.10 or newer; this is "
+             f"{sys.version.split()[0]} at {sys.executable}")
+
 PRODUCT_DETAILS = "https://product-details.mozilla.org/1.0/firefox_versions.json"
 HG_BASE = "https://hg-edge.mozilla.org/mozilla-central"
 FIREFOX_RELEASES = f"{HG_BASE}/json-firefoxreleases"
@@ -48,6 +55,15 @@ CONFIG_FILE = STATE_DIR / "config.json"
 # Only a fallback for someone who has never run check-setup. Do not hardcode this anywhere else.
 LEGACY_REPO_DEFAULT = Path.home() / "repos" / "firefox"
 GECKO_MARKER = Path("modules") / "libpref" / "init" / "StaticPrefList.yaml"
+# Every Gecko read resolves against this ref, and it is *not* safely hardcodable to `origin/main`.
+# The common GitHub layout is `origin` = your own fork and `upstream` = canonical, the inverse of
+# the layout this tooling was written on. Under that layout every preference default would be read
+# from a fork's `main` with nothing on screen saying so -- measured on one clone, the fork sat
+# 13,947 commits behind. So it is detected once by `check-setup`, stored per-user beside the clone
+# path, and this default only applies to a checkout that was never set up.
+GECKO_UPSTREAM_DEFAULT = "origin/main"
+CANONICAL_GECKO_URL = re.compile(
+    r"mozilla-firefox/firefox|hg\.mozilla\.org/mozilla-(central|unified)|mozilla/gecko-dev", re.I)
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "relman-relnotes"
 # json-firefoxreleases is ~12 MB; don't refetch it on every invocation.
 BUILDS_CACHE = CACHE_DIR / "firefoxreleases.json"
@@ -210,32 +226,79 @@ def resolve_repo_with_source(cli: str | None = None) -> tuple[Path, str]:
     )
 
 
-def fetch_origin(repo: Path, consequence: str, timeout: int | None = None) -> bool:
+def gecko_upstream() -> str:
+    """The ref every Gecko read resolves against, e.g. `origin/main`. See GECKO_UPSTREAM_DEFAULT."""
+    return read_config().get("gecko_upstream") or GECKO_UPSTREAM_DEFAULT
+
+
+def gecko_remote() -> str:
+    """The remote half of `gecko_upstream()`, for `git fetch`."""
+    return gecko_upstream().split("/", 1)[0]
+
+
+def detect_gecko_upstream(repo: Path) -> tuple[str, str]:
+    """The ref in `repo` that tracks Gecko upstream, as (ref, how it was chosen). ("", why) on none.
+
+    A remote whose URL is recognisably canonical wins over one that merely has a `main`, because the
+    failure this exists to prevent is reading from a fork that also has a perfectly good `main`.
+    """
+    remotes = {}
+    for line in git(repo, "remote", "-v", check=False).splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[-1] == "(fetch)":
+            remotes[parts[0]] = parts[1]
+    if not remotes:
+        return "", "the checkout has no remotes"
+
+    def resolves(ref: str) -> bool:
+        return bool(git(repo, "rev-parse", "--verify", "--quiet", ref, check=False).strip())
+
+    canonical = sorted(r for r, url in remotes.items() if CANONICAL_GECKO_URL.search(url))
+    for group, why in ((canonical, "its URL is a Gecko canonical"),
+                       (sorted(remotes), "it is the only remote with a resolvable main")):
+        hits = [f"{r}/main" for r in group if resolves(f"{r}/main")]
+        if len(hits) == 1:
+            return hits[0], why
+        if hits:
+            # Several plausible ones: name the tie rather than picking in silence.
+            pick = next((h for h in hits if h.startswith("origin/")), hits[0])
+            return pick, f"{len(hits)} candidates ({', '.join(hits)}); chose {pick}"
+    named = ", ".join(f"{r} -> {u}" for r, u in sorted(remotes.items()))
+    return "", f"no remote has a resolvable main ({named})"
+
+
+def fetch_origin(repo: Path, consequence: str, timeout: int | None = None,
+                 remote: str = "origin") -> bool:
     """Update the mirror, saying so if it failed. True when the mirror is current.
 
     A failed fetch used to be discarded, which left every downstream answer describing a stale tree
-    while looking exactly like a good run: `pref-delta` resolves defaults from `origin/main` by
-    default and prints an `effective now:` verdict the skills quote as *verified*. `consequence` is
-    what a stale mirror means for the caller, because "fetch failed" alone does not tell the reader
-    whether to trust the numbers underneath it.
+    while looking exactly like a good run: `pref-delta` resolves defaults from the upstream ref and
+    prints an `effective now:` verdict the skills quote as *verified*. `consequence` is what a stale
+    mirror means for the caller, because "fetch failed" alone does not tell the reader whether to
+    trust the numbers underneath it.
+
+    **`remote` matters because this is called for two different repositories.** For the Relman
+    checkout it really is `origin`; for the Gecko clone it is whatever carries upstream there, which
+    is only conventionally `origin` -- pass `gecko_remote()`. Fetching the wrong one succeeds and
+    updates nothing relevant, which is the quiet failure the default would hand you.
 
     `timeout` is for callers on the critical path of something else, where the fetch is a courtesy
     rather than the point -- offline or off-VPN, an unreachable remote would otherwise hang them.
     It defaults off because a legitimate Gecko fetch can take minutes and cutting one short would
     turn a slow answer into a wrong one.
     """
-    print("# fetching origin...", file=sys.stderr)
+    print(f"# fetching {remote}...", file=sys.stderr)
     try:
-        r = subprocess.run(["git", "-C", str(repo), "fetch", "--quiet", "origin"],
+        r = subprocess.run(["git", "-C", str(repo), "fetch", "--quiet", remote],
                            capture_output=True, text=True, check=False, timeout=timeout)
     except subprocess.TimeoutExpired:
         print(f"# WARNING: git fetch did not finish within {timeout}s, so the mirror may be behind "
-              f"origin. {consequence}", file=sys.stderr)
+              f"{remote}. {consequence}", file=sys.stderr)
         return False
     if r.returncode == 0:
         return True
     sys.stderr.write(r.stderr)
-    print(f"# WARNING: git fetch exited {r.returncode}, so the mirror may be behind origin. "
+    print(f"# WARNING: git fetch exited {r.returncode}, so the mirror may be behind {remote}. "
           f"{consequence}", file=sys.stderr)
     return False
 
@@ -611,7 +674,7 @@ def train_versions() -> dict:
     }
 
 
-def cycle_range(repo: Path, version: int, head: str = "origin/main") -> tuple | None:
+def cycle_range(repo: Path, version: int, head: str | None = None) -> tuple | None:
     """The nightly cycle for a version, as (start, end, in_progress).
 
     There is no FIREFOX_NIGHTLY_{N}_BASE tag -- only _END exists -- so the cycle start
@@ -622,6 +685,7 @@ def cycle_range(repo: Path, version: int, head: str = "origin/main") -> tuple | 
     on them. So when the end tag is missing, run to HEAD and report the cycle as still
     in progress rather than refusing.
     """
+    head = head or gecko_upstream()
     start = f"FIREFOX_NIGHTLY_{version - 1}_END"
     end = f"FIREFOX_NIGHTLY_{version}_END"
     if not git(repo, "rev-parse", "--verify", "--quiet", start, check=False).strip():
@@ -797,7 +861,8 @@ def watermark_status(repo: Path, wm: dict | None, nightly: int) -> dict:
     if not git(repo, "rev-parse", "--verify", "--quiet", commit, check=False).strip():
         return {"present": True, "known": False, "commit": commit}
     date = git(repo, "log", "-1", "--format=%cd", "--date=iso", commit, check=False).strip()
-    ahead = git(repo, "rev-list", "--count", f"{commit}..origin/main", check=False).strip()
+    upstream = gecko_upstream()
+    ahead = git(repo, "rev-list", "--count", f"{commit}..{upstream}", check=False).strip()
     prev_cycle_end = f"FIREFOX_NIGHTLY_{nightly - 1}_END"
     stale_train = False
     if git(repo, "rev-parse", "--verify", "--quiet", prev_cycle_end, check=False).strip():
@@ -813,6 +878,7 @@ def watermark_status(repo: Path, wm: dict | None, nightly: int) -> dict:
         "commit": commit,
         "date": date,
         "commits_behind": int(ahead) if ahead.isdigit() else None,
+        "upstream": upstream,
         "stale_train": stale_train,
         "current_cycle_start": prev_cycle_end,
         "saved_at": wm.get("saved_at"),

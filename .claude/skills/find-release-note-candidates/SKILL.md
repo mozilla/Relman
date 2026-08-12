@@ -341,7 +341,8 @@ Two habits make that briefing worth reading, and without them it decays into a s
   it concluded, and the next session (or the same one after compaction) cannot tell a quiet day from
   an unfinished one.
 - **Record as you go.** `watchlist.py add <bug> --status asked --note "..."` when you ask,
-  `days <YYYYMMDD>` when a day is done, `replied`/`decline`/`noted` as things move, and
+  `days <YYYYMMDD>` when a day is done, `replied`/`decline`/`noted` as things move (only for entries
+  already tracked — see the watchlist block below), and
   `log "<text>"` for context belonging to no single bug — a notes review, a decision, an open
   question. A declined bug with no recorded reason will simply be re-proposed next cycle.
 
@@ -425,14 +426,32 @@ the report called it unresolved, when the developer had approved the wording tha
 watchlist.py check-updates --pull        # self-update; drop --pull to only report, --quiet to speak only when acting
 watchlist.py summary                     # per-release counts and days reviewed
 watchlist.py list --status asked         # or declined, gated, noted -- implies --all
-watchlist.py add <bug> --status asked --note "<what and when>"
+watchlist.py add <bug> --status asked --note "<what and when>"       # asked | declined | gated |
+watchlist.py add <bug> --status declined --note "<why>"             # watching | noted | done
 watchlist.py add <bug> --status watching --due 2026-09-01   # sets the "follow up after" date that
                                                             # resume and followup both display
-watchlist.py decline <bug> --note "<why>"   # short forms take --note; use it, the reason is the point
+watchlist.py decline <bug> --note "<why>"   # ONLY for a bug already on the list -- see below
 watchlist.py noted <bug> --note "<where it shipped>"   # the note is live in Nucleus
 watchlist.py log "<pass summary>"        # release-level context; resume replays these
 watchlist.py days 20260801               # record the day as reviewed
 ```
+
+**Record a verdict with `add --status <verdict>`, not with `decline`/`noted`/`asked`.** Those short
+forms change the status of something already tracked, and a bug you judged during this pass has
+never been tracked — so they exit 1 with `is not tracked, so there is no status to change`. The
+error names `add` as the recovery, which works, but it is two commands for every verdict. Reach for
+the short forms only when following up on an entry a previous pass created.
+
+**On `add`, `--note` also *becomes* the item's summary** — the one line `list`, `resume` and
+`followup` display. So lead with what the bug is and put the verdict after it:
+
+```
+add 1921959 --status declined --note "Sidebar new tab button not clickable from screen edges. DECLINED 2026-08-05: 0 dupes, Nightly-only gate."
+```
+
+Not `--note "DECLINED 2026-08-05: ..."` — that listing never says which bug it is, and the whole
+point of the entry is recognising it next cycle. The short forms differ here: they leave the summary
+alone and append the reason to the log, which is why they are not interchangeable with `add`.
 
 `bug-detail.py <ids> --landings A..B` shows each bug's landings in a window with their diffstat —
 what a candidate actually changed, which is the usual reason to reach for the clone at all. Prefer it
@@ -734,6 +753,21 @@ Every item below is a case where the skill was wrong, so they carry more weight 
   seconds: exactly **one** note in the entire corpus mentions ffmpeg/libavcodec, and it was about
   *blocking* old versions. If a class of change has no precedent across two decades, that's strong
   evidence it isn't noted.
+- **Precedent that exists does not carry a candidate over weak impact evidence.** The check above is
+  strong evidence *against* when it comes back empty, and only weak evidence *for* when it comes back
+  full — the asymmetry is the whole point, and reading it symmetrically is what produces the mistake.
+  Declined three times on exactly this: bug 1804663 (RTL datetime-local field order; precedent 105.0.2
+  and 152.0), bug 1969451 (contenteditable plaintext-only double-backspace; precedent 139.0 and
+  136.0), bug 2061113 (VoiceOver and `aria-describedby`; precedent 92.0, 95.0, 93.0, 82.0). **All
+  three had zero duplicates.** Settle impact evidence first and use precedent only to sanity-check a
+  candidate that already earned its place.
+- **A duplicate count is impact evidence only if the duplicates are user reports — read them, don't
+  total them.** Bug 2058198 (container colour stroke spanning the tab) had the strongest-looking
+  evidence in its window, an external reporter and 4 duplicates, and was still declined: three of the
+  four are tagged `[Nova]` and it blocks meta 2052231 `[meta] Nova foxfooding bugs`, so the cluster is
+  staff finding staff bugs on an unreleased redesign. `bug-detail.py` prints every duplicate's
+  summary for this reason. A feature-team tag or a foxfooding meta in that list means the number
+  overstates the reach.
 - **Library and vendor bumps are dropped mechanically**, matched on the bug summary rather than the
   landings, because a big bump like `Update to libwebrtc 151` carries hundreds of commits and a few
   stray build fixes would otherwise keep the whole thing. They land in the dropped list, which the
@@ -770,6 +804,14 @@ Every item below is a case where the skill was wrong, so they carry more weight 
   audience. Ask how many people use the surface before asking how good the change is. **This applies
   to UI surfaces as much as to web APIs**: scoped to APIs, the rule reads past a candidate like bug
   2051292 (long-press an Android toolbar shortcut to edit it), which went out with reservations.
+- **A change to an internal configuration surface is not a note unless the surface is being
+  replaced.** `about:config` and its neighbours are deliberately not promoted, whatever their
+  traffic — that is policy rather than audience size, so the reach test above does not reach it.
+  Measured across the shipped corpus: `about:config` appears in 16 of 6,888 notes and is the
+  *subject* of only two, both the same Firefox 71 change ("Configuration page reimplemented in
+  HTML"); nearly all the rest name it as the place to flip a preference for some other feature. Bug
+  449178 (treat a spaced about:config filter as a multi-term search) was ungated and genuinely
+  user-visible, cleared every other filter here, and was declined on this ground alone.
 - **"Now configurable via a preference" is not a note.** Notes describe default behaviour; anything
   requiring a manual `about:config` change is out of scope (bug 1418178, Ctrl-Tab preview count).
   Check whether the *default* actually changed before treating a new preference as a candidate — in
@@ -1105,7 +1147,20 @@ overfitting, and every added rule costs attention on every future run.
 ## Output
 
 Lead with the funnel line (commits → bugs → FIXED → survivors → candidates), the window, and the
-Nightly version and channel mapping used. Then:
+Nightly version and channel mapping used — then, **before any analysis**, a Bugzilla buglist link
+covering every candidate, so all of them open in one go rather than one click at a time:
+
+```
+https://bugzilla.mozilla.org/buglist.cgi?bug_id_type=anyexact&bug_id=<comma-separated ids>
+```
+
+**That link belongs at the top, not down with the tiers.** The reader opens the bugs first and then
+reads the analysis alongside them, so a link printed after the tier tables sits a hundred lines
+below the moment it was wanted. `daily-pass.py` prints equivalents for the survivor and dropped
+sets; build this one from your tiered candidates, and repeat it per tier inside each tier when the
+list is long.
+
+Then:
 
 1. **Pref flips** — what became live or hidden, with per-channel defaults and bug numbers. First,
    because it's the highest-signal section.
@@ -1130,16 +1185,6 @@ Nightly version and channel mapping used. Then:
 
    **Plain text, no HTML.** The output is read in a terminal, so `<details>`/`<summary>` renders as
    literal tags rather than a collapsible block.
-
-**Include a Bugzilla buglist link for the candidates**, so every bug can be opened in one go
-rather than clicked one at a time:
-
-```
-https://bugzilla.mozilla.org/buglist.cgi?bug_id_type=anyexact&bug_id=<comma-separated ids>
-```
-
-`daily-pass.py` prints these for the survivor and dropped sets; build one for your tiered candidate
-list too, and one per tier when the list is long.
 
 Close with a short methodology note: exact window, Nightly version, **that uplift status was
 accurate only as of the run and needs re-checking before notes are finalized**, that the backout

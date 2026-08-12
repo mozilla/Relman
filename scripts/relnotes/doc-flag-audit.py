@@ -42,6 +42,8 @@ SCRIPT_DIR = REPO / "scripts" / "relnotes"
 DOC_GLOBS = (".claude/skills/*/SKILL.md", "reference/release-notes/*.md", "README.md")
 
 FLAG_RE = re.compile(r"--[a-z][\w-]*")
+# Maintenance tools, not part of a pass. See truth().
+AUDITORS = {"doc-flag-audit.py", "doc-command-audit.py"}
 # Lines that invoke one of these are describing that tool's flags, not ours.
 OTHER_TOOLS = ("git", "curl", "grep", "sed", "awk", "head", "tail", "jq", "chmod", "python3 -c")
 # The shortest flag any parser here accepts is 5 characters (`--all`, `--due`, `--rev`), so a shorter
@@ -73,12 +75,12 @@ def flags_of(*argv: str) -> set:
 def truth() -> tuple[dict, list]:
     """{script or 'watchlist.py <sub>': flags}, plus the subcommand names.
 
-    This auditor excludes itself: the docs it checks are the skills and reference notes a release-note
-    pass reads, and a maintenance tool does not belong in them. Left in, it would report its own flag
-    forever, which is how a report gets skimmed.
+    The auditors are excluded: the docs checked here are the skills and reference notes a
+    release-note pass reads, and a maintenance tool does not belong in them. Left in, each would
+    report its own flags forever, which is how a report gets skimmed.
     """
     table = {p.name: flags_of(str(p)) for p in sorted(SCRIPT_DIR.glob("*.py"))
-             if p.name != Path(__file__).name}
+             if p.name not in AUDITORS}
     wl = SCRIPT_DIR / "watchlist.py"
     usage = subprocess.run([sys.executable, str(wl), "--help"],
                            capture_output=True, text=True).stdout

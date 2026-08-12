@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+# Machine-specific permission entries written by `watchlist.py check-setup --write`.
+# It records an absolute path to someone's Gecko clone, which is wrong for everyone
+# else, so it must never reach the shared tree.
+.claude/settings.local.json
