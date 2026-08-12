@@ -192,6 +192,24 @@ class Tee:
         return "".join(self.buf)
 
 
+def print_header(version: str, window: dict, funnel: dict) -> None:
+    """The lines identifying what this pass covered and what produced it.
+
+    Printed twice -- into the report body, and again into --brief's summary, which is a separate
+    render because the body is suppressed in that mode. They were two copies that had already
+    drifted apart on the BASIS fallback, and --brief is the form the skill actually runs, so
+    anything only the body carries is missing from the transcript that gets audited later. That is
+    exactly where the TOOLING stamp has to appear, hence one function rather than a third copy.
+    """
+    print(f"TOOLING {version}")
+    print(f"WINDOW  {window['start_desc']} .. {window['end_desc']}")
+    print(f"BASIS   {window.get('basis', 'see scan.txt')}")
+    print(f"FUNNEL  {funnel['commits']} commits -> {funnel['distinct_bugs']} bugs -> "
+          f"{funnel['survivors']} survivors  ({funnel['dropped_mechanical']} mechanical, "
+          f"{funnel['not_currently_fixed']} not FIXED, {funnel['security_restricted']} "
+          f"security-restricted, {funnel.get('uplifted', 0)} uplifted)")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description="Run scan-window, pref-delta and bug-tree over one window, in one call.",
@@ -322,13 +340,14 @@ def main() -> None:
     tee = Tee(real_stdout, echo=not args.brief)
     sys.stdout = tee
 
-    f = scan["funnel"]
+    # The revision that produced this report. Runs get re-read weeks later -- and their transcripts
+    # audited -- to work out why a pass decided what it did; with more than one person editing the
+    # tooling, "which version was this?" is otherwise answerable only by guessing from the date, and
+    # not at all once someone has local edits. Whether that revision is *behind* origin is a
+    # separate question, asked once per pass by `watchlist.py check-updates`.
+    version = trainlib.tooling_stamp()["version"]
     print()
-    print(f"WINDOW  {window['start_desc']} .. {window['end_desc']}")
-    print(f"BASIS   {window.get('basis', 'see scan.txt')}")
-    print(f"FUNNEL  {f['commits']} commits -> {f['distinct_bugs']} bugs -> {f['survivors']} "
-          f"survivors  ({f['dropped_mechanical']} mechanical, {f['not_currently_fixed']} not "
-          f"FIXED, {f['security_restricted']} security-restricted, {f.get('uplifted', 0)} uplifted)")
+    print_header(version, window, scan["funnel"])
     print()
 
     if failures:
@@ -428,13 +447,7 @@ def main() -> None:
     sys.stdout = real_stdout
     (outdir / "report.txt").write_text(tee.text())
     if args.brief:
-        fu = scan["funnel"]
-        print(f"WINDOW  {window['start_desc']} .. {window['end_desc']}")
-        print(f"BASIS   {window.get('basis', '')}")
-        print(f"FUNNEL  {fu['commits']} commits -> {fu['distinct_bugs']} bugs -> "
-              f"{fu['survivors']} survivors  ({fu['dropped_mechanical']} mechanical, "
-              f"{fu['not_currently_fixed']} not FIXED, {fu['security_restricted']} "
-              f"security-restricted, {fu.get('uplifted', 0)} uplifted)")
+        print_header(version, window, scan["funnel"])
         prefs = (outdir / "prefs.txt").read_text()
         flips = [l for l in prefs.splitlines() if l.startswith("== ")]
         print("PREFS   " + ("; ".join(flips) if flips else "no preference changes"))

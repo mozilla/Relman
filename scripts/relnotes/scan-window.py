@@ -668,7 +668,12 @@ def main() -> None:
         else:
             survivors.append(rec)
 
+    # Which revision of the tooling produced this file, carried in the artifact rather than left to
+    # the reader's memory of when they ran it. See daily-pass.py's TOOLING header for the same
+    # stamp in prose form.
+    tooling = trainlib.tooling_stamp()
     result = {
+        "tooling": {"version": tooling["version"], "dirty": tooling["dirty"]},
         "window": {
             "start": start, "end": end,
             "start_desc": start_desc, "end_desc": end_desc,
@@ -697,6 +702,7 @@ def main() -> None:
     else:
         lines = []
         f = result["funnel"]
+        lines.append(f"Tooling: {result['tooling']['version']}")
         lines.append(f"Window: {start_desc} .. {end_desc}   (Nightly {nightly})")
         lines.append(
             f"Funnel: {f['commits']} commits -> {f['distinct_bugs']} bugs -> "
