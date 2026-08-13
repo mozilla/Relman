@@ -748,8 +748,8 @@ Every item below is a case where the skill was wrong, so they carry more weight 
   155, and the uplift was already on track — across shipped versions the user sees nothing. Two
   related shapes: a regression that never shipped at all (`fx153=unaffected fx154=unaffected`) needs
   no note either.
-- **Check precedent before proposing.** `fetch-shipped-notes.py --search '<regex>'` greps all 6,834
-  notes ever published. "I don't believe we've called out past ffmpeg updates" was verifiable in
+- **Check precedent before proposing.** `fetch-shipped-notes.py --search '<regex>'` greps every
+  note ever published. "I don't believe we've called out past ffmpeg updates" was verifiable in
   seconds: exactly **one** note in the entire corpus mentions ffmpeg/libavcodec, and it was about
   *blocking* old versions. If a class of change has no precedent across two decades, that's strong
   evidence it isn't noted.
@@ -807,7 +807,7 @@ Every item below is a case where the skill was wrong, so they carry more weight 
 - **A change to an internal configuration surface is not a note unless the surface is being
   replaced.** `about:config` and its neighbours are deliberately not promoted, whatever their
   traffic — that is policy rather than audience size, so the reach test above does not reach it.
-  Measured across the shipped corpus: `about:config` appears in 16 of 6,888 notes and is the
+  Measured across the shipped corpus: `about:config` appears in 16 notes in total and is the
   *subject* of only two, both the same Firefox 71 change ("Configuration page reimplemented in
   HTML"); nearly all the rest name it as the place to flip a preference for some other feature. Bug
   449178 (treat a spaced about:config filter as a multi-term search) was ungated and genuinely

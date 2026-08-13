@@ -288,7 +288,7 @@ And the opposite end — the busiest components that produced **no** notes at al
 - **Bug numbers are recorded on 232 of 535 major-release notes (43%) versus 207 of 234 dot-release notes (88%).** Dot releases require bug links and mainline notes don't, which is exactly the gap you see. Nucleus keeps the bug number as a field even when the published note doesn't render a link — so this corpus can be joined to Bugzilla either way.
 - **37 notes are marked as progressive rollouts.** A gated or staged feature does get noted; being behind a rollout is not by itself a reason to hold a note, but it changes the wording.
 - **17 known-issue notes.** These recur across several versions, which is why per-release counting has to use note–release pairs rather than distinct notes.
-- **The `HTML5` tag is still in live use** alongside `Developer`, so web-platform notes appear under more than one tag historically. Match whatever the target product is already using rather than normalizing.
+- **The `HTML5` tag is still in live use** alongside `Developer`, and is what renders as the *Web Platform* heading -- there is no `Web Platform` tag. Web-platform notes therefore appear under more than one tag historically, so match a product's established usage rather than normalizing. That is not licence to leave a note in the wrong one of the two: see the style guide for the engine-versus-DevTools split that decides it.
 
 ## Provenance
 

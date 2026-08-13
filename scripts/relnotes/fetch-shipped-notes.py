@@ -26,8 +26,9 @@ Two optional passes hit the Bugzilla REST API for context Nucleus does not have:
 
 Read-only. Network JSON is cached under `$XDG_CACHE_HOME/relman-relnotes/nucleus`
 so repeat runs and multiple --format passes are cheap -- `--workdir` moves it,
-`--refresh` bypasses it. Nucleus is live data and expires in 15 minutes; Bugzilla
-answers about shipped majors are settled history and are kept for a day.
+`--refresh` bypasses it. `--notes-for` always refetches, because it is read while
+someone is editing those notes; other Nucleus reads expire in 15 minutes, and
+Bugzilla answers about shipped majors are settled history and are kept for a day.
 
 Usage:
   fetch-shipped-notes.py --format md -o reference/release-notes/shipped-notes-survey.md \\
@@ -87,9 +88,9 @@ BOILERPLATE_RE = re.compile(r"^(various\s+)?security fix", re.IGNORECASE)
 # twenty-five orphaned directories totalling 172 MB accumulated in one day of ordinary use. Same
 # idiom as trainlib's builds cache, and it respects XDG_CACHE_HOME through it.
 DEFAULT_CACHE = trainlib.CACHE_DIR / "nucleus"
-# Nucleus is live data. The cache exists to spare one pass from refetching megabytes on each of the
-# several calls it makes, not to serve yesterday's notes -- a note published mid-pass must not stay
-# invisible, so this is deliberately short.
+# Applies to Nucleus reads that are *not* the review input; --notes-for overrides it to 0. This
+# exists to spare one pass from refetching megabytes on each of the several calls it makes, and is
+# sized for that -- not for spanning turns, which is what made a review re-read stale.
 NUCLEUS_CACHE_TTL = 15 * 60
 # Bugzilla answers about *shipped* majors are settled history: the fixed-bug count for 150.0 does
 # not move. These are also the slow half of a survey regeneration, so they are worth keeping a day.
@@ -695,9 +696,11 @@ def emit_markdown(s: dict, meta: dict, areas: dict | None, negative: dict | None
         "why per-release counting has to use note–release pairs rather than distinct notes."
     )
     w(
-        "- **The `HTML5` tag is still in live use** alongside `Developer`, so web-platform notes "
-        "appear under more than one tag historically. Match whatever the target product is already "
-        "using rather than normalizing."
+        "- **The `HTML5` tag is still in live use** alongside `Developer`, and is what renders as "
+        "the *Web Platform* heading -- there is no `Web Platform` tag. Web-platform notes therefore "
+        "appear under more than one tag historically, so match a product's established usage rather "
+        "than normalizing. That is not licence to leave a note in the wrong one of the two: see the "
+        "style guide for the engine-versus-DevTools split that decides it."
     )
     w("")
 
@@ -926,8 +929,15 @@ def main() -> None:
     workdir.mkdir(parents=True, exist_ok=True)
     print(f"# cache: {workdir}", file=sys.stderr)
 
-    notes = fetch_json(NUCLEUS_NOTES, workdir, "nucleus-notes")
-    releases = fetch_json(NUCLEUS_RELEASES, workdir, "nucleus-releases")
+    # --notes-for is the *review input*: it is read straight after an author has edited Nucleus, so a
+    # cached copy is a copy of the very text they just changed. Every other mode here reads settled
+    # history -- precedent searches, the 24-month calibration window -- where minutes of staleness
+    # are invisible. Measured 2026-08-12: a 15-minute TTL sent a review session hunting through
+    # --help for a bypass seven seconds after the author said "fixed in nucleus", and then passing
+    # --refresh by hand on every re-read for the rest of the review.
+    notes_ttl = 0 if args.notes_for else NUCLEUS_CACHE_TTL
+    notes = fetch_json(NUCLEUS_NOTES, workdir, "nucleus-notes", ttl=notes_ttl)
+    releases = fetch_json(NUCLEUS_RELEASES, workdir, "nucleus-releases", ttl=notes_ttl)
 
     if args.notes_for:
         rel_by_id = {release_id(r["url"]): r for r in releases}

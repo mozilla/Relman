@@ -54,7 +54,14 @@ import trainlib  # noqa: E402
 BUGZILLA_REST = "https://bugzilla.mozilla.org/rest/bug"
 NUCLEUS_NOTES = "https://nucleus.mozilla.org/rna/notes/?format=json"
 NUCLEUS_RELEASES = "https://nucleus.mozilla.org/rna/releases/?format=json"
-NUCLEUS_TTL = 3 * 3600
+# Every Nucleus read in this script feeds `--coverage`, and coverage is run while someone is editing
+# the very notes it reads, so there is no useful window here at all. Stale input to a *coverage*
+# answer does not merely look old -- it manufactures findings, reporting a note added ten minutes ago
+# as missing and a flag just set as unset, indistinguishable from a real gap. Sized by what the data
+# is for rather than by payload size: this script's settled-history queries (--nominated, --approved,
+# --declined, --value) hit Bugzilla, not Nucleus. An unreachable Nucleus still degrades to the cached
+# copy in cached_json, with its age stated.
+NUCLEUS_TTL = 0
 
 FIELDS = ("id,summary,product,component,status,resolution,"
           "cf_tracking_firefox_relnote,last_change_time")
@@ -62,7 +69,11 @@ FIXED_STATUS = {"RESOLVED", "VERIFIED"}
 
 
 def cached_json(url: str, name: str, refresh: bool = False):
-    """Nucleus responses are megabytes; don't refetch them for every invocation."""
+    """Fetch a Nucleus payload, falling back to the cached copy only when Nucleus is unreachable.
+
+    `ttl` is 0 by default here -- see NUCLEUS_TTL. The cache is kept for the outage path, not to
+    spare a refetch.
+    """
     path = trainlib.CACHE_DIR / name
     if not refresh and path.exists() and (time.time() - path.stat().st_mtime) < NUCLEUS_TTL:
         try:

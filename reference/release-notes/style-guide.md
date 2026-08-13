@@ -47,8 +47,8 @@ published note of the last two years.
   — its improved version reads *"…they'll now be prompted to finish installation"*, not "you'll be
   prompted".
   - *"Autofill prompts now dismiss when focus moves away"*, not *"…when you move focus away"*.
-  - **Note the corpus disagrees with the guideline:** 540 of 6,834 shipped notes contain "you", many
-    of them recent. Don't take phrasing from published notes as licence here — follow the guideline,
+  - **Note the corpus disagrees with the guideline:** roughly 8% of shipped notes contain "you",
+    many of them recent. Don't take phrasing from published notes as licence here — follow the guideline,
     not the sample.
 - Keep it short. The median shipped note is ~20 words. A candidate needing three sentences is
   usually either two notes or not a note.
@@ -76,9 +76,18 @@ published note of the last two years.
 - **Fixed** — resolved bugs. Historically a mostly dot-release tag; see the survey for where the
   major-release threshold currently sits and how fast it is moving.
 - **Changed** — interface or behavior modifications.
-- **Developer** / **Web Platform** — developer- or web-platform-facing.
-- **HTML5** — legacy tag for web-platform work, still in live use. Match whatever the target
-  product already uses rather than normalizing it away.
+- **Developer** — the developer *tools*: Debugger, Inspector, Netmonitor, the DevTools panels.
+- **HTML5** — the tag that renders as the **Web Platform** heading on the page. There is no
+  `Web Platform` tag in Nucleus; this is it. Use it for what ships *in the engine* for web content
+  to use: CSS properties, HTML elements, HTTP headers, JS APIs.
+- **Choosing between those two is not "technical vs not"** — both audiences are developers. It is
+  **who ships the thing**. A TC39 proposal adding JS methods is `HTML5`, not `Developer`: precedent
+  at 115.0 (`Array.prototype` copy methods), 122.0 (`ArrayBuffer.prototype.transfer`), 139.0
+  (Temporal), 144.0 (`Map.getOrInsert`), 148.0 (`Iterator.zip()`). **Raise it when a note is on the
+  wrong side of that line**, including a move between the two sections — the rule below is about not
+  churning an established convention, not about leaving a misplaced note alone.
+- Don't normalize `HTML5` and `Developer` into each other across a product's existing usage; where
+  both are defensible, match what the target product already uses.
 - **Firefox Labs** — experimental, opt-in features that ship preference-off and are enabled from
   the Firefox Labs panel in Settings. This is the correct home for such features — don't move them
   to New or Web Platform, and don't treat the section as a stray tag. The note must say the feature
@@ -94,7 +103,7 @@ published note of the last two years.
 
 ## Nightly release notes
 
-Nightly has its own notes (101 Nightly releases and 1,060 notes in the corpus), used to surface
+Nightly has its own notes (~100 Nightly releases and ~1,000 notes), used to surface
 Nightly-only changes for testing and feedback. The matching Bugzilla flag is
 `cf_tracking_firefox_relnote` = **`nightly+`**.
 
@@ -185,7 +194,11 @@ Generic, reusable notes are used unless Product supplies their own:
 - **Mobile dot releases are the exception** — authored by Release Management, so give them the
   full desktop-style critique, with bug links required.
 
-If it's unclear whether mobile notes are generic or Product-supplied, ask.
+If it's unclear whether mobile notes are generic or Product-supplied, ask. **Don't infer it from
+past releases.** Both happen on majors, and the mix is moving: Release Management increasingly
+authors mobile notes off its own discovery passes, so a run of Product-supplied majors is not
+evidence about the next one. Asking costs a sentence; assuming costs a mobile note the full review
+it needed.
 
 ## Tone reference
 

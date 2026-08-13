@@ -35,6 +35,18 @@ real shipped notes grouped by tag and sorted by length, which settles "is this t
 faster than argument. It also shows that `HTML5` is still in live use and that the `Fixed`-in-majors
 bar is moving, so don't flag either as anomalous.
 
+## Open with the tooling check
+
+```
+python3 scripts/relnotes/watchlist.py check-updates --pull
+```
+
+Several people edit these skills and scripts, so the copy driving your review can be days behind the
+one its author is describing. This fast-forwards the checkout when it is behind, and exits 1 with a
+`STOP` banner when the pulled commits touched a `SKILL.md` — a skill body is already loaded into this
+conversation, so `/clear` is the only fix, and **`/clear` is enough; don't tell anyone to quit Claude
+Code.** Every other line it prints is context to carry into what you report, never a reason to stop.
+
 ## First run on a machine
 
 If any script exits with **`error: could not locate the Gecko checkout`**, this machine has not been
@@ -76,6 +88,14 @@ python3 scripts/relnotes/note-page.py <src> --audit        # code-formatting inc
 python3 scripts/relnotes/note-page.py <src> --check-links  # resolve every link the authors wrote
 python3 scripts/relnotes/note-page.py --check-url <url>…   # resolve links you mean to suggest
 ```
+
+**`--check-links` reports the security-advisory link as HTTP 404 on any pre-release page, and that
+is expected.** The `Various security fixes.` note points at
+`https://www.mozilla.org/security/advisories/mfsaYYYY-NN/`, and MFSA pages publish at release time,
+so a draft or staging review necessarily fails that one. Count it and move on — don't list it as a
+finding, and don't ask whether the number will be filled in. A *malformed* advisory URL that will
+not self-resolve (wrong year, or pointing at a different release) is still worth one neutral
+mention. Raised three times in a single 154.0 review before someone said so.
 
 It walks sections and notes in document order and reports each note's id, bug link and inline markup.
 Two reasons not to rebuild it inline: **inline Python prompts** — measured, see `command-forms.md`, so
