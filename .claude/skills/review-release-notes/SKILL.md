@@ -61,9 +61,11 @@ permission entries the gecko reads need. Show those entries and ask before runni
 merges them into the git-ignored `.claude/settings.local.json` — it grants standing approval, so it is
 the user's call. Never add them to the shared `settings.json`.
 
-Reviewing rarely needs the clone (prefer Phabricator for patches, per `bugzilla-access.md`), so this
-may not come up — but when it does, it is the whole reason a first pass feels like an approval
-treadmill.
+**Expect this to come up: a gate check needs the clone.** `pref-delta.py` resolves defaults out of a
+Gecko checkout, and the framing cross-check in the review process below runs on every note set, so
+"reviewing rarely needs the clone" is only true of a review that never tests a Nightly-only claim.
+Patches can still be read on Phabricator without one, per `bugzilla-access.md`. When the clone is
+missing, this is the whole reason a first pass feels like an approval treadmill.
 
 ## Invoking commands
 
@@ -213,10 +215,26 @@ those notes are exactly what is under review. The header names any draft release
 can see what the number rests on. `--published-only` answers the narrower question of what has
 actually shipped — reach for it when auditing a past cycle, not when reviewing an upcoming one.
 
-Still ask the author for anything the flag cannot tell you: which draft is current, and the
-developer's suggested wording. And treat a coverage report as a prompt to look, never a verdict —
-security-restricted bugs are omitted by REST with no count, so it can never prove a flagged bug is
-absent.
+**Read the bug, not just the flag.** The flag says a note is owed; the bug says what it should
+contain, and the developer has usually already written that down:
+
+```
+python3 scripts/relnotes/bug-detail.py 2062892 2061864 --comments   # comment 0 and the newest
+python3 scripts/relnotes/bug-detail.py 2062892 --comment all        # the whole thread, untruncated
+```
+
+**A developer's nomination comment outranks your reading of the note text.** Its
+`[Why is this notable]`, `[Suggested wording]`, `[Affects Firefox for Android]` and `[Links]` fields
+are the authoritative account of what changed, and two findings in one review came from working off
+the note alone: a note's deliberately generic "connection candidates" was narrowed to IPv6/IPv4 when
+`[Why is this notable]` said *"or different HTTP protocol versions"*, and a link was reported as
+unavailable while it sat in `[Links]` of that same comment. One call takes many bug ids, so batch
+them — and read the bug for the notes you mean to change or whose scope you are testing, not for all
+forty.
+
+Still ask the author for the one thing nothing else can tell you: which draft is current. And treat
+a coverage report as a prompt to look, never a verdict — security-restricted bugs are omitted by
+REST with no count, so it can never prove a flagged bug is absent.
 
 If the `moz` MCP isn't connected, `@moz:` resources won't resolve — say so and ask the author for
 the bug summary rather than guessing.
@@ -237,10 +255,24 @@ the bug summary rather than guessing.
    notes that bury the user benefit.
 4. Apply the two wording traps from `style-guide.md` — conflated facts and buried benefit. Looking
    up the bug is usually what reveals a note is compressing two distinct facts.
+5. **Cross-check every note's framing against its actual gate.** Cheap, and it catches the worst
+   error the set can carry: something riding the trains described as Nightly-only, or a Nightly-only
+   feature described as shipped. Split the set by framing — notes saying "Firefox Nightly" or
+   "Nightly builds" against notes written plainly — then resolve the gate for each with
+   `pref-delta.py --lookup <pref>`, getting the preference name the way `gating.md` describes under
+   "Which preference is it?". `--lookup` takes a comma-separated list, so the whole set is **one**
+   call, not one per note. Two consecutive reviews found the set consistent this way. It is also
+   the check that tells an **expired** carry-forward note from a **stale** one, and
+   `style-guide.md` has the three-cycle rule and the counting trap that go with that call.
 
 **Don't guess.** Flag anything uncertain as a question rather than a hard correction, especially
 audience-scoping calls that depend on product context you don't have. If you couldn't read a bug or
 patch, say the scoping question is open rather than asserting a scope.
+
+**But "flag it as a question" is for answers that need a human, not for ones sitting in the tree.**
+The rule above is about product context you cannot obtain; a gate, a pref name and a patch are all
+obtainable, and handing one back as an open question spends a review round on work that was one grep
+away. Before writing "I could not determine", name the command that would settle it and run it.
 
 ## Output
 

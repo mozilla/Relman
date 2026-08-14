@@ -144,6 +144,22 @@ is enabled on release. Worked example: the `attr()` Nightly note ran 152 → 154
 `<!-- Keep this note until 156 -->` comment, and was correctly dropped from 155 when bug 2038940
 enabled the feature on release, with a plain (non-Nightly-framed) note taking its place.
 
+**The other retirement trigger is age: three Nightly cycles.** `nightly+` runs a note for three
+Nightly releases or until the feature is enabled by default, whichever comes first. A note that is
+*still* Nightly-only after three is **expired** — accurate wording, due to be dropped from the next
+set — which is a different state from **stale**, where the feature has shipped and the note still
+says "Firefox Nightly". Expired wants deleting; stale wants rewriting now. Resolve the gate before
+deciding which, per [`gating.md`](gating.md).
+
+**Count the sets the note is attached to, not the version in its text.** "Starting with Firefox N"
+names when the feature landed, not when the note started running, so counting cycles off the prose
+overcounts. The two carry-forwards in the 155 Nightly set look identical on the page and are not:
+2046153 (`link-parameters`) has run 153, 154 and 155, so it drops from 156, while 2045278
+(`ellipse-corners`) also opens "Starting with Firefox 153" but is attached to 154 and 155 only and
+has a cycle left. A review treated both as three-cycle expiries on the strength of the wording.
+`fetch-shipped-notes.py --search '<text>'` lists the releases each note is attached to, and says
+when that list is clipped.
+
 ## Known issues
 
 Focus on user impact. If a workaround exists, give clear step-by-step instructions.

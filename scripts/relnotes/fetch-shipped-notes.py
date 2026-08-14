@@ -1003,13 +1003,26 @@ def main() -> None:
         if len(hits) > SEARCH_LIST_LIMIT:
             print(f"  showing the first {SEARCH_LIST_LIMIT}; narrow the search to see the rest")
         for vers, n in hits[:SEARCH_LIST_LIMIT]:
+            # Say when the release list is clipped. A Nightly note retires after three cycles, so a
+            # silent cap at three sits exactly on the decision boundary: a review counted cycles off
+            # this listing and read "153, 154, 155" as a complete history when there may be more.
             where = ", ".join(vers[:3]) or "(unattached)"
+            if len(vers) > 3:
+                where += f", +{len(vers) - 3} more"
             # The bug number is the point of a precedent search: a carry-forward candidate needs to
             # cite the earlier note's bug, and looking it up by hand afterwards is the whole cost
             # this search exists to avoid. Nucleus carries it, so print it.
             bug = f"bug {n['bug']}" if n.get("bug") else "no bug recorded"
             print(f"  [{where}] ({n.get('tag') or '-'}) [{bug}] "
                   f"{' '.join(clean_note(n['note']).split())[:150]}")
+        if hits:
+            # The count is in the header, and the header is the first thing `| tail -N` discards.
+            # A review pass piped this through `tail -12`, counted the rows it could still see, and
+            # wrote "all 12 occurrences" into the log for a search that matched 13. Nothing else in
+            # the listing carries the total, because these rows are unnumbered -- `--notes-for`
+            # needs no trailer for the same reason its rows do.
+            shown = min(len(hits), SEARCH_LIST_LIMIT)
+            print(f"-- {len(hits)} shipped note(s) matched {args.search!r} ({shown} listed above)")
         return
     print(f"# fetched {len(notes)} notes, {len(releases)} releases", file=sys.stderr)
 

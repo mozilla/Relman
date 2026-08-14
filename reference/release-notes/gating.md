@@ -17,13 +17,75 @@ Sort every candidate into one of three states:
   (parsing-only or phase-1 platform work). Not a note; track it and note it when it actually ships.
   This is why JPEG XL only appeared once it was offered in Firefox Labs.
 
+## Which preference is it?
+
+Everything below assumes you already hold the preference's **name**, and getting it wrong is not a
+near miss. `pref-delta.py --lookup` can only answer about the string you hand it, and a review pass
+read `NOT FOUND` as *this feature has no gate* and reported a Nightly-only feature's gating as
+undetermined.
+
+**Never rebuild the name from prose.** A note reading "two new keywords, `closest-corner` and
+`farthest-corner`, for the radial size in `ellipse()`" does not tell you the preference is
+`layout.css.ellipse-corners.enabled`. Three names constructed from note wording in one review
+(`layout.css.basic-shape-corner-keywords.enabled`, `layout.css.alpha-function.enabled`,
+`layout.css.relative-color-syntax.alpha.enabled`) were all absent from the tree. Read it instead:
+
+1. **Grep the shortest distinctive token**, never a candidate name:
+
+   ```
+   git -C <clone> grep -n 'corner' origin/main -- modules/libpref/init/StaticPrefList.yaml
+   ```
+
+   Seven lines, one of them `# Is support for closest/farthest-corner enabled in ellipse()?`
+   immediately above the entry. `corner` succeeds where `corner-keywords` and `basic-shape` both
+   failed, because a one-word grep cannot be wrong about word order or plurals. The same pass ran
+   two greps on this exact file and missed, both times by pattern-matching a guessed *name*.
+2. **Read the patch**, which names the preference outright — the surer route when the note's wording
+   shares no word with the preference. With a window, `bug-detail.py <bug> --landings A..B`.
+   Without one:
+
+   ```
+   git -C <clone> log --format=%H -1 --grep='Bug 2045278' origin/main
+   git -C <clone> show <sha> -- modules/libpref/init/StaticPrefList.yaml
+   ```
+
+   Phabricator serves the same patch with no clone at all — see
+   [`bugzilla-access.md`](bugzilla-access.md).
+
+**A lookup now distinguishes three outcomes; treat them differently.** `NOT FOUND` plus a list of
+nearest existing names means the name is wrong — take one of the suggestions. `NOT FOUND` with no
+suggestions means no name in the tree shares a distinctive token with it, so go back to the patch.
+**`PRESENT IN THE TREE BUT NOT RESOLVABLE`** means the entry is there but no default was computed
+for it, and the output names which of three reasons applies. Only the first is a tool limit:
+
+- **A symbol in its guard is unmodelled**, so the block was treated as inactive and the preference
+  dropped out. The message names the symbol. `print.experimental.skpdf` is the standing example —
+  `@IS_NIGHTLY_BUILD@` inside `#ifdef MOZ_ENABLE_SKIA_PDF` — and this is the case where reading
+  the matching `moz.configure` option is the next step.
+- **Its guard is false for every configuration you asked about**, correctly evaluated. `#ifdef
+  ANDROID` with `--platforms win` does this to 88 entries. Widen the configurations; there is
+  nothing to look up.
+- **No configuration you asked about reads the file it lives in** — what a narrowed `--platforms`
+  does to the preferences that exist only in `geckoview-prefs.js` (see the Android section below).
+
+The file, line, guard and every `value:` line in the entry are quoted so you can finish the reading
+by hand, and none of the three is evidence of no gate. When an entry holds more than one `value:` —
+190 of them do, because the default itself sits in an `#if` — the output says so rather than picking
+one.
+
 ## The three preference files
 
 | File | Role |
 |---|---|
-| `modules/libpref/init/StaticPrefList.yaml` | Gecko-wide static prefs (~2,710 entries) |
-| `browser/app/profile/firefox.js` | **Desktop** Firefox defaults and overrides (~174 preprocessor conditionals) |
+| `modules/libpref/init/StaticPrefList.yaml` | Gecko-wide static prefs (2,885 entries) |
+| `browser/app/profile/firefox.js` | **Desktop** Firefox defaults and overrides (70 preprocessor conditionals) |
 | `mobile/android/app/geckoview-prefs.js` | **Android** defaults and overrides (145 prefs), shipped with GeckoView and Fenix |
+
+**Every preference count in this file was re-measured at `origin/main` on 2026-08-13** and each is
+reproducible with a grep — the shipped-note counts further down are not covered by that. Most had
+drifted or were never reproducible, so if one looks wrong, re-measure it rather than reasoning from
+it. The entry count is `- name:` lines, of which 173 are written `-   name:`; match
+them with `pref-delta.py`'s `YAML_NAME_RE` rather than a stricter pattern of your own.
 
 The app-level file overrides a StaticPrefList default **for the product that ships it**, so check
 StaticPrefList plus the one belonging to the platform in question — and never let the desktop file
@@ -40,12 +102,17 @@ never opened.
 
 Three mechanisms, in this order:
 
-1. **`geckoview-prefs.js` override.** 40 of its 145 prefs override a StaticPrefList default and 60
-   exist nowhere else, so reading only StaticPrefList gives the wrong answer for Android on 100
-   preferences. `apz.drag.enabled` is `true` in StaticPrefList and `false` here; `browser.fixup.
-   domainwhitelist.localhost` exists only here.
-2. **An `#ifdef ANDROID` / `@IS_ANDROID@` default** inside StaticPrefList — 271 preferences currently
-   resolve differently on Android than on Windows for this reason.
+1. **`geckoview-prefs.js` override.** Read only StaticPrefList and **all 145 of its preferences give
+   the wrong answer on Android**, in two different ways. **40 also exist in StaticPrefList, and all
+   40 set a different value** — `apz.drag.enabled` is `true` there and `false` here. The other **105
+   are absent from StaticPrefList entirely**, so it reports them as not existing at all: 43 of those
+   are declared in no other preference file either (`media.mediadrm-widevinecdm.visible`), and the
+   remaining 62 are declared in the *desktop* files, which Android never reads. The file contains no
+   `#ifdef`, so these are plain declaration counts.
+2. **An `#ifdef ANDROID` / `@IS_ANDROID@` default** inside StaticPrefList — 114 entries carry an
+   Android-conditional default (`@IS_ANDROID@`, `MOZ_WIDGET_ANDROID`, or a bare `ANDROID`), and 85
+   of them do resolve differently on Android than on Windows on Nightly. Grep all three spellings:
+   `\bANDROID\b` alone misses `MOZ_WIDGET_ANDROID`, because the underscore is a word character.
 3. **The Nimbus FML**, `mobile/android/fenix/app/nimbus.fml.yaml`, for Fenix-level features that have
    no Gecko pref at all. A feature can be hardcoded `false` there while every Gecko pref looks
    enabled (bug 2047027, Android tab groups). **Read the per-channel block, not just whether the
@@ -85,15 +152,16 @@ An entry looks like:
 
 Three traps:
 
-1. **`@DEFINE@` indirection.** 131 entries don't hold a literal — they hold a token:
+1. **`@DEFINE@` indirection.** 134 entries don't hold a literal — they hold a token:
 
    ```yaml
    value: @IS_NIGHTLY_BUILD@
    ```
 
    These are resolved by `#define` blocks at the top of the file (`#ifdef NIGHTLY_BUILD` →
-   `#define IS_NIGHTLY_BUILD true` / `#else` → `false`). Most common: `@IS_NIGHTLY_BUILD@` (60),
-   `@IS_ANDROID@` (19), `@IS_EARLY_BETA_OR_EARLIER@` (12), plus `IS_NOT_*` inversions. **A parser
+   `#define IS_NIGHTLY_BUILD true` / `#else` → `false`). Most common: `@IS_NIGHTLY_BUILD@` (64),
+   `@IS_ANDROID@` (19), `@IS_EARLY_BETA_OR_EARLIER@` (11), plus `IS_NOT_*` inversions
+   (`@IS_NOT_ANDROID@` 10, `@IS_NOT_MOBILE@` 9, `@IS_NOT_NIGHTLY_BUILD@` 6). **A parser
    that reports the literal `@IS_NIGHTLY_BUILD@` as the default has told you nothing** — resolve
    the define per channel.
 
@@ -139,7 +207,8 @@ git diff <START>..<END> origin/main -- modules/libpref/init/StaticPrefList.yaml 
 ```
 
 **All three files, or the diff is desktop-only.** Omitting `geckoview-prefs.js` is how an
-Android-only flip goes unseen — it is where 100 of Android's real defaults live (see above).
+Android-only flip goes unseen — it is where 145 of Android's real defaults live, 105 of them found
+in no other file Android reads (see above).
 
 Do **not** replay commit-by-commit. Land → backout → re-land churn inside a single window makes
 per-commit replay actively wrong; an endpoint diff collapses it for free. A real example from one

@@ -97,6 +97,15 @@ by matching recorded commands against the allowlist, not counts of prompts anyon
 - **Gecko reads use the absolute clone path** recorded by `watchlist.py check-setup`, never `~` and
   never `cd`. The path differs per machine, which is why it lives in per-user state and is written to
   the git-ignored `settings.local.json` rather than the shared allowlist.
+- **No shell loops.** `for x in …; do …; done` is one Bash call whose body is not a static prefix, so
+  it prompts for the same reason `$(…)` does.
+- **The same command over N inputs is N calls, not one clever call.** This is the trigger worth
+  recognising, because it is when every rule above gets broken at once and it always feels like
+  tidiness rather than a shortcut. Both forms on the 08-13 pass came from it: four
+  `git rev-list --count` over different tag pairs became one `cd … && echo "$(…)"; echo "$(…)"`, and
+  the same `pref-delta.py --lookup` at two tags became a `for` loop. Each of those calls is
+  individually allowlisted; collapsed, none of them is. Issue them separately — they can go in one
+  message and run in parallel, which is faster than the loop was going to be.
 
 ## Deliberately still prompting
 

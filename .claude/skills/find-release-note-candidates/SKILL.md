@@ -1164,9 +1164,28 @@ Then:
 
 1. **Pref flips** — what became live or hidden, with per-channel defaults and bug numbers. First,
    because it's the highest-signal section.
-2. **Tier 1 / Tier 2 / Tier 3 candidates** — table per tier: bug(s) · **the bug's Bugzilla summary,
-   verbatim** · product::component · category · draft one-liner · gated? · screenshot? ·
-   **basis (verified/inferred)**.
+2. **Tier 1 / Tier 2 / Tier 3 candidates** — **one block per candidate, never one wide table per
+   tier.** Each candidate gets its own two-column table, field name on the left, and its reasoning
+   goes immediately after it, before the next candidate begins:
+
+   ```
+   | | |
+   |---|---|
+   | **Bug** | **2061547** |
+   | **Bugzilla summary (verbatim)** | `exactly as Bugzilla has it` |
+   | **Component** | Core :: CSS Parsing and Computation |
+   | **Category** | Changed |
+   | **Draft note** | your proposed wording |
+   | **Gated?** | the gate, or "no pref gate found" |
+   | **Screenshot?** | yes/no and why |
+   | **Basis** | verified or inferred, and what you actually checked |
+   ```
+
+   **A tier-wide table with those fields as columns is the other reading of this instruction, and
+   it does not work.** Eight columns cannot hold a full draft note in a terminal, and the
+   per-candidate reasoning ends up pooled underneath the table, detached from the row it belongs to —
+   so the reader has to match paragraphs back to rows by bug number. They work one candidate at a
+   time: read the summary, read the draft, decide, move on. Shape the output the way it gets read.
 
    **Always print the bug summary, quoted exactly as Bugzilla has it — do not paraphrase, tidy,
    or fix typos in it.** The user's next action is opening the bug to ask the developer, and the

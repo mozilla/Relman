@@ -329,8 +329,14 @@ def main() -> None:
 
     if not report_only:
         print(f"PAGE   {args.source}")
+        # The no-bug-link count is here to be subtracted. A page carries items that are not Nucleus
+        # notes -- the Developer section's "Developer Information" MDN link is one -- so this total
+        # sits one above `relnote-flag.py --coverage`'s note count, and a review reported both
+        # numbers side by side with nothing to explain the gap.
+        nobug = sum(1 for n in notes if not n["bug"])
         print(f"       {len(notes)} note(s) in {len(sections)} section(s), "
-              f"{sum(len(n['code']) for n in notes)} code span(s)")
+              f"{sum(len(n['code']) for n in notes)} code span(s)"
+              + (f", {nobug} with no bug link" if nobug else ""))
         current = None
         for i, n in enumerate(notes, 1):
             if n["section"] != current:

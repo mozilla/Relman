@@ -103,6 +103,11 @@ AT_DEFINE_RE = re.compile(r"^@(\w+)@$")
 # the end rather than swallowed per-expression.
 _EVAL_FAILURES: list = []
 
+# {pref: {symbols}} for preferences whose value came from a guard this evaluator could not resolve.
+# Separate from _EVAL_FAILURES: those are expressions that would not *parse*, which are loud. These
+# parse perfectly and evaluate to a confident wrong answer, which is worse -- see Preprocessor.unknown.
+_UNRESOLVED: dict = {}
+
 # StaticPrefList entries seen versus kept, per parse, collected the same way. A guard count is not a
 # consequence: two unevaluable guards at FIREFOX_110 hid 1,018 of 2,098 preferences, and "2 guards"
 # is not something a reader turns into "half the file".
@@ -216,13 +221,39 @@ class Preprocessor:
         # failure once hid ~1,000 preferences and was only noticed because one
         # lookup happened to return NOT FOUND, so make it audible instead.
         self.eval_failures: list[str] = []
+        # Symbols referenced by a guard that this evaluator has never heard of. A symbol *known* to
+        # be false and a symbol never modelled are not the same fact, and collapsing them is how
+        # `#if defined(ENABLE_WASM_COMPACT_IMPORTS)` silently took its `#else` branch and reported
+        # javascript.options.wasm_compact_imports as "off by default on all channels" when
+        # moz.configure ships it on everywhere. The expression parses, so eval_failures never sees
+        # it. Anything inside such a guard is a guess and has to be labelled one.
+        self.unknown: set[str] = set()
+        # Unknowns seen while evaluating *this* guard. `self.unknown` is cumulative over the file, so
+        # diffing it before/after attributes a symbol to whichever guard mentioned it first and
+        # leaves every later preference behind the same symbol unflagged -- measured: only 1 of the
+        # 8 `#elif defined(XP_LINUX)` media prefs was caught that way.
+        self._pending: set[str] = set()
+        # What an unknown symbol evaluates to. False for the real reading; flipped to True by
+        # _eval_guard to ask whether the unknown could have changed the answer at all.
+        self._unknown_as = False
+        self.stack: list[dict] = []
+
+    @property
+    def unresolved_here(self) -> set[str]:
+        """Unknown symbols governing the position the generator has reached."""
+        return {s for f in self.stack for s in f.get("unknown", ())}
 
     def _defined(self, name: str) -> bool:
         if name in self.symbols:
             return bool(self.symbols[name])
-        return name in self.defines
+        if name in self.defines:
+            return True
+        self.unknown.add(name)
+        self._pending.add(name)
+        return self._unknown_as
 
-    def _eval(self, expr: str) -> bool:
+    def _eval(self, expr: str, unknown_as: bool = False) -> bool:
+        self._unknown_as = unknown_as
         e = expr.strip()
         if not e:
             return False
@@ -241,7 +272,9 @@ class Preprocessor:
             if w in self.defines:
                 v = self.defines[w].strip()
                 return "True" if v not in ("", "0", "false", "False") else "False"
-            return "False"
+            self.unknown.add(w)
+            self._pending.add(w)
+            return str(self._unknown_as)
 
         e = re.sub(r"[A-Za-z_]\w*", ident, e)
         e = e.replace("&&", " and ").replace("||", " or ").replace("!", " not ")
@@ -251,34 +284,73 @@ class Preprocessor:
             self.eval_failures.append(expr.strip()[:100])
             raise CannotEvaluate(expr.strip()[:100])
 
+    def _eval_guard(self, expr: str) -> bool:
+        """Evaluate a guard, forgetting unknown symbols that cannot change its result.
+
+        An unknown only makes the value a guess if flipping it flips the guard:
+        `#if defined(XP_WIN) || defined(SOMETHING_UNMODELLED)` on Windows is settled by XP_WIN alone,
+        so labelling that value a guess would send a reader to StaticPrefList for nothing. Measured
+        when this went in: it dropped 5 of 54 flags, each confirmed against its enclosing guard --
+        `browser.low_commit_space_threshold_mb` sits under `#if defined(XP_WIN) || defined(XP_LINUX)`
+        and is settled by XP_WIN on Windows whatever XP_LINUX turns out to be.
+
+        **Per guard, deliberately.** A coarser check that flipped every unknown for a whole run and
+        compared final values called all 54 genuine, because it conflates "this guard is sensitive"
+        with "some guard in this preference's chain is sensitive". Only the first question decides
+        whether the value being printed is a reading or a guess.
+        """
+        self._pending.clear()
+        val = self._eval(expr)
+        if self._pending:
+            try:
+                if self._eval(expr, unknown_as=True) == val:
+                    self._pending.clear()
+            except CannotEvaluate:
+                pass  # the probe is best-effort; the real reading above already succeeded
+            finally:
+                # Restore the real reading. `ifdef`/`ifndef` call _defined directly rather than
+                # through _eval, so a probe left set here silently flips *their* verdict too --
+                # measured as 54 flagged preferences becoming 73, with values changing to match.
+                self._unknown_as = False
+        return val
+
     def run(self, text: str):
         """Yield (line, active) for every line, honouring #if/#else/#endif nesting."""
-        stack: list[dict] = []  # each: {"active": bool, "taken": bool, "parent": bool}
+        stack = self.stack  # each: {"active", "taken", "parent", "unknown"}
+        stack.clear()
         for line in text.splitlines():
             m = COND_RE.match(line)
             if m and is_directive(m.group(1), m.group(2)):
                 kind, rest = m.group(1), m.group(2)
                 parent = stack[-1]["active"] if stack else True
                 if kind in ("ifdef", "ifndef", "if"):
+                    self._pending.clear()
                     if kind == "ifdef":
                         val = self._defined(rest.strip().split()[0]) if rest.strip() else False
                     elif kind == "ifndef":
                         val = not (self._defined(rest.strip().split()[0]) if rest.strip() else True)
                     else:
                         try:
-                            val = self._eval(rest)
+                            val = self._eval_guard(rest)
                         except CannotEvaluate:
                             # Prose, not a guard -- see CannotEvaluate. Fall through and treat the
                             # line as ordinary text, opening no block.
                             continue
-                    stack.append({"active": parent and val, "taken": val, "parent": parent})
+                    stack.append({"active": parent and val, "taken": val, "parent": parent,
+                                  "unknown": set(self._pending)})
                 elif kind == "elif":
                     if stack:
                         f = stack[-1]
                         try:
-                            val = self._eval(rest)
+                            val = self._eval_guard(rest)
                         except CannotEvaluate:
                             continue
+                        # An `elif` is a guard like any other, and capturing only the opening `if`
+                        # left 8 preferences reading their value out of an unmodelled
+                        # `#elif defined(XP_OPENBSD)` and printing it as fact. Unioned rather than
+                        # replaced: the `if` condition's unknowns still govern this branch and the
+                        # `#else` after it.
+                        f["unknown"] = f.get("unknown", set()) | set(self._pending)
                         f["active"] = f["parent"] and (not f["taken"]) and val
                         f["taken"] = f["taken"] or val
                 elif kind == "else":
@@ -337,6 +409,11 @@ def parse_static_pref_list(text: str, symbols: dict[str, bool]) -> dict[str, dic
                 cur["via_define"] = am.group(1)
             else:
                 cur["value"] = raw
+            # Attributed to the value line, not the name: `#if defined(...)` typically opens *after*
+            # `- name:` and wraps only the value, so hooking the name misses exactly the shape that
+            # motivated this -- wasm_compact_imports among them.
+            if pp.unresolved_here:
+                _UNRESOLVED.setdefault(cur["name"], set()).update(pp.unresolved_here)
             continue
         tm = YAML_TYPE_RE.match(line)
         if tm:
@@ -677,6 +754,170 @@ def classify(values: dict[tuple[str, str], str], channels: list[str], platforms:
     return "; ".join(rendered)
 
 
+# A token appearing in more than this many preference names is not distinctive enough to be a
+# useful hint: `enabled` is in over a thousand of them, `corner` is in three.
+_TOKEN_CAP = 25
+
+# Every symbol this tool has a value for, plus the words a guard is built from.
+_MODELLED_SYMBOLS = frozenset().union(*(d.keys() for d in CHANNELS.values()),
+                                      *(d.keys() for d in PLATFORMS.values()))
+_GUARD_WORDS = frozenset({"if", "ifdef", "ifndef", "elif", "defined"})
+
+
+def unmodelled_symbols(guard: str) -> list[str]:
+    """Identifiers in a guard line that this tool holds no value for.
+
+    Separates the two reasons a guarded entry can be missing from the resolved table, which need
+    opposite responses. `#ifdef MOZ_ENABLE_SKIA_PDF` is opaque, so the block was dropped and no
+    answer exists. `#ifdef ANDROID` is not: it was evaluated, correctly, to false -- 88 entries go
+    missing that way from a `--platforms win` run, and telling the reader the tool cannot evaluate
+    `ANDROID` would send them to moz.configure for an answer already on screen.
+    """
+    m = COND_RE.match(guard)
+    expr = _strip_trailing_comment(m.group(2)) if m else guard
+    ids = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", expr))
+    return sorted(ids - _MODELLED_SYMBOLS - _GUARD_WORDS)
+
+# Keyed by (rev, path): a lookup of several missing names would otherwise re-read the same
+# 24,000-line file once per name.
+_file_cache: dict[tuple[str, str], str] = {}
+
+
+def locate_entry(repo: Path, rev: str, name: str) -> list[dict]:
+    """Where a preference is *written*, whether or not its guard could be evaluated.
+
+    A name missing from the resolved table has two causes needing opposite responses: it does not
+    exist, or it exists inside a block whose guard this tool cannot evaluate -- in which case the
+    block is treated as inactive and every preference in it disappears with nothing on screen.
+    `print.experimental.skpdf` is the second kind: StaticPrefList.yaml sets it to
+    `@IS_NIGHTLY_BUILD@` inside `#ifdef MOZ_ENABLE_SKIA_PDF`, and `--lookup` called it absent.
+    That is the same confident wrong answer the per-preference guess warning exists to prevent,
+    one step earlier, and the global warning cannot cover it either: that list is built from
+    preferences that reached the table, and these never do.
+
+    Grep-shaped on purpose -- it must find entries the parser has already discarded, so it cannot
+    reuse the parser.
+    """
+    quoted = (f'"{name}"', f"'{name}'")
+    found = []
+    for path in PREF_FILES:
+        text = _file_cache.get((rev, path))
+        if text is None:
+            text = show_optional(repo, rev, path) or ""
+            _file_cache[(rev, path)] = text
+        if not text:
+            continue
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
+            if path == STATIC_PREF_LIST:
+                # `YAML_NAME_RE`, not a pattern of its own, and the entry form rather than the bare
+                # name: a comment quoting some other preference would report one as present that is
+                # not, while a *stricter* pattern than the parser's would make an entry invisible
+                # here that the parser can see -- backwards, for a function whose whole job is
+                # finding entries the parser dropped. The spacing does vary: 173 of the 2,885
+                # entries are written `-   name:`.
+                m = YAML_NAME_RE.match(line)
+                if not m or m.group(1) != name:
+                    continue
+            elif not (("pref(" in line) and any(q in line for q in quoted)):
+                continue
+            # The nearest unclosed #if above the entry is the guard that dropped it. Track which
+            # branch the entry sits in: reporting `#ifdef MOZ_X` for an entry in that block's
+            # `#else` inverts the answer, which is exactly the error this helper exists to stop.
+            guard, branch, depth = None, "", 0
+            for prev in reversed(lines[:i]):
+                # `COND_RE` *and* `is_directive`, the same pair the preprocessor itself uses. The
+                # regex alone accepts prose: `# if disabled and when about:webrtc is not in the
+                # foreground history data` is a YAML comment in this file, and reading it as an
+                # unclosed `#if` misattributes the guard of every entry below it.
+                m = COND_RE.match(prev)
+                if not m or not is_directive(m.group(1), m.group(2)):
+                    continue
+                kw = m.group(1)
+                if kw == "endif":
+                    depth += 1
+                elif kw in ("else", "elif"):
+                    # Scanning upwards, so the first one seen is the branch the entry is in; an
+                    # earlier `#elif` of the same chain must not overwrite it.
+                    if depth == 0 and not branch:
+                        branch = f" (the entry is in its #{kw} branch)"
+                elif depth == 0:
+                    guard = prev.strip()
+                    break
+                else:
+                    depth -= 1
+            # Every `value:` line in the entry, not the first one within a fixed window. 190 of the
+            # 2,885 entries hold more than one, because the default itself sits in an `#if` --
+            # `bidi.edit.caret_movement_style` is `1` on Nightly-not-Linux and `2` otherwise -- and
+            # quoting one of those as "the" value is the same single-branch-as-fact error the
+            # per-preference guess warning exists to prevent. Walking to the next entry rather than
+            # counting lines also fixes 4 entries whose spacing put a neighbour's value in range.
+            values = []
+            for nxt in lines[i + 1:]:
+                if YAML_NAME_RE.match(nxt):
+                    break
+                if nxt.strip().startswith("value:"):
+                    values.append(nxt.strip())
+            found.append({"path": path, "line": i + 1, "guard": guard, "branch": branch,
+                          "unmodelled": unmodelled_symbols(guard) if guard else [],
+                          "values": values})
+    return found
+
+
+def _tokens(s: str) -> set[str]:
+    """Words in a preference name, splitting on punctuation and on camelCase humps.
+
+    `places.semanticHistory.featureGate` has to yield `history`, or a hint would never connect a
+    guess to it.
+    """
+    return {t.lower() for part in re.split(r"[^A-Za-z0-9]+", s)
+            for t in re.findall(r"[A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+", part)}
+
+
+def _shares(tok: str, cand_tokens: set[str]) -> bool:
+    """Whether a guess token matches one of a candidate's tokens at its start.
+
+    Prefix rather than substring, so `corner` still reaches `ellipse-corners` while `nope` stops
+    reaching `useCrossOriginOpenerPolicy` through the middle of `OriginOpener`. The candidate side
+    is length-limited here because a short token prefixes half the file; the guess side is filtered
+    by the caller.
+    """
+    return any(len(c) >= 4 and (c.startswith(tok) or tok.startswith(c)) for c in cand_tokens)
+
+
+def near_names(name: str, table, limit: int = 5) -> list[str]:
+    """Preferences sharing a distinctive token with `name`, rarest shared token first.
+
+    A lookup misses for two very different reasons -- the preference does not exist, or the name
+    handed to it was reconstructed rather than read -- and the second is the common one. One review
+    pass derived three names from the prose of a release note (`layout.css.alpha-function.enabled`,
+    `layout.css.basic-shape-corner-keywords.enabled`), got `NOT FOUND` for each, and reported the
+    gating as undetermined; the real names shared a whole token with the guesses in every case.
+    Ranking by how *rare* the shared token is, rather than how long it is, is what makes the hint
+    worth reading: length would put `enabled` first every time.
+    """
+    gtoks = {t for t in _tokens(name) if len(t) >= 4}
+    if not gtoks:
+        return []
+    cand_toks = {c: _tokens(c) for c in table}
+    best: dict[str, tuple[int, int, str]] = {}
+    for tok in gtoks:
+        hits = sorted(c for c, ct in cand_toks.items() if _shares(tok, ct))
+        if not hits or len(hits) > _TOKEN_CAP:
+            continue
+        for cand in hits:
+            # Rarity first, then how much of the guess the candidate accounts for. Rarity alone
+            # left `layout.css.alpha-color-function.enabled` fourth behind three unrelated prefs
+            # that merely contain `alpha`; breaking the tie on shared-token count puts it first.
+            # The name ends the tuple so the ordering is total -- candidates tied on both must not
+            # fall back on set iteration order, which PYTHONHASHSEED varies between runs.
+            shared = sum(1 for t in gtoks if _shares(t, cand_toks[cand]))
+            rank = (len(hits), -shared, cand)
+            if cand not in best or rank < best[cand]:
+                best[cand] = rank
+    return sorted(best, key=lambda c: best[c])[:limit]
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description="Detect preference flips and resolve effective defaults per channel."
@@ -712,6 +953,21 @@ def main() -> None:
     eff = effective_defaults(repo, args.rev, channels, platforms)
     print(f"# {len(eff['table'])} preferences resolved across "
           f"{len(channels)}x{len(platforms)} build configurations", file=sys.stderr)
+    if _UNRESOLVED:
+        # Louder than the parse-failure warning below, because these answers *look* fine. Each of
+        # these preferences was read out of one branch of a guard whose condition depends on a build
+        # define this evaluator does not model, so the printed default is whichever branch happened
+        # to be taken -- not a fact. Caught 2026-08-13 on javascript.options.wasm_compact_imports,
+        # which read "off by default on all channels" while shipping on by default everywhere.
+        print(f"# WARNING: {len(_UNRESOLVED)} preference(s) sit behind a build define this tool "
+              "cannot resolve, so their default below is a GUESS, not a reading:", file=sys.stderr)
+        for name in sorted(_UNRESOLVED)[:12]:
+            print(f"#   {name}  (depends on {', '.join(sorted(_UNRESOLVED[name]))})", file=sys.stderr)
+        if len(_UNRESOLVED) > 12:
+            print(f"#   ... and {len(_UNRESOLVED) - 12} more", file=sys.stderr)
+        print("#   Read the entry in StaticPrefList.yaml and the matching moz.configure option "
+              "before treating any of these as gated or ungated.", file=sys.stderr)
+
     bad = sorted({e for pp in _EVAL_FAILURES for e in pp.eval_failures})
     if bad:
         # Quantified, because a guard count is not a consequence: two of these once hid 1,018 of
@@ -739,10 +995,15 @@ def main() -> None:
         for n in names:
             vals = eff["table"].get(n)
             if not vals:
-                results.append({"pref": n, "found": False})
+                # Nearest-name hints are only reachable when the entry is genuinely absent, and
+                # building them tokenises all 5,538 names, so don't pay for them otherwise.
+                written = locate_entry(repo, args.rev, n)
+                results.append({"pref": n, "found": False, "written_at": written,
+                                "near": [] if written else near_names(n, eff["table"])})
                 continue
             results.append({
                 "pref": n, "found": True,
+                "unresolved_define": sorted(_UNRESOLVED.get(n, ())),
                 "summary": classify(vals, channels, platforms),
                 "meta": eff["meta"].get(n, {}),
                 "values": {f"{c}/{p}": vals.get((c, p)) for c in channels for p in platforms},
@@ -752,11 +1013,66 @@ def main() -> None:
         else:
             for r in results:
                 if not r["found"]:
+                    if r["written_at"]:
+                        # Not "NOT FOUND": the entry is in the file. Saying otherwise is a wrong
+                        # answer, not a missing one, and the quoted guard and value line are what
+                        # the reader actually needs to finish the job by hand.
+                        print(f"{r['pref']}: PRESENT IN THE TREE BUT NOT RESOLVABLE")
+                        for w in r["written_at"]:
+                            print(f"  {w['path']}:{w['line']}")
+                            for v in w["values"]:
+                                print(f"      {v}")
+                            if len(w["values"]) > 1:
+                                print(f"      ^ {len(w['values'])} value: lines -- the default is "
+                                      f"itself conditional, so none of these is 'the' value")
+                            if w["guard"] and w["unmodelled"]:
+                                print(f"    inside {w['guard']}{w['branch']} -- this tool holds no "
+                                      f"value for {', '.join(w['unmodelled'])}, so the block was "
+                                      f"treated as inactive and the preference dropped out")
+                            elif w["guard"]:
+                                print(f"    inside {w['guard']}{w['branch']}, which is false for "
+                                      f"every configuration asked about, so the preference is not "
+                                      f"in those builds")
+                        if any(w["unmodelled"] for w in r["written_at"]):
+                            print("    *** NO DEFAULT WAS COMPUTED, because a symbol above is "
+                                  "unmodelled. Read the entry and the matching moz.configure "
+                                  "option; do not report this as ungated. ***")
+                        else:
+                            # Reached two ways, neither of them a tool limitation: a guard that
+                            # correctly excludes every requested configuration, or an entry in a
+                            # file none of them reads -- 43 preferences live only in
+                            # geckoview-prefs.js, so `--platforms win` drops every one.
+                            print(f"    *** NO DEFAULT WAS COMPUTED for "
+                                  f"{','.join(channels)} x {','.join(platforms)}: the entry exists "
+                                  f"but nothing asked about includes it. Widen "
+                                  f"--platforms/--channels; do not report this as ungated. ***")
+                        continue
                     print(f"{r['pref']}: NOT FOUND at {args.rev}")
+                    # Says what the miss does and does not establish. Read as a fact about the
+                    # tree, this line becomes "the feature has no preference gate" -- which is
+                    # how a review pass came to report a Nightly-only feature's gating as
+                    # undetermined while the pref sat three lines from a token it had grepped.
+                    if r["near"]:
+                        print(f"  the name is absent at this revision, which is not the same as "
+                              f"the feature being ungated. Nearest names in the tree: "
+                              f"{', '.join(r['near'])}")
+                    else:
+                        print("  the name is absent at this revision, which is not the same as the "
+                              "feature being ungated, and no existing name shares a distinctive "
+                              "token with it -- if you built this name rather than read it, get it "
+                              "from the patch instead (see gating.md, 'Which preference is it?')")
                     continue
                 m = r["meta"]
                 via = f", via @{m['via_define']}@" if m.get("via_define") else ""
                 print(f"{r['pref']}")
+                if r["unresolved_define"]:
+                    # Attached to the pref, not left to the global warning above: that one truncates,
+                    # and the whole point of a lookup is an answer about *this* pref. The summary
+                    # below is one branch of an unresolved guard, so it is a guess with a shape --
+                    # print it, but never let it be quoted as verified.
+                    print(f"  *** DEFAULT IS A GUESS: guarded by "
+                          f"{', '.join(r['unresolved_define'])}, which this tool cannot resolve. "
+                          f"Read the StaticPrefList entry and the matching moz.configure option. ***")
                 print(f"  {r['summary']}")
                 print(f"  source: {m.get('source')}{via}"
                       + (f", mirror: {m['mirror']}" if m.get("mirror") else "")
