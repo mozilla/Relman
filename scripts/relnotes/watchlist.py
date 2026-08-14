@@ -806,7 +806,8 @@ def main() -> None:
                         help="why -- appended to the item's log with the status change")
         sp.set_defaults(func=lambda args, _st=st: set_status(args, _st))
 
-    r = add_parser("rm")
+    r = add_parser("rm", help="delete an entry outright -- prefer a status change, which keeps "
+                              "the note trail")
     r.add_argument("key")
     r.set_defaults(func=cmd_rm)
 

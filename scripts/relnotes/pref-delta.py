@@ -11,7 +11,7 @@ Two jobs, both of which the release-note discovery pass gets wrong by hand:
    tell you which preference a changed `value:` line belongs to, and getting that wrong drops
    changes silently (see `changed_prefs`).
 
-2. **Effective default per channel.** `StaticPrefList.yaml` sets 131 defaults through `@DEFINE@`
+2. **Effective default per channel.** `StaticPrefList.yaml` sets many defaults through `@DEFINE@`
    indirection (`value: @IS_NIGHTLY_BUILD@`) and wraps whole entries in `#ifdef` blocks, so the
    literal on the `value:` line is frequently not the answer. This script runs a small C-style
    preprocessor over the file once per (channel, platform) and reports what each channel actually
@@ -39,7 +39,7 @@ import trainlib  # noqa: E402
 
 STATIC_PREF_LIST = "modules/libpref/init/StaticPrefList.yaml"
 # The other half of the shared base. StaticPrefList holds prefs with C++ mirrors; everything else
-# with a default lives here -- 1,968 `pref()` declarations, including whole families like
+# with a default lives here -- roughly two thousand `pref()` declarations, whole families like
 # `captivedetect.*`. Omitting it made `--lookup captivedetect.canonicalURL` answer
 # "NOT FOUND at origin/main" for a preference three lines long in the tree, and made every flip in
 # this file invisible to a scan that calls FLIPPED ON the strongest signal there is. It is not rare
@@ -76,6 +76,29 @@ COND_RE = re.compile(r"^\s*#\s*(ifdef|ifndef|if|elif|else|endif)\b\s*(.*)$")
 # exist, so column position alone cannot decide it -- validate the expression shape.
 PP_EXPR_OK = re.compile(r"^[\w\s()!&|<>=.+\-*/]*$")
 PP_HAS_SYMBOL = re.compile(r"\bdefined\b|[A-Z_]{2,}|\d")
+
+
+def strip_yaml_comment(value: str) -> str:
+    """Drop a trailing `# …` comment from a YAML value, honouring quotes.
+
+    Dozens of StaticPrefList's `value:` lines carry one, and capturing it makes the default a
+    different string -- `2 # See Bug 1638240` rather than `2`. Values are compared as strings to
+    detect flips, so an edit to one of those comments would report as a preference change in the
+    section a pass treats as its strongest release-note signal.
+
+    `_strip_trailing_comment` cannot be reused: it cuts from `#` to end of line unconditionally, and
+    some values are colours written `"#EE0000"`, which that would truncate to a bare quote.
+    """
+    quote = None
+    for i, ch in enumerate(value):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#":
+            return value[:i].strip()
+    return value.strip()
 
 
 def _strip_trailing_comment(rest: str) -> str:
@@ -162,19 +185,42 @@ CHANNELS = {
     },
 }
 
+# Values checked against https://wiki.mozilla.org/Platform/Platform-specific_build_defines and
+# `build/moz.configure/init.configure`, which is authoritative when the two disagree (the wiki's
+# prefs-file table still lists `mobile/android/app/mobile.js`, gone from the tree).
+#
+# **`XP_LINUX` is true on Android**, not just desktop Linux: `set_define("XP_LINUX",
+# target_has_linux_kernel)`. Over 20 files write `defined(XP_LINUX) && !defined(ANDROID)` precisely
+# because they need desktop Linux alone. Modelling it as linux-only gives 14 preferences the wrong
+# Android answer, which is worse than the guess it replaces.
+#
+# The BSDs and Solaris are false everywhere here because this tool models four Firefox
+# configurations, none of which is a BSD or Solaris build; `MOZ_THUNDERBIRD` for the same reason.
+# Adding them is what lets a `#if defined(XP_LINUX) || defined(XP_FREEBSD)` guard resolve at all.
 PLATFORMS = {
     "win": {"XP_WIN": True, "XP_MACOSX": False, "XP_DARWIN": False, "MOZ_WIDGET_GTK": False,
-            "ANDROID": False, "MOZ_WIDGET_ANDROID": False, "XP_UNIX": False,
-            "UNIX_BUT_NOT_MAC": False, "XP_IOS": False, "MOZ_WIDGET_UIKIT": False},
+            "ANDROID": False, "MOZ_WIDGET_ANDROID": False, "XP_UNIX": False, "XP_LINUX": False,
+            "UNIX_BUT_NOT_MAC": False, "XP_IOS": False, "MOZ_WIDGET_UIKIT": False,
+            "XP_FREEBSD": False, "XP_OPENBSD": False, "XP_NETBSD": False, "XP_SOLARIS": False,
+            "MOZ_THUNDERBIRD": False},
     "mac": {"XP_WIN": False, "XP_MACOSX": True, "XP_DARWIN": True, "MOZ_WIDGET_GTK": False,
-            "ANDROID": False, "MOZ_WIDGET_ANDROID": False, "XP_UNIX": True,
-            "UNIX_BUT_NOT_MAC": False, "XP_IOS": False, "MOZ_WIDGET_UIKIT": False},
+            "ANDROID": False, "MOZ_WIDGET_ANDROID": False, "XP_UNIX": True, "XP_LINUX": False,
+            "UNIX_BUT_NOT_MAC": False, "XP_IOS": False, "MOZ_WIDGET_UIKIT": False,
+            "XP_FREEBSD": False, "XP_OPENBSD": False, "XP_NETBSD": False, "XP_SOLARIS": False,
+            "MOZ_THUNDERBIRD": False},
     "linux": {"XP_WIN": False, "XP_MACOSX": False, "XP_DARWIN": False, "MOZ_WIDGET_GTK": True,
-              "ANDROID": False, "MOZ_WIDGET_ANDROID": False, "XP_UNIX": True,
-              "UNIX_BUT_NOT_MAC": True, "XP_IOS": False, "MOZ_WIDGET_UIKIT": False},
+              "ANDROID": False, "MOZ_WIDGET_ANDROID": False, "XP_UNIX": True, "XP_LINUX": True,
+              "UNIX_BUT_NOT_MAC": True, "XP_IOS": False, "MOZ_WIDGET_UIKIT": False,
+              "XP_FREEBSD": False, "XP_OPENBSD": False, "XP_NETBSD": False, "XP_SOLARIS": False,
+              "MOZ_THUNDERBIRD": False},
+    # `UNIX_BUT_NOT_MAC` stays False here even though XP_UNIX is true and XP_MACOSX is not: Gecko
+    # uses that symbol in `firefox.js` only, which is never read for Android, so the value is
+    # unreachable rather than wrong.
     "android": {"XP_WIN": False, "XP_MACOSX": False, "XP_DARWIN": False, "MOZ_WIDGET_GTK": False,
-                "ANDROID": True, "MOZ_WIDGET_ANDROID": True, "XP_UNIX": True,
-                "UNIX_BUT_NOT_MAC": False, "XP_IOS": False, "MOZ_WIDGET_UIKIT": False},
+                "ANDROID": True, "MOZ_WIDGET_ANDROID": True, "XP_UNIX": True, "XP_LINUX": True,
+                "UNIX_BUT_NOT_MAC": False, "XP_IOS": False, "MOZ_WIDGET_UIKIT": False,
+                "XP_FREEBSD": False, "XP_OPENBSD": False, "XP_NETBSD": False, "XP_SOLARIS": False,
+                "MOZ_THUNDERBIRD": False},
 }
 
 DESKTOP = ["win", "mac", "linux"]
@@ -400,7 +446,7 @@ def parse_static_pref_list(text: str, symbols: dict[str, bool]) -> dict[str, dic
             continue
         vm = YAML_VALUE_RE.match(line)
         if vm:
-            raw = vm.group(1).strip()
+            raw = strip_yaml_comment(vm.group(1))
             am = AT_DEFINE_RE.match(raw)
             if am:
                 # @IS_NIGHTLY_BUILD@ -> resolve through the #define table.
@@ -779,7 +825,7 @@ def unmodelled_symbols(guard: str) -> list[str]:
     return sorted(ids - _MODELLED_SYMBOLS - _GUARD_WORDS)
 
 # Keyed by (rev, path): a lookup of several missing names would otherwise re-read the same
-# 24,000-line file once per name.
+# 20,000-line file once per name.
 _file_cache: dict[tuple[str, str], str] = {}
 
 
@@ -814,7 +860,7 @@ def locate_entry(repo: Path, rev: str, name: str) -> list[dict]:
                 # name: a comment quoting some other preference would report one as present that is
                 # not, while a *stricter* pattern than the parser's would make an entry invisible
                 # here that the parser can see -- backwards, for a function whose whole job is
-                # finding entries the parser dropped. The spacing does vary: 173 of the 2,885
+                # finding entries the parser dropped. The spacing does vary: a subset of the
                 # entries are written `-   name:`.
                 m = YAML_NAME_RE.match(line)
                 if not m or m.group(1) != name:
@@ -846,8 +892,8 @@ def locate_entry(repo: Path, rev: str, name: str) -> list[dict]:
                     break
                 else:
                     depth -= 1
-            # Every `value:` line in the entry, not the first one within a fixed window. 190 of the
-            # 2,885 entries hold more than one, because the default itself sits in an `#if` --
+            # Every `value:` line in the entry, not the first one within a fixed window. Hundreds of
+            # entries hold more than one, because the default itself sits in an `#if` --
             # `bidi.edit.caret_movement_style` is `1` on Nightly-not-Linux and `2` otherwise -- and
             # quoting one of those as "the" value is the same single-branch-as-fact error the
             # per-preference guess warning exists to prevent. Walking to the next entry rather than
@@ -996,7 +1042,7 @@ def main() -> None:
             vals = eff["table"].get(n)
             if not vals:
                 # Nearest-name hints are only reachable when the entry is genuinely absent, and
-                # building them tokenises all 5,538 names, so don't pay for them otherwise.
+                # building them tokenises every resolved name, so don't pay for them otherwise.
                 written = locate_entry(repo, args.rev, n)
                 results.append({"pref": n, "found": False, "written_at": written,
                                 "near": [] if written else near_names(n, eff["table"])})

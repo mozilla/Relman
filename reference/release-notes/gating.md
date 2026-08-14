@@ -30,7 +30,32 @@ undetermined.
 (`layout.css.basic-shape-corner-keywords.enabled`, `layout.css.alpha-function.enabled`,
 `layout.css.relative-color-syntax.alpha.enabled`) were all absent from the tree. Read it instead:
 
-1. **Grep the shortest distinctive token**, never a candidate name:
+1. **For a web-platform surface, grep `dom/webidl` for the API name the note already gives you.**
+   The `[Pref=…]` annotation names the gate outright, and it is the only method that works when the
+   gate is older than the change:
+
+   ```
+   git -C <clone> grep -n 'StylePropertyMap' origin/main -- 'dom/webidl/*.webidl'
+   ```
+
+   ```
+   CSSStyleRule.webidl:50: [SameObject, Pref="layout.css.typed-om.enabled"] ... styleMap;
+   Element.webidl:459:     [SameObject, Pref="layout.css.typed-om.enabled"] ... attributeStyleMap;
+   ```
+
+   All 152 preferences named this way are also declared in StaticPrefList, so this is a *reverse
+   lookup* — API name to preference — not a second place a gate hides. It is the fastest route for a
+   CSS/DOM/JS note because the note names the interface.
+
+   **The annotation sits on the entry points, not on the interface**: `StylePropertyMap.webidl`
+   itself carries none, and the gate is on `Element.attributeStyleMap` and `CSSStyleRule.styleMap`.
+   Grep the API name across the whole directory rather than opening the file that shares its name.
+
+   **`[Func=…]` names a C++ predicate, not a preference, and no lookup can resolve it** — 272 of
+   these, against 579 `[Pref=…]`. `ONNX.webidl`'s `Func="InferenceSession::InInferenceProcess"`
+   exposes the interface only inside Firefox's inference process, so it is invisible to web content
+   however the preferences read. Read the predicate.
+2. **Grep the shortest distinctive token** in StaticPrefList:
 
    ```
    git -C <clone> grep -n 'corner' origin/main -- modules/libpref/init/StaticPrefList.yaml
@@ -40,17 +65,31 @@ undetermined.
    immediately above the entry. `corner` succeeds where `corner-keywords` and `basic-shape` both
    failed, because a one-word grep cannot be wrong about word order or plurals. The same pass ran
    two greps on this exact file and missed, both times by pattern-matching a guessed *name*.
-2. **Read the patch**, which names the preference outright — the surer route when the note's wording
-   shares no word with the preference. With a window, `bug-detail.py <bug> --landings A..B`.
-   Without one:
+
+   **Take the token from the feature area, not from the API being added.** `stylepropertymap`
+   matches nothing in that file; `typed`, from the note's own "CSS Typed Object Model", matches 10
+   lines including `layout.css.typed-om.enabled`. If the obvious noun returns nothing, try the
+   broader one before concluding anything.
+3. **Read the patch** — the surer route when the note's wording shares no word with the preference.
+   With a window, `bug-detail.py <bug> --landings A..B`. Without one:
 
    ```
-   git -C <clone> log --format=%H -1 --grep='Bug 2045278' origin/main
+   git -C <clone> log --format='%H %s' --grep='Bug 2045278' origin/main
    git -C <clone> show <sha> -- modules/libpref/init/StaticPrefList.yaml
    ```
 
-   Phabricator serves the same patch with no clone at all — see
-   [`bugzilla-access.md`](bugzilla-access.md).
+   **List every landing; do not take the newest.** `log -1` on bug 2057406 returns "Annotate another
+   passing test", not the implementation. Phabricator serves the same patches with no clone at all —
+   see [`bugzilla-access.md`](bugzilla-access.md).
+
+**A patch that touches no preference file is not evidence of no gate.** This is the failure the
+methods above are ordered to prevent, and the one that shipped a wrong note. Bug 2057406 added
+`StylePropertyMap.delete()` across `nsDOMCSSDeclaration.h`, `StylePropertyMap.cpp`,
+`StylePropertyMapReadOnly.h`, `glue.rs` and WPT metadata — **no preference file at all** — because
+the interface had been gated behind `layout.css.typed-om.enabled` (`@IS_NIGHTLY_BUILD@`,
+Nightly-only) long before. Reading the patch answers *no gate in this change*, a different claim
+from *no gate*: the gate belongs to the surface a change extends, not to the change. Adding a method
+to an existing interface is where the two come apart, and that is common in web-platform work.
 
 **A lookup now distinguishes three outcomes; treat them differently.** `NOT FOUND` plus a list of
 nearest existing names means the name is wrong — take one of the suggestions. `NOT FOUND` with no
@@ -81,11 +120,12 @@ one.
 | `browser/app/profile/firefox.js` | **Desktop** Firefox defaults and overrides (70 preprocessor conditionals) |
 | `mobile/android/app/geckoview-prefs.js` | **Android** defaults and overrides (145 prefs), shipped with GeckoView and Fenix |
 
-**Every preference count in this file was re-measured at `origin/main` on 2026-08-13** and each is
-reproducible with a grep — the shipped-note counts further down are not covered by that. Most had
-drifted or were never reproducible, so if one looks wrong, re-measure it rather than reasoning from
-it. The entry count is `- name:` lines, of which 173 are written `-   name:`; match
-them with `pref-delta.py`'s `YAML_NAME_RE` rather than a stricter pattern of your own.
+**Every preference count in this file was re-measured at `origin/main` on 2026-08-13**, and the
+`dom/webidl` annotation counts on 2026-08-14; each is reproducible with a grep. The shipped-note
+counts further down are not covered by that. Most had drifted or were never reproducible, so if one
+looks wrong, re-measure it rather than reasoning from it. The entry count is `- name:` lines, of
+which 173 are written `-   name:`; match them with `pref-delta.py`'s `YAML_NAME_RE` rather than a
+stricter pattern of your own.
 
 The app-level file overrides a StaticPrefList default **for the product that ships it**, so check
 StaticPrefList plus the one belonging to the platform in question — and never let the desktop file
@@ -242,6 +282,16 @@ off-by-default nature must be in the first sentence.
 platform qualifier. But confirm it from the **changed file paths**, not the bug's component or
 summary — see the scoping section of [`bugzilla-access.md`](bugzilla-access.md). Narrow platform
 reach does not disqualify a note: several shipped `Fixed` notes are macOS- or Windows-only.
+
+**`XP_LINUX` is true on Android.** It is `set_define("XP_LINUX", target_has_linux_kernel)` in
+`build/moz.configure/init.configure`, so `#ifdef XP_LINUX` covers desktop Linux *and* Android —
+which is why over 20 files write `defined(XP_LINUX) && !defined(ANDROID)` when they mean desktop
+Linux alone. Reading such a guard as desktop-only inverts the Android answer on 14 preferences.
+
+[Platform-specific build defines](https://wiki.mozilla.org/Platform/Platform-specific_build_defines)
+is the per-platform table for `XP_*` and `MOZ_WIDGET_*`, and it is worth opening before reasoning
+about any guard. `init.configure` wins where the two disagree: the wiki's prefs-file table still
+lists `mobile/android/app/mobile.js`, which no longer exists in the tree.
 
 ## Web-platform features: shipped vs. parsing-only
 

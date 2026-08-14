@@ -255,15 +255,23 @@ the bug summary rather than guessing.
    notes that bury the user benefit.
 4. Apply the two wording traps from `style-guide.md` — conflated facts and buried benefit. Looking
    up the bug is usually what reveals a note is compressing two distinct facts.
-5. **Cross-check every note's framing against its actual gate.** Cheap, and it catches the worst
-   error the set can carry: something riding the trains described as Nightly-only, or a Nightly-only
-   feature described as shipped. Split the set by framing — notes saying "Firefox Nightly" or
-   "Nightly builds" against notes written plainly — then resolve the gate for each with
-   `pref-delta.py --lookup <pref>`, getting the preference name the way `gating.md` describes under
-   "Which preference is it?". `--lookup` takes a comma-separated list, so the whole set is **one**
-   call, not one per note. Two consecutive reviews found the set consistent this way. It is also
-   the check that tells an **expired** carry-forward note from a **stale** one, and
-   `style-guide.md` has the three-cycle rule and the counting trap that go with that call.
+5. **Resolve the gate for every plain-framed web-platform note — exhaustively, not a spot check.**
+   Of the two directions this covers, only one reaches users: a **Nightly-only feature described as
+   shipped**. Split the set by framing — notes saying "Firefox Nightly" or "Nightly builds" against
+   notes written plainly — then work the *plain* side of `Web Platform` / `HTML5` to exhaustion. Get
+   each preference the way `gating.md` describes under "Which preference is it?"; for a web-platform
+   note that starts by grepping `dom/webidl` for the API name the note gives you. Then one
+   `pref-delta.py --lookup <a,b,c,…>` call for the whole set, not one per note.
+
+   **Scope it honestly: in the 155.0a1 set that was 11 of 43 notes and about three minutes.** A
+   review that checked 5 of the 43 reported the cross-check clean and missed bug 2057406, whose
+   `StylePropertyMap.delete()` note sat in the release queue for twelve days while
+   `layout.css.typed-om.enabled` was Nightly-only. **The flag value is no substitute for the gate**:
+   that bug read `155+` throughout, so flag and framing agreed with each other and both were wrong.
+   Report which notes you resolved rather than that the check "came back clean".
+
+   This is also the check that separates an **expired** carry-forward note from a **stale** one, and
+   `style-guide.md` carries the three-cycle rule and the counting trap that go with that call.
 
 **Don't guess.** Flag anything uncertain as a question rather than a hard correction, especially
 audience-scoping calls that depend on product context you don't have. If you couldn't read a bug or
