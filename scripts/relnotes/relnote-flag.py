@@ -393,11 +393,35 @@ def cmd_coverage(args) -> None:
     # directly without setting the flag -- all eight bugs behind the 153.0.3 notes were `---` -- and
     # a known-issue note describes something *unfixed*, so it never carries a flag. Reporting those
     # as "flag may need setting" would bury the one or two that actually are.
-    expected, real = [], []
+    # Third class, and its cause is a Release Management convention rather than anything about the
+    # note: a note covering a multi-bug rollup is associated with the **meta** bug and the flag is
+    # deliberately left unset, because a meta with ongoing work would otherwise carry a flag
+    # asserting a finished decision. Classified here rather than left to the reader, and unaffected
+    # by --no-related, because whether a report is correct should not depend on a request-saving flag.
+    metas = {b["id"]: b for b in fetch_fields(unflagged_note, "id,summary,keywords,depends_on")
+             if trainlib.is_meta(b)}
+    expected, rollup, real = [], [], []
     for i in unflagged_note:
         n = primary[i][0]
         tag = (n.get("tag") or "").lower()
-        (expected if tag == "fixed" or str(n.get("is_known_issue")) == "True" else real).append(i)
+        if i in metas:
+            rollup.append(i)
+        elif tag == "fixed" or str(n.get("is_known_issue")) == "True":
+            expected.append(i)
+        else:
+            real.append(i)
+
+    if rollup:
+        print(f"\n  ROLLUP NOTES ON A META BUG [{len(rollup)}] -- unflagged by convention, "
+              "not a gap:")
+        for i in rollup:
+            b = metas[i]
+            # Not narrowed to *open* dependencies, which is what the convention actually rests on:
+            # that needs a second fetch of every dependency's resolution, so the label carries the
+            # caveat and the reader decides. A meta whose dependencies have all closed may be an
+            # oversight rather than the convention.
+            print(f"  {i}  {(b.get('summary') or '')[:66]}  "
+                  f"({len(b.get('depends_on') or [])} dependencies, open or not)")
 
     print(f"\n  NOTED BUT NOT FLAGGED [{len(real)}] -- the flag may genuinely need setting:")
     if real:
@@ -447,7 +471,9 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=60, help="rows to print; 0 for all")
     p.add_argument("--refresh", action="store_true", help="bypass the Nucleus cache")
     p.add_argument("--no-related", action="store_true",
-                   help="skip the blocks/depends_on hop that explains meta-bug and rollup coverage")
+                   help="skip the blocks/depends_on hop that explains a flagged bug with no note of "
+                        "its own. Rollup notes on a meta are still classified, since that decides "
+                        "whether a line is a finding")
     p.add_argument("--format", choices=["text", "json"], default="text")
     args = p.parse_args()
 

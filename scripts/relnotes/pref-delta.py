@@ -49,7 +49,12 @@ FIREFOX_JS = "browser/app/profile/firefox.js"
 # Android's counterpart to firefox.js. Ships with GeckoView/Fenix, so it is where a preference is
 # turned on for Android alone, with nothing changing in any file a desktop-only scan reads.
 GECKOVIEW_JS = "mobile/android/app/geckoview-prefs.js"
-PREF_FILES = [STATIC_PREF_LIST, ALL_JS, FIREFOX_JS, GECKOVIEW_JS]
+# pdf.js ships its own defaults, in the same `pref(...)` form, and nothing else in the tree sets a
+# name it sets -- so it can only add names here, never change another file's answer. Without it a
+# pdf.js gate reads as absent: bug 2054348 turned on `pdfjs.enableSelectionRendering`, which lives
+# only here.
+PDFJS_JS = "toolkit/components/pdfjs/PdfJsDefaultPrefs.js"
+PREF_FILES = [STATIC_PREF_LIST, ALL_JS, PDFJS_JS, FIREFOX_JS, GECKOVIEW_JS]
 
 # firefox.js: pref("name", value);  (also user_pref/sticky_pref variants, and a third argument
 # `sticky` or `locked`). The modifier must be captured separately or it lands in the value: without
@@ -500,6 +505,7 @@ def effective_defaults(repo: Path, rev: str, channels: list[str], platforms: lis
     """
     spl_text = show(repo, rev, STATIC_PREF_LIST)
     all_text = show(repo, rev, ALL_JS)
+    pdfjs_text = show_optional(repo, rev, PDFJS_JS) or ""
     app_text = {
         "desktop": show(repo, rev, FIREFOX_JS),
         "android": show_optional(repo, rev, GECKOVIEW_JS) or "",
@@ -535,8 +541,10 @@ def effective_defaults(repo: Path, rev: str, channels: list[str], platforms: lis
                                        "mirror": info.get("mirror"),
                                        "via_define": info.get("via_define")})
             # all.js is the shared base and applies to every product; the app-level file then
-            # overrides both for the product that ships it.
+            # overrides both for the product that ships it. pdf.js sits with the shared base -- it
+            # ships on desktop and Android alike.
             apply(parse_firefox_js(all_text, symbols), "all.js", ch, plat)
+            apply(parse_firefox_js(pdfjs_text, symbols), "PdfJsDefaultPrefs.js", ch, plat)
             apply(parse_firefox_js(app_text[kind], symbols),
                   app_file[kind].rsplit("/", 1)[-1], ch, plat)
     return {"table": table, "meta": meta}

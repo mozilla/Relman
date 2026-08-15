@@ -73,16 +73,24 @@ by matching recorded commands against the allowlist, not counts of prompts anyon
   "the recent comments", "all the comments", or "the see_also URLs". It can now.
 - **No shell `for` loops** — 124 segments in the audit. Loop inside Python instead, in one of the
   forms below.
-- **Inline Python goes on one line, as `python3 -c "…"`.** Verified 2026-08-09 by tool-call probes in
-  a clean session: `python3 -c "print('plain')"` and `python3 -c "print('<li>brackets</li>')"` both
-  ran without a prompt, so the payload's content — angle brackets included — is not the problem.
+- **A one-liner goes inline as `python3 -c "…"`; anything longer goes to a `/tmp` file and runs from
+  there.** Verified 2026-08-09 by tool-call probes in a clean session: `python3 -c "print('plain')"`
+  and `python3 -c "print('<li>brackets</li>')"` both ran without a prompt, so the payload's content —
+  angle brackets included — is not the problem. Write the file with `Edit`, then
+  `python3 /tmp/analyse.py`.
 - **`python3 - <<'EOF'` heredocs prompt**, despite `Bash(python3 - <<*)` existing. They interrupted a
-  real review pass. The exact trigger is unconfirmed; the likeliest explanation is that
-  the body lines are parsed as separate commands, none of which is allowlisted. Whatever the cause,
-  fold the snippet onto one `-c` line or put it in a script.
-- **`python3 /tmp/x.py` prompts too** — measured. `Read(//tmp/**)` and `Edit(//tmp/**)` govern reading
-  and writing those files, not running them, and no `Bash` entry matches `python3 /tmp/...`. `/tmp` is
-  still the right place to *hold* scratch Python; running it is not pre-approved.
+  real review pass, and again in the 155 rollup. The exact trigger is unconfirmed; the likeliest
+  explanation is that the body lines are parsed as separate commands, none of which is allowlisted.
+  No entry can reach that, so there is no fix beyond not writing them — use the `/tmp` file instead.
+  Reaching for a heredoc because the snippet has loops in it is exactly the case the `/tmp` form
+  serves; folding those onto one `-c` line is what mangled the indentation in the 155 pass.
+- **Running scratch Python from `/tmp` is pre-approved, since 2026-08-14.** `Read(//tmp/**)` and
+  `Edit(//tmp/**)` govern reading and writing those files but not executing them, so
+  `python3 /tmp/x.py` used to prompt with no entry matching it. `Bash(python3 /tmp/*)` closes that.
+  It is the same literal-prefix-then-glob shape as `Bash(python3 scripts/relnotes/*)`, which the
+  passes prove works — a cycle pass makes dozens of script calls without a prompt. Being in the
+  shared file, it reaches colleagues too, and matching is against the command string, so the platform
+  does not enter into it. Unmeasured on macOS all the same, like everything else here.
 - **Anything you write twice belongs in `scripts/relnotes/`** — matched by prefix, and the reason
   `bug-detail.py` and `note-page.py` exist.
 - **Measuring any of this requires a tool call.** Commands run with the `!` prefix execute in the
@@ -99,6 +107,12 @@ by matching recorded commands against the allowlist, not counts of prompts anyon
   the git-ignored `settings.local.json` rather than the shared allowlist.
 - **No shell loops.** `for x in …; do …; done` is one Bash call whose body is not a static prefix, so
   it prompts for the same reason `$(…)` does.
+- **A whole-version Bugzilla census is one query, not a loop over bug-id ranges.** Measured
+  2026-08-14: `include_fields=id&limit=0` on one `cf_status_firefoxN` returns ~2,600 ids in seconds,
+  so there is nothing to page or split — asking for full records *in the same query* is what makes it
+  slow enough to look like there is. `scan-window.py --cycle N --version N --census` does that query
+  and the diff against the window. The ranged-`curl`-with-retry form it replaces cost two of the five
+  prompts in the 155 rollup.
 - **The same command over N inputs is N calls, not one clever call.** This is the trigger worth
   recognising, because it is when every rule above gets broken at once and it always feels like
   tidiness rather than a shortcut. Both forms on the 08-13 pass came from it: four
@@ -127,6 +141,10 @@ were the largest single source of prompts (~196 segments) and the only alternati
 granting it locally and diverging. Project settings apply **only while working inside this repo**, and
 that scope is what makes it acceptable. The same caveat already applied to `sed`, `awk`, `echo` and
 `cat`, any of which can write through a shell redirect.
+
+`Bash(python3 /tmp/*)` extends that grant to the multi-line form and adds no capability `-c` did not
+already carry. The one real difference: a `/tmp` file could have been written by something other than
+the session running it, where a `-c` payload is always authored in the moment.
 
 `Bash(python3 - <<*)` is in the file for the same reason and does **not** work — heredocs prompt
 regardless, as measured above. It stays only because removing it changes nothing.

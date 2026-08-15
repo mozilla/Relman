@@ -9,6 +9,10 @@ Two directions, and the second is the one that keeps finding things:
    doc. Every capability added in one recent week -- `--check-url`, `--comment last:N`,
    `list --status`, `--note` on the status transitions -- needed a separate nudge to get written
    down, and a capability nobody knows about is one that gets rebuilt inline.
+3. **`--cycle N` without `--version N`**: an example that scans one train while checking another's
+   status flag. scan-window refuses that combination, so such an example does not merely mislead, it
+   fails. Script docstrings are scanned for it as well as the docs, since usage examples live in
+   both.
 
 Truth comes from `--help` rather than from parsing argparse calls, so it reflects what the parser
 really accepts, including every subcommand's own options.
@@ -24,7 +28,7 @@ getting them wrong first:
 - **Other tools' flags.** Docs are full of `git log --grep`, `curl -s`, `head -n`. Eight of the
   first run's nine "failures" were git flags. Lines invoking another tool are skipped.
 
-Read-only. Exits non-zero if anything is stale, so it can gate a commit.
+Read-only. Exits non-zero on a stale flag or an unpaired `--cycle`, so it can gate a commit.
 
 Usage:
   doc-flag-audit.py
@@ -42,6 +46,8 @@ SCRIPT_DIR = REPO / "scripts" / "relnotes"
 DOC_GLOBS = (".claude/skills/*/SKILL.md", "reference/release-notes/*.md", "README.md")
 
 FLAG_RE = re.compile(r"--[a-z][\w-]*")
+# Only a literal version number; `--cycle N` and `--cycle {nightly}` are placeholders, not examples.
+CYCLE_RE = re.compile(r"--cycle\s+(\d+)")
 # Maintenance tools, not part of a pass. See truth().
 AUDITORS = {"doc-flag-audit.py", "doc-command-audit.py"}
 # Lines that invoke one of these are describing that tool's flags, not ours.
@@ -143,7 +149,19 @@ def main() -> None:
     print(f"\n=== SUBCOMMANDS never named in any doc ({len(orphan)})")
     print("  " + (", ".join(orphan) if orphan else "none"))
 
-    sys.exit(1 if stale else 0)
+    unpaired = []
+    for f in docs + sorted(SCRIPT_DIR.glob("*.py")):
+        for i, line in enumerate(f.read_text().splitlines(), 1):
+            for ver in CYCLE_RE.findall(line):
+                if not re.search(rf"--version\s+{ver}\b", line):
+                    unpaired.append((f"{f.relative_to(REPO)}:{i}", line.strip()[:70]))
+    print(f"\n=== --cycle N missing --version N -- would now fail ({len(unpaired)})")
+    for where, text in unpaired:
+        print(f"  {where:<52} {text}")
+    if not unpaired:
+        print("  none")
+
+    sys.exit(1 if stale or unpaired else 0)
 
 
 if __name__ == "__main__":

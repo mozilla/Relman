@@ -25,7 +25,7 @@ Read-only. Writes only to the output directory (a mktemp dir unless --outdir is 
 Usage:
   daily-pass.py --build 20260731085738
   daily-pass.py --since-last --save-state
-  daily-pass.py --cycle 155
+  daily-pass.py --cycle 155 --version 155
   daily-pass.py --build 20260731085738 --outdir /tmp/pass31
 """
 
@@ -47,6 +47,22 @@ BUGZILLA_REST = "https://bugzilla.mozilla.org/rest"
 def run(cmd: list[str], capture: bool = True) -> subprocess.CompletedProcess:
     print(f"# $ {' '.join(cmd)}", file=sys.stderr)
     return subprocess.run(cmd, capture_output=capture, text=True, check=False)
+
+
+def write_artifact(path: Path, res: subprocess.CompletedProcess) -> None:
+    """A child's output with its diagnostics folded in above it.
+
+    Diagnostics are where a child says what it could *not* do -- a parent list truncated by
+    --max-parents, the meta bugs skipped as too broad, a preference whose default is a guess -- and
+    they arrive on stderr. These files are re-read weeks later, so a caveat that stayed in a terminal
+    is a caveat nobody has: bug-tree dropped 31 parents and skipped 71 metas on the cycle-155 rollup
+    and clusters.txt recorded neither.
+
+    Lines already carry a `#`; anything that does not (a traceback) gets one, so the head cannot be
+    mistaken for content.
+    """
+    head = [ln if ln.startswith("#") else f"# {ln}" for ln in res.stderr.splitlines()]
+    path.write_text(("\n".join(head) + "\n\n" if head else "") + res.stdout)
 
 
 def window_args(args) -> list[str]:
@@ -192,7 +208,7 @@ class Tee:
         return "".join(self.buf)
 
 
-def print_header(version: str, window: dict, funnel: dict) -> None:
+def print_header(version: str, window: dict, funnel: dict, census: dict | None = None) -> None:
     """The lines identifying what this pass covered and what produced it.
 
     Printed twice -- into the report body, and again into --brief's summary, which is a separate
@@ -208,6 +224,10 @@ def print_header(version: str, window: dict, funnel: dict) -> None:
           f"{funnel['survivors']} survivors  ({funnel['dropped_mechanical']} mechanical, "
           f"{funnel['not_currently_fixed']} not FIXED, {funnel['security_restricted']} "
           f"security-restricted, {funnel.get('uplifted', 0)} uplifted)")
+    if census:
+        print(f"CENSUS  {census['flagged']} bugs flagged fixed in {census['version']}, "
+              f"{census['outside_window']} outside this window -> {census['to_review']} to look at "
+              f"(see census.txt)")
 
 
 def main() -> None:
@@ -224,6 +244,9 @@ def main() -> None:
     p.add_argument("--range", dest="rev_range", default=None)
     p.add_argument("--version", type=int, default=None)
     p.add_argument("--first-parent", action="store_true")
+    p.add_argument("--census", action="store_true",
+                   help="cross-check the cycle against Bugzilla's own fixed-in-N set, into "
+                        "census.txt (cycle windows only)")
     p.add_argument("--allow-stale", action="store_true")
     p.add_argument("--save-state", action="store_true")
     p.add_argument("--repo", default=None)
@@ -255,7 +278,11 @@ def main() -> None:
     wargs = window_args(args)
 
     # --- 1. scan -------------------------------------------------------------
-    r = run([sys.executable, str(HERE / "scan-window.py"), *wargs,
+    # The census goes on this run only. It costs a Bugzilla search over the whole version plus a
+    # full-history git pass, and the second scan below would repeat both; --census-out gets the
+    # readable section out of this one instead.
+    census_args = (["--census", "--census-out", str(outdir / "census.txt")] if args.census else [])
+    r = run([sys.executable, str(HERE / "scan-window.py"), *wargs, *census_args,
              "--format", "json", "-o", str(scan_json)])
     sys.stderr.write(r.stderr)
     if r.returncode != 0 or not scan_json.exists():
@@ -270,7 +297,7 @@ def main() -> None:
     r2 = run([sys.executable, str(HERE / "scan-window.py"), *wargs,
               "--dropped-out", str(outdir / "dropped.txt"),
               *(["--show-dropped"] if args.show_dropped else [])])
-    (outdir / "scan.txt").write_text(r2.stdout)
+    write_artifact(outdir / "scan.txt", r2)
 
     # The drop list as its own complete file, unconditionally: the audit is a required step every
     # pass, and giving it a file removes the reason to rebuild the list through a pipe that can
@@ -303,13 +330,13 @@ def main() -> None:
     # --- 2. preference flips over the identical range ------------------------
     r3 = run([sys.executable, str(HERE / "pref-delta.py"), "--range", rng, "--no-fetch",
               "--repo", str(trainlib.resolve_repo(args.repo))])
-    (outdir / "prefs.txt").write_text(r3.stdout)
+    write_artifact(outdir / "prefs.txt", r3)
 
     # --- 3. feature clusters -------------------------------------------------
     r4 = run([sys.executable, str(HERE / "bug-tree.py"), "--input", str(scan_json),
               "--min-cluster", str(args.min_cluster),
               "--repo", str(trainlib.resolve_repo(args.repo))])
-    (outdir / "clusters.txt").write_text(r4.stdout)
+    write_artifact(outdir / "clusters.txt", r4)
 
     # Only the first scan's exit status was ever checked, and the other three children feed sections
     # whose empty form is an assertion: an exited pref-delta printed "No preference changes." with its
@@ -347,7 +374,7 @@ def main() -> None:
     # separate question, asked once per pass by `watchlist.py check-updates`.
     version = trainlib.tooling_stamp()["version"]
     print()
-    print_header(version, window, scan["funnel"])
+    print_header(version, window, scan["funnel"], scan.get("census"))
     print()
 
     if failures:
@@ -436,7 +463,8 @@ def main() -> None:
     print()
 
     print(f"Full output written to {outdir}/ (scan.json, scan.txt, dropped.txt, prefs.txt, "
-          "clusters.txt" + (", flags.json" if flags else "") + ")")
+          "clusters.txt" + (", census.txt" if scan.get("census") else "")
+          + (", flags.json" if flags else "") + ")")
     print(f"Survivor list with landings: {outdir}/scan.txt")
     print(f"Drop list to audit ({len(dropped)} entries): {outdir}/dropped.txt")
     # Also in the report body, because report.txt is what gets re-read later and stderr is not
@@ -447,7 +475,7 @@ def main() -> None:
     sys.stdout = real_stdout
     (outdir / "report.txt").write_text(tee.text())
     if args.brief:
-        print_header(version, window, scan["funnel"])
+        print_header(version, window, scan["funnel"], scan.get("census"))
         prefs = (outdir / "prefs.txt").read_text()
         flips = [l for l in prefs.splitlines() if l.startswith("== ")]
         print("PREFS   " + ("; ".join(flips) if flips else "no preference changes"))

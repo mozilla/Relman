@@ -41,6 +41,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import trainlib  # noqa: E402
 
 BUGZILLA_REST = "https://bugzilla.mozilla.org/rest/bug"
+# What `limit=0` actually returns at most, measured 2026-08-14. The response carries no total and no
+# truncation marker, so hitting this is indistinguishable from a complete answer unless counted.
+BUGZILLA_MAX_RESULTS = 10000
+# Bugzilla's answer to "did this land in N". Shared by is_fixed() and the --census search, so
+# the query cannot drift from the predicate.
+LANDED_IN_VERSION = ("fixed", "verified", "disabled")
 PRODUCT_DETAILS = "https://product-details.mozilla.org/1.0/firefox_versions.json"
 USER_AGENT = "Relman-relnotes-scan/1.0"
 
@@ -177,7 +183,13 @@ DROP_SUBJECT_PATTERNS = [
         # ones, ~7 were user-facing dialog/UI work this pattern had been hiding.
         r"^\s*(?:(?:bug\s+\d+|\[[^\]]{0,40}\]|\(?part\s+\d+\)?|pre\s+\d+|phase\s+\d+|"
         r"coverity\s+cid\s+\d+|wpt\s+pr\s+\d+|follow-?up)\s*[-\u2013\u2014:,.]?\s*)*"
-        r"(rename|move|extract|inline|deduplicate|refactor)\w*\b",
+        # The tail is lowercase-only and case-sensitively so, which admits the inflections
+        # (renamed, moved, refactoring) while refusing to run on into a CamelCase identifier that
+        # merely starts with one of the verbs. `RenameAndChangeLocation dialog should have the file
+        # extension non-editable` (bug 2047953) is a UI change, not a rename. Measured over
+        # FIREFOX_NIGHTLY_147_END..main, 48,235 subjects on 2026-08-14: the tail flips that one
+        # subject and nothing else, 1,409 matches to 1,408.
+        r"(rename|move|extract|inline|deduplicate|refactor)(?-i:[a-z]*)\b",
         r"\bno bug\b",
         r"\btypo\b",
         r"\bclean ?up\b",
@@ -185,7 +197,6 @@ DROP_SUBJECT_PATTERNS = [
         r"^Backed out\b|^Revert\b",
     )
 ]
-
 
 
 def fetch_json(url: str):
@@ -282,7 +293,7 @@ def is_fixed(bug: dict, nightly: int) -> bool:
     """
     flag = bug.get(f"cf_status_firefox{nightly}")
     # `disabled` counts as landed: the code is in, behind an off-by-default pref.
-    if flag in ("fixed", "verified", "disabled"):
+    if flag in LANDED_IN_VERSION:
         return True
     if flag in ("wontfix", "disabled-by-default", "unaffected"):
         return False
@@ -290,7 +301,7 @@ def is_fixed(bug: dict, nightly: int) -> bool:
     return bug.get("resolution") == "FIXED" and bug.get("status") in ("RESOLVED", "VERIFIED")
 
 
-LANDED_FLAGS = ("fixed", "verified")
+SHIPPED_FLAGS = ("fixed", "verified")
 
 
 def note_target(bug: dict, nightly: int, esrs: list[int]) -> dict:
@@ -306,9 +317,9 @@ def note_target(bug: dict, nightly: int, esrs: list[int]) -> dict:
     """
     shipped_in = []
     for v in (nightly - 2, nightly - 1, nightly):
-        if bug.get(f"cf_status_firefox{v}") in LANDED_FLAGS:
+        if bug.get(f"cf_status_firefox{v}") in SHIPPED_FLAGS:
             shipped_in.append(v)
-    esr_hits = [v for v in esrs if bug.get(f"cf_status_firefox_esr{v}") in LANDED_FLAGS]
+    esr_hits = [v for v in esrs if bug.get(f"cf_status_firefox_esr{v}") in SHIPPED_FLAGS]
     earliest = shipped_in[0] if shipped_in else nightly
     return {
         "note_version": earliest,
@@ -336,6 +347,14 @@ def tidy_subject(subject: str) -> str:
     """
     subject = re.sub(r"^\s*[Bb]ug\s+\d+\s*(?:[pP](?:art)?\s*\d+)?\s*[-:.]\s*", "", subject)
     return strip_reviewers(subject)
+
+
+# Capped, because a cycle pass reaches ~330 not-FIXED bugs and an uncapped line is a wall nobody
+# reads. The count comes first and the remainder is named, so nothing vanishes without saying so.
+def capped(items: list[str], limit: int = 40) -> str:
+    shown = ", ".join(items[:limit])
+    return shown + (f", ... and {len(items) - limit} more (see scan.json)"
+                    if len(items) > limit else "")
 
 
 def render_dropped(dropped: list[dict]) -> list[str]:
@@ -378,6 +397,62 @@ def render_dropped(dropped: list[dict]) -> list[str]:
     return lines
 
 
+def render_census(c: dict) -> list[str]:
+    """The Bugzilla-side coverage check as lines.
+
+    One renderer for the inline listing and --census-out, on the same reasoning as
+    render_dropped: the file a pass re-reads afterwards must not drift from what it printed.
+    """
+    lines: list[str] = []
+    lines.append(
+        f"Bugzilla census (cf_status_firefox{c['version']} in "
+        f"{'/'.join(c['flags'])}): {c['flagged']} flagged, {c['in_window']} in this "
+        f"window, {c['outside_window']} not -- of those, {c['filtered_mechanical']} "
+        f"mechanical, {c['earlier_version']} belong to an earlier version, "
+        f"{c['flag_only']} have no landing of their own, "
+        f"{c['to_review']} to look at."
+    )
+    if c["truncated"]:
+        lines.append(f"  *** the flagged set hit Bugzilla's {BUGZILLA_MAX_RESULTS}-result "
+                     "cap, so it is short and these gaps are UNDER-reported")
+    if c["unfetchable"]:
+        lines.append(f"  *** searchable but not fetchable ({len(c['unfetchable'])}): "
+                     + capped(c["unfetchable"])
+                     + " -- excluded from the four counts above, which therefore do not sum")
+    if c["candidates"]:
+        lines.append("")
+        lines.append("Landed on a ref this window does not cover -- check for a beta uplift:")
+        if c["cycle_in_progress"]:
+            lines.append("  NOTE: this cycle has not merged, so most of these are on autoland ahead "
+                         "of main rather than missed. Run the census after merge day.")
+    for r in c["candidates"]:
+        tag = f"  [also ESR {', '.join(str(v) for v in r['esr'])}]" if r["esr"] else ""
+        lines.append(f"  {r['bug']}  {r['product']} :: {r['component']}"
+                     f"  flag={r['status_flag']}{tag}")
+        lines.append(f"        bug: {r['summary'][:140]}")
+        for s in r["landings"][:3]:
+            lines.append(f"        landed: {tidy_subject(s)[:140]}")
+        if len(r["landings"]) > 3:
+            lines.append(f"        ... and {len(r['landings']) - 3} more landings")
+    if c["earlier"]:
+        lines.append("")
+        lines.append(f"Flagged for an earlier version too ({len(c['earlier'])}) -- usually QA "
+                     f"verifying on {c['version']} a fix that landed before it, so the note, "
+                     "if any, belongs to that version:")
+        for r in c["earlier"]:
+            lines.append(f"  {r['bug']}  -> {r['note_version']}  "
+                         f"{r['product']} :: {r['component']}  {r['summary'][:90]}")
+    if c["no_landing"]:
+        lines.append("")
+        lines.append(f"Flagged fixed in {c['version']} with no landing of their own "
+                     f"({len(c['no_landing'])}) -- the flag was set without one, or the only "
+                     "commit naming the bug is a backout blaming it:")
+        for r in c["no_landing"]:
+            lines.append(f"  {r['bug']}  {r['product']} :: {r['component']}"
+                         f"  {r['summary'][:100]}")
+    return lines
+
+
 def drop_reason(bug: dict, subjects: list[str]) -> str | None:
     product = bug.get("product", "")
     component = bug.get("component", "")
@@ -401,6 +476,138 @@ def drop_reason(bug: dict, subjects: list[str]) -> str | None:
                 return None
             reasons.append(hit)
         return f"mechanical subject ({reasons[0]})"
+    return None
+
+
+def census_ids(version: int) -> list[str]:
+    """Every bug Bugzilla says landed in `version`, by id.
+
+    Ids only, which is why this needs no paging: one version is a couple of thousand bugs and comes
+    back in seconds, while asking for full records in the same query is slow enough to look like it
+    does. Full records for the few that matter come from fetch_bugs() afterwards.
+
+    Security-restricted bugs are as invisible here as they are to fetch_bugs, so a census is not a
+    check on that blind spot.
+    """
+    qs = url_parse.urlencode({
+        "f1": f"cf_status_firefox{version}",
+        "o1": "anyexact",
+        "v1": ",".join(LANDED_IN_VERSION),
+        "include_fields": "id",
+        "order": "bug_id",
+        "limit": 0,
+    })
+    payload = fetch_json(f"{BUGZILLA_REST}?{qs}")
+    return [str(b["id"]) for b in payload.get("bugs", [])]
+
+
+def landings_anywhere(repo: Path, bug_ids: list[str]) -> dict[str, list[str]]:
+    """Landing subjects for each bug, across every ref in the clone.
+
+    Attribution is BUG_RE's leading match, the same rule the window path uses: `--grep` also matches
+    the message body, so a commit that names the bug only as a dependency, or as what a backout
+    blames, is not its landing.
+
+    Bounded by what the clone has -- a beta-only landing is invisible without a beta ref.
+    """
+    found: dict[str, list[str]] = collections.defaultdict(list)
+    for i in range(0, len(bug_ids), 200):
+        batch = set(bug_ids[i:i + 200])
+        log = git(repo, "log", "--all", "--format=%s", *[f"--grep={b}" for b in sorted(batch)])
+        for subject in log.splitlines():
+            m = BUG_RE.search(subject)
+            # Membership is against this batch, not all ids: a commit matched here for a body mention
+            # may lead with a bug from another batch, and would otherwise be recorded twice.
+            if m and m.group(1) in batch:
+                found[m.group(1)].append(subject)
+    return found
+
+
+def run_census(repo: Path, version: int, window_bugs: set[str], esrs: list[int],
+               in_progress: bool = False) -> dict:
+    """Bugs flagged as landed in `version` that this window's git enumeration never contained.
+
+    Most of what a census turns up is explained rather than missed, and each explanation is reported
+    as its own bucket so the residue is small enough to read. `verified` is the big one: QA sets it on
+    the version they tested, so a bug that landed in N-1 and was verified on N is flagged for N
+    without ever appearing in N's window -- note_target already knows it belongs to N-1. The rest
+    either have no landing of their own, or landed on a ref the window does not cover, which is where
+    a beta uplift shows up.
+    """
+    flagged = census_ids(version)
+    unseen = [b for b in flagged if b not in window_bugs]
+    print(f"# census: {len(flagged)} bugs flagged fixed in {version}, "
+          f"{len(unseen)} outside this window", file=sys.stderr)
+    truncated = len(flagged) >= BUGZILLA_MAX_RESULTS
+    if truncated:
+        print(f"# *** the flagged set hit Bugzilla's {BUGZILLA_MAX_RESULTS}-result cap, so it is "
+              "short and these gaps are UNDER-reported", file=sys.stderr)
+
+    bugs, unfetchable = fetch_bugs(unseen, version, esrs) if unseen else ({}, [])
+    elsewhere = landings_anywhere(repo, unseen) if unseen else {}
+    kept, filtered, earlier, no_landing = [], [], [], []
+    for bug_id in unseen:
+        bug = bugs.get(bug_id)
+        if bug is None:
+            continue
+        subjects = [s for s in elsewhere.get(bug_id, []) if not REVERT_RE.match(s)]
+        rec = {
+            "bug": bug_id,
+            "summary": bug.get("summary", ""),
+            "product": bug.get("product", ""),
+            "component": bug.get("component", ""),
+            "type": bug.get("type"),
+            "keywords": bug.get("keywords", []),
+            "status_flag": bug.get(f"cf_status_firefox{version}"),
+            "landings": subjects,
+            **note_target(bug, version, esrs),
+        }
+        reason = drop_reason(bug, subjects)
+        if reason:
+            rec["drop_reason"] = reason
+            filtered.append(rec)
+        elif rec["note_version"] < version:
+            earlier.append(rec)
+        elif not subjects:
+            no_landing.append(rec)
+        else:
+            kept.append(rec)
+    return {
+        "version": version,
+        "cycle_in_progress": in_progress,
+        "flags": list(LANDED_IN_VERSION),
+        "truncated": truncated,
+        "flagged": len(flagged),
+        "in_window": len(flagged) - len(unseen),
+        "outside_window": len(unseen),
+        "filtered_mechanical": len(filtered),
+        "earlier_version": len(earlier),
+        "flag_only": len(no_landing),
+        "to_review": len(kept),
+        "candidates": kept,
+        "earlier": earlier,
+        "no_landing": no_landing,
+        "filtered": filtered,
+        # Searchable but not fetchable should not happen, and dropping it silently would make a short
+        # census read as a complete one.
+        "unfetchable": sorted(unfetchable),
+    }
+
+
+def window_version(repo: Path, end: str, nightly_now: int) -> int | None:
+    """The train `end` belongs to, or None if the boundary tags cannot say.
+
+    A commit belongs to cycle N when it is after FIREFOX_NIGHTLY_{N-1}_END, so the answer is the
+    first N walking back whose opening tag `end` does not precede. One `merge-base` call settles the
+    common case, where the window is in the current cycle.
+    """
+    for n in range(nightly_now, nightly_now - 12, -1):
+        tag = f"FIREFOX_NIGHTLY_{n - 1}_END"
+        if not trainlib.git(repo, "rev-parse", "--verify", "--quiet", tag, check=False).strip():
+            return None
+        rc, _, _ = trainlib.git_rc(repo, "merge-base", "--is-ancestor", end, tag)
+        if rc != 0:
+            return n
     return None
 
 
@@ -567,6 +774,11 @@ def main() -> None:
                         "day's last build). This is the usual review unit.")
     p.add_argument("--cycle", type=int, default=None,
                    help="scan version N's whole nightly cycle via the FIREFOX_NIGHTLY_*_END tags")
+    p.add_argument("--census", action="store_true",
+                   help="cross-check the window against a Bugzilla-wide search for "
+                        "cf_status_firefoxN, and report bugs flagged as landed in N that no commit "
+                        "in the window mentions -- beta-only uplifts are the usual find. Requires "
+                        "the window to be N's whole cycle.")
     p.add_argument("--allow-stale", action="store_true",
                    help="permit resuming from a watermark that predates the current train")
     p.add_argument("--save-state", action="store_true",
@@ -576,6 +788,9 @@ def main() -> None:
                         "plain two-dot range pulls in every merged main ancestor (71,678 commits "
                         "for 153 instead of 682)")
     p.add_argument("--show-dropped", action="store_true")
+    p.add_argument("--census-out", metavar="PATH", default=None,
+                   help="also write the census section to PATH, so a --format json run still "
+                        "produces the readable version")
     p.add_argument("--dropped-out", metavar="PATH", default=None,
                    help="also write the grouped drop list to PATH. One renderer serves this and "
                         "--show-dropped, so the audit file and the inline listing cannot drift.")
@@ -606,6 +821,45 @@ def main() -> None:
     src = "explicit --version" if args.version else "current Nightly from product-details"
     print(f"# window {start_desc} .. {end_desc} (checking cf_status_firefox{nightly}, {src})",
           file=sys.stderr)
+
+    # Checking a train's status flag against another train's commits mislabels almost every survivor
+    # as an uplift, because note_target then resolves `shipped_in` one train too late. One comparison
+    # decides it; only the severity varies. A disagreement is fatal when nobody chose the version
+    # (the default is the current Nightly, so every historical window needs --version) and when
+    # --cycle set the window, where the train is definitional. Any other explicit --version stands:
+    # a window straddling merge day genuinely belongs to two trains and the caller picks.
+    wv = window_version(repo, end, nightly_now)
+    if wv is None:
+        if args.version is None:
+            print("# WARNING: cannot tell which train this window belongs to -- no boundary tag in "
+                  f"this checkout -- so cf_status_firefox{nightly} is unverified", file=sys.stderr)
+    elif wv != nightly:
+        if args.version is None or args.cycle:
+            sys.exit(f"error: this window's commits belong to Firefox {wv}, but the version being "
+                     f"checked is {nightly}, so every cf_status_firefox{nightly} lookup is for the "
+                     f"wrong train and nearly every survivor comes back as an uplift. "
+                     f"Pass --version {wv}.")
+        print(f"# NOTE: this window's commits look like Firefox {wv}, not the {args.version} being "
+              "checked", file=sys.stderr)
+
+    if args.census:
+        if args.first_parent:
+            sys.exit("error: --census with --first-parent under-enumerates the window, because the "
+                     "landings that arrive through merges are skipped and then reported as gaps. "
+                     "Drop --first-parent.")
+        rng = trainlib.cycle_range(repo, nightly, head=args.rev)
+        if not rng:
+            sys.exit(f"error: --census needs cycle bounds for {nightly}, and this checkout has no "
+                     f"FIREFOX_NIGHTLY_{nightly - 1}_END tag.")
+        c_start, c_end, cycle_open = rng
+        resolved = [git(repo, "rev-parse", r).strip() for r in (start, end, c_start, c_end)]
+        if resolved[:2] != resolved[2:]:
+            sys.exit(
+                f"error: --census compares every bug flagged cf_status_firefox{nightly} against "
+                f"the bugs in this window, so a window narrower than the cycle reports the rest of "
+                f"the cycle as unseen. Window is {start}..{end}; cycle {nightly} is "
+                f"{c_start}..{c_end}. Use --cycle {nightly} --version {nightly}."
+            )
 
     # A window spanning merge day straddles two versions: commits before the automatic
     # version bump belong to N-1, those after to N. The uplift heuristic cannot tell
@@ -671,6 +925,9 @@ def main() -> None:
         else:
             survivors.append(rec)
 
+    census = (run_census(repo, nightly, set(by_bug), esrs, cycle_open)
+              if args.census else None)
+
     # Which revision of the tooling produced this file, carried in the artifact rather than left to
     # the reader's memory of when they ran it. See daily-pass.py's TOOLING header for the same
     # stamp in prose form.
@@ -698,6 +955,8 @@ def main() -> None:
         # an int and this is a list, and one name for both invites len() on the number.
         "not_fixed_bugs": not_fixed_ids,
         "security_restricted_bugs": sorted(missing),
+        # null when not requested, so a reader can tell "not checked" from "nothing found".
+        "census": census,
     }
 
     if args.format == "json":
@@ -718,19 +977,15 @@ def main() -> None:
         # Name both, because a count cannot be audited. Security-restricted bugs are the window's
         # largest blind spot and the skill asks for them in the report; a not-currently-FIXED bug is
         # a candidate that may simply land its resolution later.
-        # Capped, because a cycle pass reaches ~330 not-FIXED bugs and an uncapped line is a wall
-        # nobody reads. The count comes first and the remainder is named, which is how every other
-        # capped listing here behaves.
-        def capped(items: list[str], limit: int = 40) -> str:
-            shown = ", ".join(items[:limit])
-            return shown + (f", ... and {len(items) - limit} more (see scan.json)"
-                            if len(items) > limit else "")
         if missing:
             lines.append(f"Security-restricted, not fetchable ({len(missing)}): "
                          + capped(sorted(missing)))
         if not_fixed_ids:
             lines.append(f"Not currently FIXED ({len(not_fixed_ids)}): "
                          + capped([f"{r['bug']} [{r['status']}]" for r in not_fixed_ids]))
+        if census:
+            lines.append("")
+            lines += render_census(census)
         lines.append("")
         areas = collections.Counter(f"{s['product']} :: {s['component']}" for s in survivors)
         lines.append(f"Survivors by area ({len(areas)} areas):")
@@ -753,7 +1008,7 @@ def main() -> None:
                 flags.append("also ESR " + ", ".join(str(v) for v in s["esr"]))
             if s["status_flag"] == "disabled":
                 flags.append("flag=disabled")
-            if "meta" in s["keywords"]:
+            if trainlib.is_meta(s):
                 flags.append("meta")
             tag = f"  [{', '.join(flags)}]" if flags else ""
             lines.append(f"  {s['bug']}  {s['product']} :: {s['component']}{tag}")
@@ -767,6 +1022,12 @@ def main() -> None:
             lines.append("")
             lines += render_dropped(dropped)
         out = "\n".join(lines) + "\n"
+
+    if args.census_out:
+        if census is None:
+            sys.exit("error: --census-out needs --census; there is nothing to write without it.")
+        Path(args.census_out).write_text("\n".join(render_census(census)) + "\n")
+        print(f"# wrote {args.census_out} ({census['to_review']} to look at)", file=sys.stderr)
 
     # Independent of --format: the drop list is the audit artifact, and a JSON run still needs it.
     if args.dropped_out:

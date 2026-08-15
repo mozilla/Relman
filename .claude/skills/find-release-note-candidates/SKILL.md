@@ -173,6 +173,23 @@ decide whether the finished body of work now deserves a single rollup note. Inte
 feature pushes and preference-gated features that flipped late are the usual candidates. Track
 deferrals in the watchlist (`--status watching`) so they resurface rather than being rediscovered.
 
+**Then check coverage from Bugzilla's side**, which is the one question a window scan cannot answer
+about itself:
+
+```
+python3 scripts/relnotes/scan-window.py --cycle 155 --version 155 --census
+```
+
+`--census` searches for every bug Bugzilla flags as landed in the version and reports the ones no
+commit in the cycle mentions. It refuses on anything narrower than the full cycle, because a partial
+window reports the rest of the cycle as unseen. `daily-pass.py --census` does the same and leaves it
+in `census.txt`; on a `--format json` run, `--census-out PATH` writes the readable section. Most of what it finds is explained rather than
+missed, and it sorts what it finds into buckets that say so: mechanical, flagged for an earlier
+version as well (QA sets `verified` on the version they *tested*), and no landing of their own. On the
+155 cycle that left **a handful** — five on 2026-08-14 — out of 177 outside the window and 2,602
+flagged. That residue is where a **beta uplift** shows up: those commits live on the beta branch, so
+no scan of main can see them however wide the window.
+
 ### Cumulative passes
 
 Use `--cycle N` for the wider sweeps where notes have no daily granularity — feature rollups that
@@ -838,6 +855,13 @@ form in the Bugzilla comment box asking for suggested wording and a documentatio
 that doesn't set the flag is a nomination stranded in a comment thread** — nobody working the flag
 queue will ever see it.
 
+**One exception, and only one: a rollup note whose subject is a meta bug.** Release Management
+associates that note in Nucleus with the meta and deliberately leaves the flag unset, because a meta
+with ongoing work would otherwise carry a flag asserting a finished decision. So on a *meta* ask,
+request the wording but do not ask for the flag, and never read the missing flag as a stranded
+nomination. This applies to end-of-cycle rollups, so it should not arise in a daily pass; when it
+does, the cycle's own watchlist entry records which rollups it covers.
+
 This is measured, not theoretical. Of the first eleven asks, three set the flag and two replied
 enthusiastically *without* setting it, leaving those nominations invisible to the process.
 
@@ -893,7 +917,9 @@ ask for `[Why is this notable]`, `[Affects Firefox for Android]` and the rest �
 
 **Follow up on stranded nominations.** A `replied` item whose flag is still `---` needs the flag set
 (Release Management can set it) or a nudge — otherwise the work of asking is wasted.
-`watchlist.py followup` lists every asked/replied item with its current flag state.
+`watchlist.py followup` lists every asked/replied item with its current flag state. **Check first
+whether the item is a meta bug**, where an absent flag is the convention above and not a nomination
+to chase.
 
 **Run `followup` in every pass, before you write anything asking the user to act.** Any line of the
 form "close the needinfo", "set the flag", "withdraw the ask" is a claim about live Bugzilla state and

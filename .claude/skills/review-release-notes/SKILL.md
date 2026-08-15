@@ -192,7 +192,7 @@ python3 scripts/relnotes/relnote-flag.py --coverage 153.0.3 --product "Firefox f
 notes whose bug was never flagged. Validated against Nightly 155 — 19 notes, 19 flagged bugs, exact
 correspondence both ways.
 
-**Read its output with the four known distortions in mind**, all of which it labels rather than
+**Read its output with the six known distortions in mind**, all of which it labels rather than
 hides:
 
 - **The flag is per-major**, so a bug flagged `153+` may be noted in 153.0 *or* any later dot
@@ -202,6 +202,15 @@ hides:
   out of the note text, and says when a match came only from there.
 - **A meta bug or a rollup note may carry the note** while the flag sits on an implementation bug.
   One hop over `blocks`/`depends_on` explains those, reported separately from real gaps.
+- **A rollup note on a meta bug carries no flag anywhere, deliberately.** Release Management
+  associates the note in Nucleus with the meta and leaves `relnote-firefox` unset, because a meta
+  with ongoing work would otherwise carry a flag asserting a finished decision. No hop can explain
+  these — nothing is flagged — so they are listed as `ROLLUP NOTES ON A META BUG`, and not conflated
+  with the genuinely unflagged notes beneath, which have unrelated causes. **The convention rests on
+  the meta having open work**, which the tool does not check: it prints the dependency count, open or
+  not, so a meta whose dependencies have all closed may be an oversight rather than the convention and
+  is worth one look. One consequence either way: a count of a release's notes taken from flags
+  undercounts by the number of rollups, so count from Nucleus.
 - **`Fixed` and known-issue notes are normally unflagged** — Release Management writes dot-release
   fixes without setting the flag, so they are counted, not listed as findings.
 - **The flag has no product dimension.** Pass `--product` for a mobile note set, or you will be shown

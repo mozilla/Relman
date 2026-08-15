@@ -20,7 +20,7 @@ from "still cooking", and it catches features whose work began before the window
 Input is scan-window.py's JSON. Read-only; hits Bugzilla for parent/dependency metadata only.
 
 Usage:
-  scan-window.py --cycle 155 --format json -o /tmp/w.json
+  scan-window.py --cycle 155 --version 155 --format json -o /tmp/w.json
   bug-tree.py --input /tmp/w.json
   bug-tree.py --input /tmp/w.json --min-cluster 3 --format json
 """
@@ -126,12 +126,6 @@ TEST_ONLY_DEP_RE = re.compile(
 )
 
 
-def is_meta(bug: dict) -> bool:
-    if "meta" in (bug.get("keywords") or []):
-        return True
-    return bool(re.match(r"^\s*\[meta\]", bug.get("summary", ""), re.IGNORECASE))
-
-
 def main() -> None:
     p = argparse.ArgumentParser(description="Cluster window survivors into features.")
     p.add_argument("--input", required=True, help="scan-window.py JSON output")
@@ -171,25 +165,52 @@ def main() -> None:
         capped = True
         print(f"# warning: {len(parent_ids)} parent bugs exceeds --max-parents "
               f"{args.max_parents}; sampling the most-referenced", file=sys.stderr)
+        # Counted over the candidates only. Counting every `blocks` target instead lets the ranking
+        # spend slots on bugs that are themselves survivors -- which the line above deliberately
+        # excluded -- and each wasted slot costs a real parent: on the 155 cycle, 82 of 600 went that
+        # way and dropped 113 parents where 31 was the arithmetic minimum.
         freq = collections.Counter()
         for s in survivors:
             for b in s.get("blocks", []):
-                freq[str(b)] += 1
-        parent_ids = {b for b, _ in freq.most_common(args.max_parents)}
+                if str(b) in parent_ids:
+                    freq[str(b)] += 1
+        kept = {b for b, _ in freq.most_common(args.max_parents)}
+        # Named, for the same reason the skipped metas are: a dropped parent is a cluster that never
+        # existed, and a count alone leaves nobody able to tell which feature went missing. These are
+        # the least-referenced, so they are the likeliest to be incidental -- but that is a
+        # probability, not a guarantee.
+        dropped = sorted(parent_ids - kept, key=lambda b: (-freq[b], b))
+        print(f"#   dropped {len(dropped)} least-referenced parent(s): "
+              + ", ".join(f"{b} ({freq[b]}x)" for b in dropped[:10])
+              + (f", ... and {len(dropped) - 10} more" if len(dropped) > 10 else ""),
+              file=sys.stderr)
+        parent_ids = kept
 
     parents = fetch_bugs(
         sorted(parent_ids), "id,summary,keywords,status,resolution,depends_on,blocks,whiteboard"
     ) if parent_ids else {}
-    all_metas = {i: b for i, b in parents.items() if is_meta(b)}
+    all_metas = {i: b for i, b in parents.items() if trainlib.is_meta(b)}
     # A meta with hundreds of dependencies is a standing tracking bug ("[meta] WebRTC
     # bugs"), not a feature. Clustering on it would sweep unrelated work together and
     # its completeness check would fetch thousands of bugs for no benefit.
     metas = {i: b for i, b in all_metas.items()
              if len(b.get("depends_on") or []) <= args.max_meta_deps}
-    skipped_metas = len(all_metas) - len(metas)
+    # Named, not just counted. A count cannot be audited: meta 2017363 (Interop 2026 WebRTC, 62
+    # deps) was dropped here during the cycle-155 rollup and its absence had to be noticed by hand.
+    # Closest to the threshold first and capped, because a cycle pass skips ~70 of these and the ones
+    # worth a second look are the near misses -- nothing with 2,527 dependencies is a feature.
+    skipped_metas = sorted(set(all_metas) - set(metas),
+                           key=lambda i: len(all_metas[i].get("depends_on") or []))
     print(f"# {len(parents)} parents fetched, {len(all_metas)} are meta bugs "
-          f"({skipped_metas} skipped as broad tracking bugs with more than "
+          f"({len(skipped_metas)} skipped as broad tracking bugs with more than "
           f"{args.max_meta_deps} dependencies)", file=sys.stderr)
+    for i in skipped_metas[:8]:
+        deps = len(all_metas[i].get("depends_on") or [])
+        print(f"#   skipped meta {i} ({deps} deps): {all_metas[i].get('summary','')[:66]}",
+              file=sys.stderr)
+    if len(skipped_metas) > 8:
+        print(f"#   ... and {len(skipped_metas) - 8} broader ones. Raise --max-meta-deps to cluster "
+              "any of these.", file=sys.stderr)
 
     clusters: list[dict] = []
 

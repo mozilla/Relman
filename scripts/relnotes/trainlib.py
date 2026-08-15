@@ -325,6 +325,17 @@ def git(repo: Path, *args: str, check: bool = True) -> str:
     return out
 
 
+# ----------------------------------------------------------------------------- bugs
+
+def is_meta(bug: dict) -> bool:
+    """A tracking bug rather than a change. Needs both tests: plenty of metas carry only the title
+    convention, and plenty carry only the keyword.
+    """
+    if "meta" in (bug.get("keywords") or []):
+        return True
+    return bool(re.match(r"^\s*\[meta\]", bug.get("summary", ""), re.IGNORECASE))
+
+
 # ------------------------------------------------------------------- tooling version
 
 # This repo's own release-note surface, split by *what it costs to pick up a change* -- which is

@@ -112,16 +112,23 @@ by hand, and none of the three is evidence of no gate. When an entry holds more 
 190 of them do, because the default itself sits in an `#if` — the output says so rather than picking
 one.
 
-## The three preference files
+## The five preference files
 
 | File | Role |
 |---|---|
 | `modules/libpref/init/StaticPrefList.yaml` | Gecko-wide static prefs (2,885 entries) |
+| `modules/libpref/init/all.js` | Gecko-wide defaults with no C++ mirror (1,527 prefs) |
+| `toolkit/components/pdfjs/PdfJsDefaultPrefs.js` | pdf.js defaults (52 prefs), shipped on desktop and Android alike |
 | `browser/app/profile/firefox.js` | **Desktop** Firefox defaults and overrides (70 preprocessor conditionals) |
 | `mobile/android/app/geckoview-prefs.js` | **Android** defaults and overrides (145 prefs), shipped with GeckoView and Fenix |
 
-**Every preference count in this file was re-measured at `origin/main` on 2026-08-13**, and the
-`dom/webidl` annotation counts on 2026-08-14; each is reproducible with a grep. The shipped-note
+The first three are shared across products; the last two are per-product. **`pref-delta.py` reads all
+five**, so a name it reports as absent is absent from the tree rather than merely from a file it
+cannot see — do not hand-read one of these on the assumption that the tool skips it.
+
+**Every preference count in this file was re-measured at `origin/main` on 2026-08-13**, the `all.js`
+and pdf.js rows on 2026-08-14, and the `dom/webidl` annotation counts on 2026-08-14; each is
+reproducible with a grep. The shipped-note
 counts further down are not covered by that. Most had drifted or were never reproducible, so if one
 looks wrong, re-measure it rather than reasoning from it. The entry count is `- name:` lines, of
 which 173 are written `-   name:`; match them with `pref-delta.py`'s `YAML_NAME_RE` rather than a

@@ -152,6 +152,15 @@ intuition.
   now reports reporter domain, duplicate count, see_also and cc per survivor — **read that before
   tiering.** Keywords, bug age and a severe-sounding title are not impact evidence; outside reporters
   and duplicates are.
+  - **`EXTERNAL` means "not an @mozilla.com address", which is not the same as "not a Mozilla
+    developer".** The split is a domain test (`creator.endswith("@mozilla.com")`), so a developer who
+    files from a personal address is labelled an outside reporter. Seen twice in a week:
+    `aaron.train@gmail.com` on 08-09, then `docfaraday@gmail.com` and `ngrunbaum@me.com` — both
+    Mozilla WebRTC developers — in the 155 rollup's interop cluster. The error runs toward
+    *including*, which is the dangerous direction for this rule: it turns an internally-filed bug with
+    no duplicates into apparent outside corroboration. The domain is printed, so read it, and when the
+    reporter is also the assignee or the area's obvious owner, treat the label as unknown rather than
+    as evidence.
 - **A severe recent regression predicts an *uplift*, not a note.** `fx153=affected fx154=affected` on
   something that broke recently means it will likely be fixed on those branches, leaving no
   user-visible delta to describe. Bug 2054991 (unrecoverable certificate error) was proposed partly

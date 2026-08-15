@@ -290,7 +290,7 @@ def cmd_resume(args) -> None:  # noqa: C901
 # Deliberately enumerated rather than allowing "git -C <repo>:*", which would also pre-approve
 # checkout/reset/commit against someone's working tree.
 GECKO_GIT_SUBCOMMANDS = ("log", "show", "diff", "grep", "rev-list", "rev-parse", "merge-base",
-                         "for-each-ref", "tag", "fetch", "ls-tree", "cat-file")
+                         "for-each-ref", "tag", "branch", "fetch", "ls-tree", "cat-file")
 REPO_ROOT = trainlib.RELMAN_ROOT
 LOCAL_SETTINGS = REPO_ROOT / ".claude" / "settings.local.json"
 SHARED_SETTINGS = REPO_ROOT / ".claude" / "settings.json"
