@@ -8,7 +8,7 @@ Regenerate with `scripts/relnotes/fetch-shipped-notes.py --format md -o referenc
 
 ## The bar, in one line
 
-**A major release ships 21 notes (median; range 10–31) drawn from ~2,645 bugs fixed per cycle — about 1.1%, or 1 note per 94 fixed bugs.**
+**A major release ships 20 notes (median; range 10–30) drawn from ~2,646 bugs fixed per cycle — about 1.0%, or 1 note per 98 fixed bugs.**
 
 **This is a publication rate, not a shortlist budget — do not use it to prune.** It is what survived *after* a developer was asked and Release Management made a call. Discovery sits upstream of both: its job is to surface bugs worth asking a developer about, and the cost of the two errors is wildly asymmetric. A surplus candidate costs one question in a bug; a missed one ships a release with a note nobody wrote. So **err toward including** and let the tiering carry the uncertainty.
 
@@ -18,21 +18,21 @@ What the number *is* good for: sanity-checking the final published set, and cali
 
 | Version | Notes | | Version | Notes |
 |---|---:|---|---|---:|
-| 129.0 | 21 | | 142.0 | 19 |
-| 130.0 | 11 | | 143.0 | 18 |
-| 131.0 | 16 | | 144.0 | 28 |
-| 132.0 | 21 | | 145.0 | 25 |
-| 133.0 | 13 | | 146.0 | 22 |
-| 134.0 | 10 | | 147.0 | 31 |
+| 129.0 | 20 | | 142.0 | 18 |
+| 130.0 | 10 | | 143.0 | 17 |
+| 131.0 | 15 | | 144.0 | 27 |
+| 132.0 | 20 | | 145.0 | 24 |
+| 133.0 | 12 | | 146.0 | 21 |
+| 134.0 | 10 | | 147.0 | 30 |
 | 135.0 | 21 | | 148.0 | 19 |
-| 136.0 | 30 | | 149.0 | 26 |
-| 137.0 | 15 | | 150.0 | 27 |
-| 138.0 | 19 | | 151.0 | 30 |
-| 139.0 | 23 | | 152.0 | 24 |
-| 140.0 | 20 | | 153.0 | 31 |
-| 141.0 | 17 | | | |
+| 136.0 | 29 | | 149.0 | 26 |
+| 137.0 | 14 | | 150.0 | 26 |
+| 138.0 | 18 | | 151.0 | 29 |
+| 139.0 | 22 | | 152.0 | 23 |
+| 140.0 | 19 | | 153.0 | 30 |
+| 141.0 | 16 | | | |
 
-25 major releases, 537 notes, mean 21.5. Plus 57 dot releases carrying 234 notes.
+25 major releases, 516 notes, mean 20.6. Plus 57 dot releases carrying 234 notes.
 
 ## Tags, and what each is really used for
 
@@ -43,12 +43,12 @@ What the number *is* good for: sanity-checking the final published set, and cali
 | HTML5 | 141 | 140 | 1 | 75 | 21 |
 | Developer | 61 | 61 | 0 | 28 | 23 |
 | Changed | 48 | 46 | 2 | 26 | 28 |
-| Enterprise | 25 | 21 | 4 | 4 | 20 |
 | Community | 25 | 25 | 0 | 0 | 134 |
 | (untagged) | 17 | 14 | 7 | 12 | 43 |
+| Enterprise | 4 | 0 | 4 | 4 | 17 |
 | Labs | 4 | 4 | 0 | 3 | 45 |
 
-Notes are short — median **20 words** across hand-authored notes (excluding the generated Community and Enterprise boilerplate). A candidate that needs three sentences to explain is usually either two notes or not a note.
+Notes are short — median **20 words** across hand-authored notes (excluding the generated Community credits). A candidate that needs three sentences to explain is usually either two notes or not a note.
 
 **The Fixed/major split is the number to watch.** Of 264 `Fixed` notes, 214 shipped in dot releases against 50 in majors — and 25 of those majors are just the standing security catch-all. Majors are carried by `New`, `HTML5`/`Developer`, and `Changed`; dot releases are where fixes live. Treat that as a description of past practice rather than a rule — it is already changing, and the next section quantifies how fast and characterizes the threshold.
 
@@ -61,7 +61,6 @@ The style guide's tense rule shows up in the data — use this to check a draft'
 - **HTML5** — `Firefox` (39), `Added` (31), `The` (29), `Support` (7), `Enabled` (4), `Implemented` (3), `Service` (2), `Both` (1)
 - **Developer** — `The` (16), `Firefox` (11), `Added` (5), `A` (4), `Support` (2), `Improved` (2), `When` (2), `Debugger` (1)
 - **Changed** — `The` (13), `Firefox` (6), `When` (3), `Improved` (3), `On` (3), `Due` (2), `Extensions` (2), `Local` (2)
-- **Enterprise** — `You` (21), `Introduced` (2), `Added` (1), `Fixed` (1)
 - **Community** — `With` (25)
 - **(untagged)** — `strike` (7), `For` (2), `Windows` (2), `On` (2), `Users` (1), `Due` (1), `Multiselecting` (1), `Some` (1)
 
@@ -109,14 +108,6 @@ Real shipped text, spread from shortest to longest within each tag.
 - Geolocation on Windows now respects the user's Windows location permission setting, instead of overriding it, when the user grants location permission to a page. Firefox will ask users to enable the Windows permission if it is needed.
 - The refreshed New Tab layout previously rolled out in Firefox 134 to users in the United States is now being made available in all countries where Stories are available. It features a repositioned logo to prioritize Web Search, Shortcuts, and Recommended Stories at the top. The update also includ...
 
-**Enterprise**
-
-- Added an enterprise policy to disable the *Firefox Labs* section in *Settings*.
-- You can find information about policy updates and enterprise-specific bug fixes in the Firefox for Enterprise 150 Release Notes.
-- You can find information about policy updates and enterprise specific bug fixes in the Firefox for Enterprise 132 Release Notes.
-- You can find information about policy updates and enterprise specific bug fixes in the Firefox for Enterprise 140 Release Notes.
-- Introduced a new enterprise policy that allows administrators to prevent the built-in VPN and IP protection features from being available to users. (Bug 2022365)
-
 **Community**
 
 - With the release of Firefox 132, we are pleased to welcome the developers who contributed their first code change to Firefox in this release, 7 of whom were brand new volunteers! Please join us in thanking each of these diligent and enthusiastic individuals, and take a look at their contributions...
@@ -132,6 +123,20 @@ Real shipped text, spread from shortest to longest within each tag.
 - On Linux (Wayland) systems, certain popups and context menus will sometimes open in the wrong place, such as the top-left corner of the window. Firefox 147.0.3 has a partial mitigation for this problem and remaining instances will be addressed in a future release.
 - <strike>Under certain conditions, copyrighted video served via digital rights management may experience playback issues . A patch is underway. For an immediate workaround, please complete the following steps: 1. Go to *about:config* in the Awesomebar. 2. Search for `media.eme.mfcdm.origin-filter....
 - ~~Some Windows users may experience a crash on startup after updating, caused by an incomplete update leaving the Firefox installation in an inconsistent state (Bug 1681745). If you are affected, downloading Firefox from firefox.com and installing it over your existing installation will repair it...
+
+**Enterprise** — only 4 in the corpus, so read these as instances rather than a pattern
+
+- Added an enterprise policy to disable the *Firefox Labs* section in *Settings*.
+- Introduced a new enterprise policy that allows administrators to directly manage and control AI-related features within Firefox.
+- Fixed an issue where enterprise policies for the browser homepage and start page were not being applied correctly.
+- Introduced a new enterprise policy that allows administrators to prevent the built-in VPN and IP protection features from being available to users. (Bug 2022365)
+
+**Labs** — only 4 in the corpus, so read these as instances rather than a pattern
+
+- Firefox Labs can now be opened quickly by typing "labs" or "experiment" in the address bar and selecting the _Open Firefox Labs_ quick action. <img src="https://www.firefox.com/media/img/firefox/releasenotes/note-images/153_labs_quickaction.png" alt="Screenshot of the Firefox Labs quick action be...
+- Firefox now offers experimental support for the new JPEG XL image format, which generally provides better compression than WebP, JPEG, PNG, and GIF and is designed to supersede them. You can enable it from the *Firefox Labs* panel in *Settings*.
+- Firefox now offers experimental support for the new JPEG XL image format, which generally provides better compression than WebP, JPEG, PNG, and GIF and is designed to supersede them. You can enable it from the *Firefox Labs* panel in *Settings*. <img src="https://www.firefox.com/media/img/firefox...
+- Tab notes feature that lets you attach a short note to a web page is now available in Firefox Labs. You can use notes to remember why you opened a page, what you planned to do next or any details you want to revisit later. Please give notes a try and share your feedback on what works well and wha...
 
 ## Where the `Fixed` threshold currently sits (majors)
 
@@ -224,12 +229,12 @@ For each sampled version, every bug marked `fixed` for that version versus the n
 
 | Version | Bugs fixed | Notes | Rate |
 |---|---:|---:|---:|
-| 153.0 | 2,713 | 31 | 1.14% |
-| 152.0 | 2,911 | 24 | 0.82% |
-| 151.0 | 2,511 | 30 | 1.19% |
-| 150.0 | 2,446 | 27 | 1.10% |
+| 153.0 | 2,715 | 30 | 1.10% |
+| 152.0 | 2,912 | 23 | 0.79% |
+| 151.0 | 2,512 | 29 | 1.15% |
+| 150.0 | 2,446 | 26 | 1.06% |
 
-Aggregate: **112 notes out of 10,581 fixed bugs = 1.06%.**
+Aggregate: **108 notes out of 10,585 fixed bugs = 1.02%.**
 
 Highest note yield among components with at least 25 fixed bugs in the sampled versions (below that, one note reads as a huge percentage and means nothing):
 
@@ -277,7 +282,7 @@ And the opposite end — the busiest components that produced **no** notes at al
 | Developer Infrastructure :: Lint and Formatting | 87 | 0 |
 | Firefox :: Messaging System | 86 | 0 |
 | Core :: JavaScript: WebAssembly | 80 | 0 |
-| Web Compatibility :: Site Reports | 75 | 0 |
+| Web Compatibility :: Site Reports | 78 | 0 |
 | Core :: DOM: Security | 75 | 0 |
 | Core :: WebRTC | 74 | 0 |
 
@@ -285,7 +290,7 @@ And the opposite end — the busiest components that produced **no** notes at al
 
 ## Observations that bear on discovery
 
-- **Bug numbers are recorded on 232 of 535 major-release notes (43%) versus 207 of 234 dot-release notes (88%).** Dot releases require bug links and mainline notes don't, which is exactly the gap you see. Nucleus keeps the bug number as a field even when the published note doesn't render a link — so this corpus can be joined to Bugzilla either way.
+- **Bug numbers are recorded on 232 of 514 major-release notes (45%) versus 207 of 234 dot-release notes (88%).** Dot releases require bug links and mainline notes don't, which is exactly the gap you see. Nucleus keeps the bug number as a field even when the published note doesn't render a link — so this corpus can be joined to Bugzilla either way.
 - **37 notes are marked as progressive rollouts.** A gated or staged feature does get noted; being behind a rollout is not by itself a reason to hold a note, but it changes the wording.
 - **17 known-issue notes.** These recur across several versions, which is why per-release counting has to use note–release pairs rather than distinct notes.
 - **The `HTML5` tag is still in live use** alongside `Developer`, and is what renders as the *Web Platform* heading -- there is no `Web Platform` tag. Web-platform notes therefore appear under more than one tag historically, so match a product's established usage rather than normalizing. That is not licence to leave a note in the wrong one of the two: see the style guide for the engine-versus-DevTools split that decides it.
@@ -294,15 +299,17 @@ And the opposite end — the busiest components that produced **no** notes at al
 
 - Source: `https://nucleus.mozilla.org/rna/notes/?format=json` and `https://nucleus.mozilla.org/rna/releases/?format=json` (public, unauthenticated).
 - Scope: product `Firefox`, channel `Release`, released on or after `2024-08-01`.
-- 82 releases in scope, 764 distinct public notes, 774 note–release pairs.
+- 82 releases in scope, 743 distinct public notes, 753 note–release pairs.
 - Bugzilla REST used for component lookup and fixed-bug denominators.
 - Generated by `scripts/relnotes/fetch-shipped-notes.py`; counts are as of the run date.
 
 ### Measuring this corpus yourself
 
-Ad-hoc counts over the Nucleus payload drive calibration decisions, and two mistakes have produced a confident wrong answer:
+Ad-hoc counts over the Nucleus payload drive calibration decisions, and each of these has produced a confident wrong answer:
 
-- **Exclude `Community`, `Enterprise`** — the `NON_AUTHORED_TAGS` set in `fetch-shipped-notes.py`. Both are generated boilerplate rather than team writing, so their markup, length and phrasing are not evidence of house practice. Leaving them in is what makes raw HTML links look like current convention.
+- **Exclude `Community`** — the `NON_AUTHORED_TAGS` set in `fetch-shipped-notes.py`. Contributor credits are generated rather than team writing, so their markup, length and phrasing are not evidence of house practice. Leaving them in is what makes raw HTML links look like current convention.
+
+- **`Enterprise` is excluded by text, not by tag, and only the old pointer.** Notes reading "You can find information about policy updates…" linked out to the separately maintained Firefox for Enterprise notes; those stopped being maintained in August 2026 and Release Management writes these notes now. So the tag is hand-authored going forward and belongs in the corpus, while its historical volume is almost entirely that one pointer. **Do not calibrate the enterprise bar off this corpus** — the class was documented elsewhere, not judged and rejected.
 
 - **Markdown links come in two forms, and the reference form dominates.** Inline `[text](url)` is the one people write regexes for; `[text][1]` with a `[1]: url` definition below is what the notes actually use. Measured over notes authored since 2024: **1,135 reference-style against 19 inline**, so an inline-only pattern sees under 2% of them.
 

@@ -78,7 +78,15 @@ MD_REF_LINK_RE = re.compile(r"\[([^\]]+)\]\[\d+\]")
 STUB_RE = re.compile(r"^\s*reference link to\b", re.IGNORECASE)
 # Tags that are not hand-authored during the notes pass and should not calibrate
 # either the significance bar or the phrasing analysis.
-NON_AUTHORED_TAGS = {"Community", "Enterprise"}
+SURVEY_PATH = "reference/release-notes/shipped-notes-survey.md"
+NON_AUTHORED_TAGS = {"Community"}
+# `Enterprise` used to be in that set, because nearly every note under it was one generated pointer
+# at the separately maintained Firefox for Enterprise notes. Those stopped being maintained in August
+# 2026 and Release Management writes these notes now, so the tag is hand-authored going forward and
+# excluding it would hide the only examples of the register. Excluding the *pointer text* instead
+# keeps the old boilerplate out and needs no further edit as real notes accumulate.
+ENTERPRISE_POINTER_RE = re.compile(
+    r"you can find information about policy updates", re.IGNORECASE)
 # The standing per-release catch-all. It ships in every major, so counting it
 # alongside real Fixed notes doubles the apparent Fixed-in-majors rate.
 BOILERPLATE_RE = re.compile(r"^(various\s+)?security fix", re.IGNORECASE)
@@ -204,18 +212,25 @@ def build_pairs(
             scoped[rid] = r
 
     pairs = []
-    stubs = 0
+    stubs = pointers = 0
     for n in notes:
         if not n.get("is_public"):
             continue
         if STUB_RE.match(n.get("note", "")):
             stubs += 1
             continue
+        # Same reasoning as the stubs: navigation to another document rather than a note, and the
+        # document it points at is not maintained any more. Dropping it here rather than only from
+        # the median is what keeps it out of the tag table, the openers and the examples -- left in,
+        # it makes the Enterprise tag look like boilerplate and its register look like "You can…".
+        if ENTERPRISE_POINTER_RE.search(n.get("note", "")):
+            pointers += 1
+            continue
         for u in n.get("releases", []):
             rid = release_id(u)
             if rid in scoped:
                 pairs.append((scoped[rid], n))
-    return pairs, scoped, stubs
+    return pairs, scoped, stubs, pointers
 
 
 def fetch_bug_fields(bug_ids: list[int], fields: str, cache: Path | None, label: str) -> dict[int, dict]:
@@ -327,8 +342,9 @@ def summarize(pairs: list[tuple[dict, dict]], scoped: dict[str, dict]) -> dict:
             "notes": ns,
         }
 
-    # Median length across hand-authored notes only: the Community blurb and the
-    # Enterprise boilerplate are generated elsewhere and would skew it badly.
+    # Median length across hand-authored notes only: the Community blurb is generated elsewhere and
+    # runs long enough to skew it badly. The Enterprise pointer notes are already gone by here,
+    # dropped in build_pairs.
     authored_words = [
         len(clean_note(n["note"]).split())
         for n in notes_by_id.values()
@@ -404,8 +420,11 @@ def emit_markdown(s: dict, meta: dict, areas: dict | None, negative: dict | None
           "refreshes.")
     w("")
     w(
+        # The canonical path, never `--output`: this line is an instruction to whoever reads the
+        # committed file, and a one-off regeneration to a scratch path would otherwise tell every
+        # future reader to write the survey there.
         "Regenerate with `scripts/relnotes/fetch-shipped-notes.py --format md "
-        f"-o {meta['outpath']} --areas --negative {','.join(negative['versions']) if negative else '153.0,152.0'}`. "
+        f"-o {SURVEY_PATH} --areas --negative {','.join(negative['versions']) if negative else '153.0,152.0'}`. "
         "Counts below are from the run recorded at the bottom of this file; refresh after each cycle."
     )
     w("")
@@ -474,7 +493,7 @@ def emit_markdown(s: dict, meta: dict, areas: dict | None, negative: dict | None
     w("")
     w(
         f"Notes are short — median **{s['authored_median_words']} words** across hand-authored "
-        "notes (excluding the generated Community and Enterprise boilerplate). A candidate that "
+        "notes (excluding the generated Community credits). A candidate that "
         "needs three sentences to explain is usually either two notes or not a note."
     )
     w("")
@@ -508,10 +527,15 @@ def emit_markdown(s: dict, meta: dict, areas: dict | None, negative: dict | None
     w("")
     w("Real shipped text, spread from shortest to longest within each tag.")
     w("")
+    # Small tags are shown too, with their size stated. A cutoff of five silently hid every example
+    # of the two tags most likely to be looked up precisely because they are rare -- `Labs`, which
+    # the style guide devotes a paragraph to, and `Enterprise`, whose whole corpus is small now that
+    # the generated pointer notes are excluded. One example is not a spread, so that is the floor.
     for tag, st in sorted(s["tag_stats"].items(), key=lambda x: -x[1]["count"]):
-        if st["count"] < 5:
+        if st["count"] < 2:
             continue
-        w(f"**{tag}**")
+        w(f"**{tag}**" + (f" — only {st['count']} in the corpus, so read these as instances rather "
+                          "than a pattern" if st["count"] < 5 else ""))
         w("")
         for ex in pick_examples(st["examples"], 5):
             flat = " ".join(ex.split())
@@ -722,13 +746,21 @@ def emit_markdown(s: dict, meta: dict, areas: dict | None, negative: dict | None
     w("")
     w("### Measuring this corpus yourself")
     w("")
-    w("Ad-hoc counts over the Nucleus payload drive calibration decisions, and two mistakes have "
+    w("Ad-hoc counts over the Nucleus payload drive calibration decisions, and each of these has "
       "produced a confident wrong answer:")
     w("")
     w(f"- **Exclude `{'`, `'.join(sorted(NON_AUTHORED_TAGS))}`** — the `NON_AUTHORED_TAGS` set in "
-      "`fetch-shipped-notes.py`. Both are generated boilerplate rather than team writing, so their "
-      "markup, length and phrasing are not evidence of house practice. Leaving them in is what "
-      "makes raw HTML links look like current convention.")
+      "`fetch-shipped-notes.py`. Contributor credits are generated rather than team writing, so "
+      "their markup, length and phrasing are not evidence of house practice. Leaving them in is "
+      "what makes raw HTML links look like current convention.")
+    w("")
+    w("- **`Enterprise` is excluded by text, not by tag, and only the old pointer.** Notes reading "
+      "\"You can find information about policy updates…\" linked out to the separately maintained "
+      "Firefox for Enterprise notes; those stopped being maintained in August 2026 and Release "
+      "Management writes these notes now. So the tag is hand-authored going forward and belongs in "
+      "the corpus, while its historical volume is almost entirely that one pointer. **Do not "
+      "calibrate the enterprise bar off this corpus** — the class was documented elsewhere, not "
+      "judged and rejected.")
     w("")
     w("- **Markdown links come in two forms, and the reference form dominates.** Inline "
       "`[text](url)` is the one people write regexes for; `[text][1]` with a `[1]: url` definition "
@@ -984,8 +1016,15 @@ def main() -> None:
         rx = re.compile(args.search, re.IGNORECASE)
         rel_by_id = {re.search(r"/releases/(\d+)/", r["url"]).group(1): r for r in releases}
         hits = []
+        pointer_hits = 0
         for n in notes:
             if not n.get("is_public") or not rx.search(n.get("note") or ""):
+                continue
+            # Excluded here for the same reason build_pairs excludes them from the corpus, and it
+            # matters more here: `--search` is the precedent check, so leaving the generated Firefox
+            # for Enterprise pointers in would report dozens of them as house practice.
+            if ENTERPRISE_POINTER_RE.search(n.get("note", "")):
+                pointer_hits += 1
                 continue
             vers = sorted({
                 f"{rel_by_id[i]['product'].replace('Firefox for ', '')} "
@@ -996,6 +1035,9 @@ def main() -> None:
             hits.append((vers, n))
         print(f"{len(hits)} shipped note(s) match {args.search!r} across "
               f"{len(notes)} notes (all products, channels, years)")
+        if pointer_hits:
+            print(f"  ({pointer_hits} generated Firefox for Enterprise pointer note(s) also matched "
+                  "and are excluded -- navigation, not house practice)")
         if not hits:
             print("  NO PRECEDENT -- this kind of change has never been noted.")
         # The header above carries the real total, but the listing is what gets read and precedent
@@ -1026,8 +1068,9 @@ def main() -> None:
         return
     print(f"# fetched {len(notes)} notes, {len(releases)} releases", file=sys.stderr)
 
-    pairs, scoped, stubs = build_pairs(notes, releases, args.product, args.channel, since)
-    print(f"# skipped {stubs} cross-reference stubs", file=sys.stderr)
+    pairs, scoped, stubs, pointers = build_pairs(notes, releases, args.product, args.channel, since)
+    print(f"# skipped {stubs} cross-reference stubs and {pointers} Firefox for Enterprise pointers",
+          file=sys.stderr)
     if not pairs:
         sys.exit(
             f"error: no notes matched product={args.product!r} channel={args.channel!r} "
@@ -1049,7 +1092,6 @@ def main() -> None:
         "channel": args.channel,
         "since": since,
         "pairs": pairs,
-        "outpath": args.output or "reference/release-notes/shipped-notes-survey.md",
         # None when --since pinned the floor, a month count when it was derived from --months. The
         # difference is not cosmetic: a derived floor moves forward on every run, so the report has
         # to say which kind it is rather than printing a date that looks fixed either way.

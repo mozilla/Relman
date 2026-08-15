@@ -1,8 +1,14 @@
 # Calibration: what real passes got wrong
 
 Empirical calibration for `find-release-note-candidates`, kept out of the skill body on purpose.
-**Read it before tiering** — every item is a case where a pass was wrong and a Release Manager or
-the tree corrected it, so it outranks intuition.
+Every item is a case where a pass was wrong and a Release Manager or the tree corrected it, so it
+outranks intuition.
+
+**Read the tiering sections before tiering, and the later sections when you reach the step they
+belong to** — "Gate misses" alongside Step 2, "Drafting and wording" alongside Step 5, "Drop-audit
+lessons" when you audit the drop list. The skill states each rule at the step that needs it; this file
+holds the case that produced it, for when the rule looks arbitrary or you are deciding how strictly to
+read it.
 
 It lives here because it is an incident log, and an incident log grows one entry per mistake.
 Inline it crowded out the process it was meant to inform: the skill states the method, this file
@@ -183,9 +189,13 @@ intuition.
   audience. Ask how many people use the surface before asking how good the change is. **This applies
   to UI surfaces as much as to web APIs**: scoped to APIs, the rule reads past a candidate like bug
   2051292 (long-press an Android toolbar shortcut to edit it), which went out with reservations.
+  **Managed deployments are a recognized audience and are not sized by headcount** — an enterprise
+  policy note is aimed at the administrators who will look for it, so the reach test does not apply.
 - **A change to an internal configuration surface is not a note unless the surface is being
   replaced.** `about:config` and its neighbours are deliberately not promoted, whatever their
-  traffic — that is policy rather than audience size, so the reach test above does not reach it.
+  traffic — that is a decision rather than audience size, so the reach test above does not reach it.
+  **Enterprise policies are not one of these surfaces**: they are a supported, documented management
+  interface with its own audience — see the enterprise entry below.
   Measured across the shipped corpus: `about:config` appears in 16 notes in total and is the
   *subject* of only two, both the same Firefox 71 change ("Configuration page reimplemented in
   HTML"); nearly all the rest name it as the place to flip a preference for some other feature. Bug
@@ -193,6 +203,8 @@ intuition.
   user-visible, cleared every other filter here, and was declined on this ground alone.
 - **"Now configurable via a preference" is not a note.** Notes describe default behaviour; anything
   requiring a manual `about:config` change is out of scope (bug 1418178, Ctrl-Tab preview count).
+  **A new enterprise policy is the exception**, because for its audience the configurability is the
+  feature, not a workaround — see the enterprise entry below.
   Check whether the *default* actually changed before treating a new preference as a candidate — in
   1418178 the value had been hardcoded at 7 and the preference kept it at 7, so nothing changed for
   anyone. A `pref-delta.py` line reading `None -> 7` means the preference is new, **not** that the
@@ -239,6 +251,39 @@ intuition.
   automatically mean "covered by the security advisory".** Weigh whether the *user-visible*
   behaviour is a known shortcoming worth telling people was fixed.
 
+**Enterprise policies, from 2026-08-15: a candidate class the corpus cannot calibrate.**
+
+Firefox for Enterprise release notes stopped being separately maintained, so Release Management now
+writes these. Three things follow, and the first is the one to internalise:
+
+- **Its absence from two years of shipped notes is not evidence against it.** The work was being
+  documented in another place, not judged and rejected. Anything that reasons from "how often does
+  this ship a note" — the survey's tag table, the `Fixed`-in-majors bar — reads low here for a reason
+  that no longer holds. This is the one class where the corpus argues the wrong way.
+- **In scope:** a policy added, a policy gaining options, and a policy that stopped being enforced.
+  The last is easy to skip because it reads like an ordinary regression: `DNSOverHTTPS enterprise
+  policy no longer enforced` (2044851) and `DisablePasswordReveal … no longer hides the show password
+  button` (2001459) are invisible to everyone except the deployments relying on them, which is
+  precisely why nobody else files them. There is published precedent for the regression case —
+  *"Fixed an issue where enterprise policies for the browser homepage and start page were not being
+  applied correctly"* — so it does not need arguing from first principles.
+- **The flag queue does not cover this class, so discovery is the only path.** Every FIXED
+  `Enterprise Policies` bug measured over a year carried `relnote-firefox = ---`, including bug
+  2022365, whose Enterprise note *shipped*. Both notes submitted for **155** were also unflagged:
+  2001734 (`DisableLaunchOnLogin`) and 2056928. Elsewhere an unflagged bug in a mechanical-looking
+  area is weak evidence that nobody thought it note-worthy; here it means nothing at all.
+- **One of those two is the worked example for how this class hides.** Bug 2056928 earned a 155
+  Enterprise note and sits in `Firefox :: Settings UI` with a landing reading `Make legacy disabling
+  pref work with new settings` — no policy in the component, neither "enterprise" nor "policy" in any
+  of its text. The only signal was that it touched `browser/components/enterprisepolicies/`, which is
+  why the label reads the tree as well as the summary. **So the label is a floor, not a filter:** an
+  enterprise-visible regression can be worded entirely in the vocabulary of the feature it broke.
+
+`scan-window.py` labels these `[enterprise policy]` during the cycle, and after the release
+`policy-changelog.py --version N` lists what the policy templates say changed. Neither is a
+significance judgement: a policy that only administrators can even observe still has to be worth an
+administrator's attention.
+
 **Judge the landing, not the bug summary — this rule has already been broken once.** Bug 267369 is a
 2004 feature request ("put source URL into the saved file's properties") that was proposed as a
 Tier 1 candidate. Its **only** landing was `Document how Firefox records download origin metadata …
@@ -251,4 +296,85 @@ to ask developers about — 1477920, 2051354, 2058840. The skill had proposed tw
 and one in Tier 2, plus four Tier 2 items and seven Tier 3 items that were all rejected. Erring
 toward inclusion is still right, but **internals and crash fixes are dead weight, not cheap
 over-inclusion.**
+
+## Gate misses
+
+The rules these produced are in the skill's Step 2. These are the cases, and the pattern across them
+is that the check was not missing — it was applied selectively.
+
+- **The workup was done first and the gate settled it anyway.** Over three consecutive days
+  (2026-08-01..03) three candidates were killed by their feature's gate *after* the full workup —
+  reporter, duplicate count, blocking meta, landing message, precedent search — when one `--lookup`
+  would have ended it at the start.
+
+  | Bug | Gate | Verdict |
+  |---|---|---|
+  | 2047027 | Android tab groups, hardcoded `false` | not a note |
+  | 2060090 | `browser.ipProtection.enabled` false on every config | not a note |
+  | 2009909 | `dom.select.customizable_select.enabled` false on every config | not a note |
+
+- **Neither bug "looked gated", and the release manager supplied both gates.** On two consecutive
+  days: the `mediaNotificationImprovements` Nimbus flag (2054954), then `browser.nova.enabled`
+  (2043530). On both days the same check ran correctly on *other* bugs in the same pass, which is why
+  "resolve it when it looks gated" is the wrong trigger.
+- **QA states the gate in comment 0; developers usually don't.** 2043530's `**Preconditions**` block
+  named `browser.nova.enabled = true` outright. By contrast all four comments on 2054954 are the
+  developer's one-line summary, his patch and two push notices — the gate existed only in
+  `nimbus.fml.yaml`. A pass also once filtered a `--comment 0` call through `grep` for `see_also` and
+  threw away the platform evidence sitting in the same output.
+- **A web-platform gate is older than the change.** Bug 2057406 was asked and noted as ungated because
+  neither comment 0 nor the patch mentions a preference; `StylePropertyMap` had been behind
+  `layout.css.typed-om.enabled`, Nightly-only, all along.
+- **A diff was read as proof of absence.** On 2043530 the report claimed "verified ungated by reading
+  the diff" because the button was added unconditionally in `FormAutofillPrompter.sys.mjs` — the gate
+  lived upstream of that hunk, in the preference comment 0 had named.
+- **Correctly excluded became invisible.** Bug 2009909 was rightly dropped for its gate and then left
+  out of the report entirely, so the user had to ask why a notable bug was missing.
+
+## Drafting and wording
+
+The rules are in the skill's Step 5; `style-guide.md` is the checklist. These are the drafts that
+were rejected and why.
+
+- **Mechanism instead of symptom**, the most common failure:
+
+  | Rejected draft | Why it failed | Better |
+  |---|---|---|
+  | *Added a Windows font collection so more characters render correctly in web content.* | Describes the change (adding a font list entry), not the experience. "More characters" says nothing. | *Fixed characters from some less common scripts appearing as empty boxes on web pages on Windows.* |
+  | *Fixed text loss when typing with an input method on Linux, which could discard characters in some web applications.* | "Text loss" and "discard characters" are the same fact twice — the conflated-facts trap. Vague about where. | *Fixed text disappearing in Microsoft 365 Word Online on Linux when typing certain characters.* |
+
+- **Even an accurate mechanism clause gets trimmed.** A proposed *"Fixed Firefox preventing Linux
+  systems from sleeping or suspending after a long browsing session, caused by silent or muted videos
+  holding a wake lock"* shipped as *"…after a long browsing session"*. Across the drafts reviewed the
+  editor has trimmed several and lengthened none.
+- **Platform scope asserted from the summary.** Bug 2053681 — *"…stops in Firefox Android when screen
+  turns off"* — was drafted as an Android-only note; comment 0 listed Ubuntu too, so the wording had
+  to be widened after Release Management caught it.
+- **Direction reversed — factually wrong, not differently worded.** Bug 1699444's summary reads "Tabs
+  opened by extensions are displayed as private when they are not", and the proposed note said tabs
+  are *no longer shown as private*. The actual fix is close to the opposite: extension-created tabs
+  now **do** open in private browsing when the user is, and private opening is **blocked** for
+  extensions lacking the permission. A summary of the form "X is Y when it shouldn't be" can be
+  resolved in either direction.
+- **Scope asserted precisely and wrongly.** Bug 2051354's note said "accented or non-Latin
+  characters"; the reporter said all Greek text was affected, unaccented included, and Google Sheets
+  as well as Microsoft 365.
+- **Rules the guide already carried, broken anyway.** A suggested wording went out breaking both the
+  spell-abbreviations-out rule and the inline-`code`-for-API-names rule, on bugs 1856645 and 2060873,
+  with `style-guide.md` covering them the whole time. This is why the skill's drafting list is an
+  incident log rather than a checklist — and why the checklist still has to be read.
+
+## Drop-audit lessons
+
+- **A truncated list read as a complete audit.** A pass piped `scan-window.py --show-dropped` through
+  `head -95`, received the 47 entries that fit, and reported that "all 86 mechanical drops were
+  walked". Another logged "1145 mechanical drops, all audited" having never displayed the first 399.
+  Both are why the audit reconciles the count it read against the funnel's own number.
+- **A real false drop, caught this way.** Bug 2047027, an Android tab-ungrouping menu item, was
+  dropped as localization work because `android-l10n-reviewers` appeared in the commit's `r=` list.
+  A false drop is invisible in the survivor list by construction, so the drop list is the only place
+  it can surface.
+- **Asks that never became nominations.** Of the first eleven asks, three set the `relnote-firefox`
+  flag and two developers replied enthusiastically *without* setting it, leaving those nominations
+  invisible to the process. Hence leading the ask with the flag rather than the wording.
 

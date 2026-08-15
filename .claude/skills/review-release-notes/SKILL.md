@@ -30,6 +30,12 @@ issues, not that they're "ready to publish" or anything implying you'll act on t
 audience, tense, full stops, links, tags including **Firefox Labs**, sections to skip, mobile rules,
 and the two recurring wording traps. Read it before reviewing rather than working from memory.
 
+**The Enterprise section is in scope now.** It used to hold one boilerplate link out to separately
+maintained Firefox for Enterprise notes and was on the skip list; those notes stopped being
+maintained in August 2026, so it carries real notes written for administrators and gets reviewed like
+any other section. Its register is the one place the shipped corpus is thin — the style guide's
+Enterprise entry says what it looks like.
+
 Use `shipped-notes-survey.md` when a scoping or categorization call is genuinely uncertain — it has
 real shipped notes grouped by tag and sorted by length, which settles "is this the right register?"
 faster than argument. It also shows that `HTML5` is still in live use and that the `Fixed`-in-majors
@@ -69,9 +75,9 @@ missing, this is the whole reason a first pass feels like an approval treadmill.
 
 ## Invoking commands
 
-Follow `reference/release-notes/command-forms.md` — no `cd`, scratch files under `/tmp` by absolute
-path, `curl -s "<url>"` with the URL first and flags after it, no shell loops. Written any other way,
-better than half these commands stop for a permission prompt on a fresh checkout.
+`reference/release-notes/command-forms.md` holds the invocation rules and the measurements behind
+them — read it rather than working from the examples below, which only show the form. Written any
+other way, better than half these commands stop for a permission prompt on a fresh checkout.
 
 One rule specific to reviewing: **use WebFetch for a rendered page, and curl only when you need the
 raw bytes.** WebFetch answers a prompt against the page rather than handing you the markup, so it will
@@ -112,12 +118,12 @@ enough to catch those flagged one shipped note in five, on `macOS` and `JavaScri
 `drag-and-drop`. A clean audit therefore means nothing *of those two shapes* — the abbreviation and
 code-formatting rules in `style-guide.md` still have to be read.
 
-**When an edit doesn't show up, ask Nucleus — don't re-fetch the page.** The rendered page is built
-from Nucleus on a delay, so straight after the author saves, "the change isn't there" has two causes
-that look identical from the page: it was never saved, or it hasn't published yet. Re-fetching cannot
-tell them apart, and a cache-busting query string appended to someone else's URL is not an answer:
-a pass fetched the page three times that way, twice with `?freshness=…`, before reasoning its way to
-publish lag. One call settles it, because Nucleus is where the edit lands first:
+**When an edit doesn't show up on a rendered notes page, ask Nucleus — don't re-fetch the page.**
+That page is built from Nucleus on a delay, so straight after the author saves, "the change isn't
+there" has two causes that look identical from the page: it was never saved, or it hasn't published
+yet. Re-fetching cannot tell them apart, and a cache-busting query string appended to someone else's
+URL is not an answer — a pass burned three fetches that way before reasoning its way to publish lag.
+One call settles it, because Nucleus is where the edit lands first:
 
 ```
 python3 scripts/relnotes/fetch-shipped-notes.py --channel Nightly --notes-for 155.0a1
@@ -156,13 +162,15 @@ like any public page. Two consequences:
 - Dot releases **require bug links** (the opposite of mainline), so expect and check linked bugs
   rather than flagging them.
 
-**Publish lag when re-checking edits.** The `/pub` snapshot regenerates on a delay (the doc header
-usually says "Updated automatically every 5 minutes"), and WebFetch caches each URL for ~15 minutes,
+**Publish lag when re-checking edits to a Google Doc.** The `/pub` snapshot regenerates on a delay
+(the doc header usually says "Updated automatically every 5 minutes"), and WebFetch caches each URL,
 so re-fetching the *same* URL can return your own earlier pre-edit copy. When you re-check whether
 changes were applied and the old text is still showing:
 
 - **Bust the WebFetch cache** with a throwaway query param (`…/pub?freshness=recheck2`) so it's
-  treated as a new URL.
+  treated as a new URL. **This is the opposite of the rule for a rendered notes page above, and the
+  difference is where the text lives:** a Google Doc has no Nucleus behind it to ask, so a fresh
+  fetch is the only reading available. On a notes page, ask Nucleus and don't append anything.
 - If the change still isn't there after a genuinely fresh fetch, it's most likely publish lag, not a
   missed edit. **Don't tell the author they forgot.** Say you're seeing a stale published snapshot,
   wait a few minutes, and re-check before concluding anything.
@@ -192,8 +200,7 @@ python3 scripts/relnotes/relnote-flag.py --coverage 153.0.3 --product "Firefox f
 notes whose bug was never flagged. Validated against Nightly 155 — 19 notes, 19 flagged bugs, exact
 correspondence both ways.
 
-**Read its output with the six known distortions in mind**, all of which it labels rather than
-hides:
+**Read its output with the known distortions in mind**, all of which it labels rather than hides:
 
 - **The flag is per-major**, so a bug flagged `153+` may be noted in 153.0 *or* any later dot
   release. Coverage therefore spans every release of the major by default; `--scope release` narrows

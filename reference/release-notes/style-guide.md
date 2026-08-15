@@ -31,6 +31,22 @@ published note of the last two years.
   configurable) was skipped on exactly this basis.
 - **Developer / Web Platform notes are the exception to the plain-language rule**: that audience is
   developers, so these may be technical, reference APIs, and use inline `code` and MDN links.
+- **Enterprise notes are the other audience exception**: they are written for administrators of
+  managed deployments. Two things follow.
+  - **"Configurable rather than default" does not disqualify the note.** A new policy *is* the
+    deliverable for this audience, and its whole point is that an administrator sets it
+    deliberately. Say what the policy lets them control; don't ask what a user sees by default.
+  - **Name the policy when the note is that a policy was added**, because the name is what an
+    administrator will search for. The 155 submission is the form to copy: *"Added the
+    `DisableLaunchOnLogin` policy to control whether Firefox launches automatically when users log
+    in to Windows."* Naming it is not the preference-name problem — that rule is about sending a
+    general reader to `about:config`. For a note about a policy that **stopped working**, describe
+    the behaviour instead, which is what shipped: *"Fixed an issue where locking certain legacy
+    preferences no longer disabled the corresponding controls in Firefox Settings."*
+  - **Say so when the policy does not apply to ESR.** Managed deployments run ESR heavily, so
+    "applies to Firefox but not Firefox ESR" is load-bearing for this audience in a way it is not
+    for any other tag. The 155 note carries it as its own closing sentence: *"This policy does not
+    apply to Firefox ESR."*
 
 ## Wording and grammar
 
@@ -47,9 +63,9 @@ published note of the last two years.
   — its improved version reads *"…they'll now be prompted to finish installation"*, not "you'll be
   prompted".
   - *"Autofill prompts now dismiss when focus moves away"*, not *"…when you move focus away"*.
-  - **Note the corpus disagrees with the guideline:** roughly 8% of shipped notes contain "you",
-    many of them recent. Don't take phrasing from published notes as licence here — follow the guideline,
-    not the sample.
+  - **Note the corpus disagrees with the guideline:** roughly 9% of shipped notes contain "you"
+    (measured 2026-08-15), many of them recent. Don't take phrasing from published notes as licence
+    here — follow the guideline, not the sample.
 - Keep it short. The median shipped note is ~20 words. A candidate needing three sentences is
   usually either two notes or not a note.
 - Defer to MDN writing conventions for capitalization, contractions, numbers, pluralization,
@@ -99,7 +115,15 @@ published note of the last two years.
 - **Community** — contributor credits. Generated elsewhere (see below). Individual contributors are
   *occasionally* named inline in another tag's note (e.g. an experimental CSS property credited to
   its implementer). It is unusual enough to be worth querying, but it is not an error.
-- **Enterprise** — usually just a link to the separate enterprise notes.
+- **Enterprise** — changes to how administrators manage Firefox: a policy added, a policy gaining
+  options, or a policy that stopped being enforced. **This tag changed meaning in August 2026.**
+  Until then it was almost always a single boilerplate link out to the separately maintained Firefox
+  for Enterprise release notes; those are no longer maintained, so the content that used to live
+  there is written here instead. **The corpus is therefore thin here and understates how often this
+  tag should now appear** — the survey excludes the old pointer notes, leaving only the few that were
+  hand-authored while the separate document existed. The two submitted for 155 (bugs 2001734 and
+  2056928) are the most current examples of the register; see the audience rules above.
+  `policy-changelog.py --version N` lists the policies a version actually changed.
 
 ## Nightly release notes
 
@@ -166,7 +190,9 @@ Focus on user impact. If a workaround exists, give clear step-by-step instructio
 
 ## Sections to skip when reviewing
 
-- **Enterprise** — boilerplate link. Ignore unless it contains more than that link.
+**Enterprise is no longer one of them.** It was skipped while it held a link to a separately
+maintained document; it now holds real notes and gets reviewed like any other section.
+
 - **Community contributions** — generated elsewhere, not hand-authored. Disregard entirely.
 - **Any empty section** — the draft is an intermediate staging document and empty sections don't
   carry over to the publishing system. Ignore them; don't flag them as needing to be cleared.

@@ -51,12 +51,16 @@ damages trust, so **never guess and never present inference as verification**. C
 | REST vs MCP, backouts, freshness, channel mapping | `reference/release-notes/bugzilla-access.md` |
 | Pref/Nimbus/Labs/platform gating recipes | `reference/release-notes/gating.md` |
 | Command forms that don't trigger permission prompts | `reference/release-notes/command-forms.md` |
-| What real passes got wrong — read before tiering | `reference/release-notes/calibration.md` |
+| What real passes got wrong — before tiering, and per step | `reference/release-notes/calibration.md` |
 
 The survey is the calibration source. Read at least its "bar in one line", the `Fixed` threshold
 section, and the zero-yield table before judging significance. Note that the `Fixed`-in-majors bar
 is **actively moving** (0.54 → 1.46 → 2.14 substantive notes per release over two years), so treat
 "fixes don't get mainline notes" as outdated.
+
+**One class the survey cannot calibrate: enterprise policies.** They were documented in a separate,
+separately maintained set of notes until August 2026, so the corpus reads as though they almost never
+earn one. See `calibration.md`; the corpus argues the wrong way here and nowhere else.
 
 ## Scope: you are working one release's notes
 
@@ -87,17 +91,16 @@ release's owner. Same machinery, different window (`--range FIREFOX_BETA_{N}_BAS
 **Never claim cycle-mode coverage you don't have.** 2,000 survivors cannot each be examined. State
 plainly which signals you ran, and that a change touching none of them would have been missed.
 
-**A "day" is not a fixed size.** Quiet days run 10–20 survivors; the days after a merge run 100–130.
-Measured: 07-26 gave 10 survivors, 07-21 gave 127 from 423 commits. **Above roughly 60 survivors,
-walking every one is real work and the temptation is to read the multi-commit head of the list plus
-the impact-evidence section and stop.** That is not exhaustive, and claiming it is, is a false
-statement about coverage. Either walk the whole list or say exactly what you prioritised and what
-you did not read.
+**A "day" is not a fixed size.** Quiet days run 10–20 survivors; the days after a merge run over a
+hundred. **Above roughly 60 survivors, walking every one is real work and the temptation is to read
+the multi-commit head of the list plus the impact-evidence section and stop.** That is not
+exhaustive, and claiming it is, is a false statement about coverage. Either walk the whole list or say
+exactly what you prioritised and what you did not read.
 
 **The weak-impact-evidence list is a reading-order hint, not a skip list.** It routinely holds half
-the survivors — 61 of 127 on 07-21 — and real candidates live in it: bugs 2042999 (CSS `line-clamp`)
-and 2050397 (passport management page) were both missed there, both internally reported with no
-duplicates. Low prior, not zero.
+the survivors, and real candidates live in it: bugs 2042999 (CSS `line-clamp`) and 2050397 (passport
+management page) were both missed there, both internally reported with no duplicates. Low prior, not
+zero.
 
 ## Choosing the window — never by date
 
@@ -183,12 +186,33 @@ python3 scripts/relnotes/scan-window.py --cycle 155 --version 155 --census
 `--census` searches for every bug Bugzilla flags as landed in the version and reports the ones no
 commit in the cycle mentions. It refuses on anything narrower than the full cycle, because a partial
 window reports the rest of the cycle as unseen. `daily-pass.py --census` does the same and leaves it
-in `census.txt`; on a `--format json` run, `--census-out PATH` writes the readable section. Most of what it finds is explained rather than
-missed, and it sorts what it finds into buckets that say so: mechanical, flagged for an earlier
-version as well (QA sets `verified` on the version they *tested*), and no landing of their own. On the
-155 cycle that left **a handful** — five on 2026-08-14 — out of 177 outside the window and 2,602
-flagged. That residue is where a **beta uplift** shows up: those commits live on the beta branch, so
-no scan of main can see them however wide the window.
+in `census.txt`; on a `--format json` run, `--census-out PATH` writes the readable section. Most of
+what it finds is explained rather than missed, and it sorts what it finds into buckets that say so:
+mechanical, flagged for an earlier version as well (QA sets `verified` on the version they *tested*),
+and no landing of their own. What survives all of those is **a handful** out of thousands flagged, and
+that residue is where a **beta uplift** shows up: those commits live on the beta branch, so no scan of
+main can see them however wide the window.
+
+**And check the enterprise policies, which have their own external list:**
+
+```
+python3 scripts/relnotes/policy-changelog.py --version 153
+```
+
+The `mozilla/policy-templates` release for a version names the policies it added and changed, written
+independently of our funnel, so a policy in it that no candidate covered is a real miss. The
+descriptions are administrator-facing and are usable as drafting material. **It publishes with the
+release, not during the cycle**, so this runs after a version ships — asked about a version still on
+Nightly it says so and exits non-zero rather than reporting no policy changes. During the cycle the
+`[enterprise policy]` label on survivors is the coverage.
+
+`--list` shows every published template release and the Firefox version it covers, which is how to
+check whether a version has one yet. `--no-map` skips the per-policy bug lookup, the slow part.
+Each policy is mapped to a bug by two channels and the output says which was used: a commit under the
+policy directory that changed a line naming it, or a bug summary quoting it. **Both are scoped to the
+version**, because an established policy like `Homepage` or `Preferences` is named in bugs all over
+the tree; where that leaves more than one candidate the tool lists them rather than picking, and
+"no bug found" means look by hand, not that none exists.
 
 ### Cumulative passes
 
@@ -208,8 +232,8 @@ python3 scripts/relnotes/relnote-flag.py --nominated
 
 **Defaults to nominations on bugs that are actually fixed, and that default matters.** Most `?` bugs
 are open — a developer pre-registering an intention months ahead — and the team treats those as noise
-rather than decisions waiting to be made. At the time of writing, six bugs carried `?` and only one
-was fixed. `--include-open` shows the rest if you specifically want the pipeline view.
+rather than decisions waiting to be made, so the fixed subset is usually a small fraction of the
+queue. `--include-open` shows the rest if you specifically want the pipeline view.
 
 Work a fixed nomination exactly like a candidate you found yourself: the bar, the tiering, the
 precedent search and the gating checks below all apply unchanged. The only difference is that someone
@@ -248,9 +272,9 @@ Three things about this range, each verified against the 153 cycle:
   beta cycle, not the end. This differs from the hg tag of the same name; don't assume the mirror's
   tags match hg's.
 - **It matches the hg pushlog.** Cross-checked against
-  `hg-edge.mozilla.org/releases/mozilla-beta/json-pushes?fromchange=FIREFOX_BETA_153_BASE&tochange=FIREFOX_BETA_153_END&full=1&version=2`
-  (660 pushes, 820 changesets, 454 distinct bugs): the git range yields **458 distinct bugs and
-  contains all 454 of hg's**, with 4 extra. Superset, so it errs toward inclusion.
+  `hg-edge.mozilla.org/releases/mozilla-beta/json-pushes?fromchange=FIREFOX_BETA_153_BASE&tochange=FIREFOX_BETA_153_END&full=1&version=2`:
+  the git range **contains every bug hg reports**, plus a few more. A superset, so it errs toward
+  inclusion.
 
 Uplift commits carry an `a=<approver>` marker (`Bug 2033733 - enable LNA for all desktop users by
 default. a=pascalc`). Both 153 uplifts that earned notes were **preference flips**, so run
@@ -263,13 +287,11 @@ published note — is in `reference/release-notes/calibration.md`.
 
 ## Invoking the scripts
 
-**Copy the invocation form in the examples below exactly** — `python3 scripts/relnotes/<script>.py`
-from the repository root, no `cd`, scratch files under `/tmp` by absolute path, no shell `for` loops,
-and gecko reads through the absolute clone path from `check-setup`. Written any other way, most of
-these commands stop for a permission prompt on every call.
+**Copy the invocation form in the examples below exactly.** Written any other way, most of these
+commands stop for a permission prompt on every call.
 
-`reference/release-notes/command-forms.md` is the single home for those rules and the measurements
-behind them; it is not restated here.
+`reference/release-notes/command-forms.md` is the single home for the rules and the measurements
+behind them — read it rather than inferring the rules from the examples, which only show the form.
 
 ## First run on a machine: locate the Gecko clone
 
@@ -283,8 +305,8 @@ path can be committed to the shared tree or assumed here. `check-setup` resolves
 the per-user state file next to the watermark, and every script reads it from there.
 
 It also reports the `Bash(git -C <clone> …:*)` permission entries needed for the gecko reads. Without
-them **every single gecko read prompts** — one pass ran `git grep` eleven times and `git show` six,
-all prompting, which is most of what makes a cold run feel like an approval treadmill.
+them **every single gecko read prompts**, which is most of what makes a cold run feel like an
+approval treadmill.
 
 - **On a machine that has never been set up, every script exits with
   `error: could not locate the Gecko checkout` and names this command.** That error is the signal —
@@ -375,11 +397,10 @@ python3 scripts/relnotes/daily-pass.py --build-day 20260801 --outdir /tmp/day01 
   `dropped.txt` (the complete drop list to audit), `prefs.txt`, `clusters.txt`, `flags.json`,
   `scan.json`.
 - Window flags are the same as `scan-window.py` (`--build`, `--build-day`, `--from-build`, `--cycle`,
-  `--since-last`), plus `--save-state` to record the watermark on success.
-- **Pass `--save-state` to this call rather than re-running `scan-window.py` afterwards to save it.**
-  `daily-pass.py` writes the watermark from the scan it already did; a second `scan-window.py
-  --save-state` re-enumerates the window and re-fetches every bug to record one line of state. A pass
-  did this and refetched 219 bugs for nothing.
+  `--since-last`). **Pass `--save-state` to this call rather than re-running `scan-window.py`
+  afterwards to save it:** `daily-pass.py` writes the watermark from the scan it already did, while a
+  second `scan-window.py --save-state` re-enumerates the window and re-fetches every bug to record one
+  line of state. A pass did exactly that, for nothing.
 
 **Open every pass with the carried-over work, before the new window.** `resume` on the condition given
 above; `followup` and `replies` every time, in this order. `replies` is not optional — it is the only
@@ -395,15 +416,17 @@ watchlist.py replies                     # what people said on asked/replied/wat
 **`followup`'s section headings are instructions, and its output is not a status report to skim.**
 Every `NEEDS CHASING` line and every `[follow up after <date>]` marker has to be resolved in your
 report — chased, closed, or explicitly deferred with a reason. Twice now a pass has printed that
-output and then contradicted it: 2058436 was reported as needing its needinfo closed when `followup`
-had already shown it clear, and 1699444 sat under `NEEDS CHASING [follow up after 2026-08-08]` while
-the report called it unresolved, when the developer had approved the wording that morning. Running
-`replies` answers the second case directly; nothing answers it if you skip it.
+output and then contradicted it in the same session; bug 1699444 sat under `NEEDS CHASING` while the
+report called it unresolved, when the developer had approved the wording that morning. Running
+`replies` answers that case directly; nothing answers it if you skip it. The other case, and the rule
+it produced — a watchlist status is never evidence of what is still open — is under "Run `followup` in
+every pass" below.
 
-**Then keep the watchlist current**, because it is the only memory between passes:
+## Keeping the watchlist current
+
+The watchlist is the only memory between passes:
 
 ```
-watchlist.py check-updates --pull        # self-update; drop --pull to only report, --quiet to speak only when acting
 watchlist.py summary                     # per-release counts and days reviewed
 watchlist.py list --status asked         # or declined, gated, noted -- implies --all
 watchlist.py add <bug> --status asked --note "<what and when>"       # asked | declined | gated |
@@ -440,6 +463,8 @@ Not `--note "DECLINED 2026-08-05: ..."` — that listing never says which bug it
 point of the entry is recognising it next cycle. The short forms differ here: they leave the summary
 alone and append the reason to the log, which is why they are not interchangeable with `add`.
 
+## Reading a candidate
+
 `bug-detail.py <ids> --landings A..B` shows each bug's landings in a window with their diffstat —
 what a candidate actually changed, which is the usual reason to reach for the clone at all. Prefer it
 over composing `git show --stat $(git log --grep=…)` by hand: a `$(…)` subshell defeats the permission
@@ -461,8 +486,22 @@ python3 scripts/relnotes/scan-window.py --version 153 \
     --range FIREFOX_NIGHTLY_152_END..FIREFOX_NIGHTLY_153_END --format json -o /tmp/w.json
 ```
 
+It fetches origin, resolves the window, extracts bug ids, batch-fetches Bugzilla, keeps only
+currently-FIXED bugs (the real backout filter — reverts are flagged, not trusted), and drops
+mechanically-never-noteworthy landings. It prints the funnel counts; **carry those into your
+output** so the user can see the denominator.
+
 **Pass `--version N` for any historical window.** It defaults to the current Nightly, which checks
 the wrong `cf_status_firefox{N}` field entirely when you're scanning a past cycle.
+
+**`[enterprise policy]` on a survivor means treat it as a candidate class, not that it clears the
+bar.** Three channels, because each catches notes the others miss: the `Firefox :: Enterprise
+Policies` component; a summary or landing naming both "enterprise" and a policy (policy work often
+lands from the feature's own team — Web Serial, Data Sanitization and PSM each shipped one); and a
+landing under `browser/` or `toolkit/components/enterprisepolicies/`, which is the only thing that
+catches a bug like 2056928, worded entirely in the vocabulary of the feature it broke. The label does
+not filter or exempt anything — the funnel drops mechanical policy work exactly as it drops
+everything else — and it is a floor rather than a filter, so an unlabelled bug can still be one.
 
 ### Validating against whattrainisitnow.com
 
@@ -516,20 +555,12 @@ window had **40**. So:
   step in the workflow, not a one-time scan property.
 - Say so in the output: state that uplift status was accurate as of the run and may change.
 
-It fetches origin, resolves the window, extracts bug ids, batch-fetches Bugzilla, keeps only
-currently-FIXED bugs (the real backout filter — reverts are flagged, not trusted), and drops
-mechanically-never-noteworthy landings. It prints the funnel counts; **carry those into your
-output** so the user can see the denominator.
-
 **Audit the mechanical drop list too — every pass.** `daily-pass.py` always writes it complete to
-`<outdir>/dropped.txt`, with the entry count in its header line — **Read that file.** Do not
-reconstruct the list by piping `scan-window.py --show-dropped` through `sed`/`head`: a pass did
-exactly that, received the 47 entries that fit under `head -95`, and reported that "all 86 mechanical
-drops were walked". The drops are heuristics and they do get things wrong: bug 2047027, a real
-Android tab-ungrouping menu item, was dropped as localization work because
-`android-l10n-reviewers` appeared in the commit's `r=` list. Skim the dropped summaries for anything
-that reads like user-facing work and rescue it. A false drop is invisible in the survivor list by
-construction, so this is the only place it can be caught.
+`<outdir>/dropped.txt`, with the entry count in its header line — **Read that file**, rather than
+reconstructing the list by piping `scan-window.py --show-dropped` through `sed`/`head`. The drops are
+heuristics and they do get things wrong, so skim the dropped summaries for anything that reads like
+user-facing work and rescue it. A false drop is invisible in the survivor list by construction, so
+this is the only place it can be caught.
 
 **Before reporting the audit, reconcile the count you actually read against the funnel's `mechanical`
 number.** Both come from the same scan, so they always agree — if you have seen fewer entries than
@@ -538,14 +569,14 @@ drops" is a claim about every entry; it cannot be made about the ones that scrol
 
 **At cycle scale, audit by group.** The file opens with a `SHAPE` table — every distinct drop reason
 with its count, summing to the total — and then lists the entries grouped under each reason. A cycle
-pass drops over a thousand, and reading that as a flat list is how one pass logged "1145 mechanical
-drops, all audited" having never displayed the first 399 of them. Work down the groups, and say which
-reasons you reviewed and how: "wpt-sync (620) sampled, the four behaviour-shaped groups read in full"
-is an auditable claim, where "all audited" is not.
+pass drops over a thousand, and reading that as a flat list is how a pass comes to log "all audited"
+having never displayed the first few hundred. Work down the groups, and say which reasons you reviewed
+and how: "wpt-sync (620) sampled, the four behaviour-shaped groups read in full" is an auditable
+claim, where "all audited" is not.
 
-Judge the `landed:` lines, not the bug summary — a bug titled like test work often lands real
-changes and vice versa. Use `--show-dropped` when the user wants to rescue something; the drop list
-is auditable by design.
+Use `--show-dropped` when the user wants to rescue something; the drop list is auditable by design.
+The truncation cases and the false drop that prompted these rules are in `calibration.md` under
+"Drop-audit lessons".
 
 ## Step 2 — Pref flips and gating (script does this)
 
@@ -586,58 +617,35 @@ beyond it is inferred.
 Preference state is not the whole gating story — check Nimbus and Labs per
 `reference/release-notes/gating.md`.
 
-**Resolve the gate before the evidence workup, not after.** Over three consecutive days
-(2026-08-01..03) three separate candidates were killed by their feature's gate, and in every case the
-full workup — reporter, duplicate count, blocking meta, landing message, precedent search — was done
-first and then a single `--lookup` settled it:
+**Resolve the gate before the evidence workup, and do it for every feature-shaped survivor — not
+just the ones that look gated.** Off everywhere means watchlist, and the workup was wasted either
+way; one `--lookup` answers it. Three places a gate hides, none of them a substitute for another:
 
-| Bug | Gate | Verdict |
-|---|---|---|
-| 2047027 | Android tab groups, hardcoded `false` | not a note |
-| 2060090 | `browser.ipProtection.enabled` false on all 12 configs | not a note |
-| 2009909 | `dom.select.customizable_select.enabled` false on all 12 configs | not a note |
-
-So: **if a survivor touches anything that looks preference-gated, `--lookup` its gate first.** Off
-everywhere means watchlist, and the workup was wasted either way. One call answers it.
-
-**"Looks gated" is too weak a trigger — resolve the gate for every feature-shaped survivor.** On two
-consecutive days the gate was missed and came from the release manager instead: the
-`mediaNotificationImprovements` Nimbus flag (2054954), then `browser.nova.enabled` (2043530). Neither
-bug looked gated, and on both days the same check ran correctly on *other* bugs in the same pass — so
-the rule isn't missing, it is being applied selectively. The two cases need different checks, and
-neither substitutes for the other:
-
-- **QA-filed bugs state the gate in comment 0**, in an explicit `**Preconditions**` block listing the
-  prefs to set — 2043530's named `browser.nova.enabled = true`. `bug-detail.py <ids> --comments`
-  prints comment 0, so add it to the batch call you are already making rather than deciding per bug
-  which ones deserve it. **Read comment 0; do not pipe it through `grep`** — a pass filtered a
-  `--comment 0` call for `see_also` and threw away the platform evidence in the same output. When the
-  preview marks a cut, `--comment 0` gives the whole thing, and `--comment last:5` or `all` gives the
-  discussion.
-- **Developer-filed bugs usually say nothing at all.** All four comments on 2054954 are the
-  developer's one-line summary, his patch, and two push notices; none mentions the gate, which
-  existed only in `nimbus.fml.yaml`. **An empty Preconditions block is not evidence of no gate** —
-  and neither is a failed fetch, which `bug-detail.py` now says out loud. For anything in a
-  `Firefox for Android` or Fenix component, the FML check in `gating.md` is the check that answers it,
-  and comment 0 cannot stand in for it.
+- **QA-filed bugs state it in comment 0**, in an explicit `**Preconditions**` block listing the prefs
+  to set. `bug-detail.py <ids> --comments` prints comment 0, so add it to the batch call you are
+  already making rather than deciding per bug which ones deserve it. **Read it; do not pipe it through
+  `grep`.** When the preview marks a cut, `--comment 0` gives the whole thing, and `--comment last:5`
+  or `all` gives the discussion.
+- **Developer-filed bugs usually say nothing at all**, and **an empty Preconditions block is not
+  evidence of no gate** — nor is a failed fetch, which `bug-detail.py` now says out loud. For anything
+  in a `Firefox for Android` or Fenix component, the FML check in `gating.md` is what answers it, and
+  comment 0 cannot stand in for it.
 - **A web-platform surface's gate is usually older than the change, and lives in `dom/webidl`.**
   Adding a method to an existing interface touches no preference file, so neither comment 0 nor the
-  patch mentions a gate and both read as ungated. Bug 2057406 was asked and noted that way, and
-  `StylePropertyMap` had been behind `layout.css.typed-om.enabled` (Nightly-only) all along. Grep
-  `dom/webidl` for the API name — the webidl reverse lookup in `gating.md`, "Which preference is
-  it?".
+  patch mentions a gate and both read as ungated. Grep `dom/webidl` for the API name — the webidl
+  reverse lookup in `gating.md`, "Which preference is it?".
 
-**A diff can prove a gate exists; it cannot prove that none does.** On 2043530 the report claimed
-"verified ungated by reading the diff" because the button was added unconditionally in
-`FormAutofillPrompter.sys.mjs` — but the gate lived upstream of that hunk, in the pref comment 0 named.
-Reading a hunk establishes *no gate in that hunk*; the honest phrasing is "no gate found in `<file>`",
-labelled **inferred**. Reserve **verified** for a gate you positively located: a `--lookup` verdict, an
-FML block, a hardcoded `false`.
+**A diff can prove a gate exists; it cannot prove that none does.** Reading a hunk establishes *no
+gate in that hunk*; the honest phrasing is "no gate found in `<file>`", labelled **inferred**. Reserve
+**verified** for a gate you positively located: a `--lookup` verdict, an FML block, a hardcoded
+`false`.
 
-**A gated-off bug still has to appear in the report** — as a watchlist line naming the gate. Bug
-2009909 was correctly excluded and then omitted entirely, so the user had to ask why a notable bug
-was missing. "Correctly excluded" and "invisible to the reader" are different outcomes and only the
-first is acceptable.
+**A gated-off bug still has to appear in the report** — as a watchlist line naming the gate.
+"Correctly excluded" and "invisible to the reader" are different outcomes and only the first is
+acceptable.
+
+The cases behind these rules, including the ones the release manager caught, are in `calibration.md`
+under "Gate misses".
 
 ## Step 3 — Roll up features (script does this)
 
@@ -670,9 +678,11 @@ From the nomination page, changes that belong in release notes:
 * **Important stability and security fixes**
 * Important system requirements changes (for example, end of support for an OS version)
 * **New locales**
+* **Enterprise policy changes** — added since Release Management absorbed these in August 2026: a
+  policy added, a policy gaining options, or a policy that stopped being enforced
 
-Two of these are easy to forget: system-requirements changes and new locales rarely look like
-"features" in a commit log. Watch for them.
+Three of these are easy to forget: system-requirements changes and new locales rarely look like
+"features" in a commit log, and policy work reads like plumbing. Watch for them.
 
 Note the tension with the calibration below: the criteria admit "important stability and security
 fixes", but in practice the bar is high — Release Management's working guidance is that crash and
@@ -682,9 +692,14 @@ Both are true; "important" is doing the work.
 ## Calibration from real passes (read this before tiering)
 
 **Read `reference/release-notes/calibration.md` before tiering.** It is the incident log for this
-skill: every entry is a case where a pass was wrong and a Release Manager or the tree corrected it.
-It carries the signals that argue for and against a note, the drop-audit lessons, and the gate
-misses, and it outranks intuition on all of them.
+skill: every entry is a case where a pass was wrong and a Release Manager or the tree corrected it,
+and it outranks intuition on all of them. The signals arguing for and against a note are what you
+need here.
+
+**Its other sections pair with the steps around them** — "Gate misses" with Step 2, "Drafting and
+wording" with Step 5, "Drop-audit lessons" with the drop audit. Each rule in this skill is stated at
+the step that needs it; read the case when the rule looks arbitrary, or when you are deciding how
+strictly to apply it.
 
 ## The `relnote-firefox` flag, including `nightly+`
 
@@ -694,8 +709,8 @@ Field: `cf_tracking_firefox_relnote`.
 doesn't need another ask. `daily-pass.py` reads the flag for every survivor, so a normal pass already
 tells you. To go the other way and ask *which bugs carry a given value*, use
 `relnote-flag.py` — `--nominated` for the `?` queue (see above), `--approved N` and `--nightly` for
-what is already decided, `--declined` for the 234 bugs Release Management has said no to, which is
-the only negative calibration corpus available. Those four are shorthands; `--value <v>` queries any
+what is already decided, `--declined` for every bug Release Management has said no to, which is the
+only negative calibration corpus available. Those four are shorthands; `--value <v>` queries any
 flag value directly, including ones no shorthand covers.
 
 **`nightly+` is a real, used value** for changes enabled on **Nightly only** that are still worth
@@ -727,8 +742,7 @@ Calibrate against the survey, not intuition. Then place each candidate in a tier
   gated off on every channel. Not a note now; note it when it ships (the way JPEG XL only appeared
   once offered in Firefox Labs).
 - **Dropped.** Report what the audit *found*, not an inventory of everything dropped — see the
-  Output section. Plain text only: this is read in a terminal, so no HTML (`<details>`/`<summary>`
-  renders as literal tags).
+  Output section.
 
 The recurring shapes that clear the bar, and the ones that never do, are characterized in the
 survey's `Fixed`-threshold section. Two calibration anchors from it: **platform-scoped is not
@@ -740,47 +754,30 @@ absent entirely** from two years of notes.
 **Read `reference/release-notes/style-guide.md` before drafting any wording** — not "consult it if
 unsure", read it, every pass. Categories and the full rules live there.
 
-**What follows is not a summary of that guide.** It is calibration from drafts that were rejected in
-*this* workflow, and a rule appears here only because it was already missed once. Two rules that had
-never been missed stayed in the guide and out of this list — spell abbreviations out ("Developer
-Tools", not "DevTools") and use inline `code` for API names in Developer and Web Platform notes — and
-a suggested wording then went out breaking both, on bugs 1856645 and 2060873, with the guide covering
-them the whole time. A list that grows only where the skill has already been caught reads like a
-checklist while being an incident log. The guide is the checklist; this is the incident log.
+**What follows is not a summary of that guide** — it is the rules that drafts in *this* workflow have
+already broken, and the guide still has to be read for the ones they haven't. The rejected drafts
+themselves are in `calibration.md` under "Drafting and wording".
 
 Keep drafts copy-pasteable; the user and the developer will edit. Median shipped note is ~20 words.
 
 **Lead with the symptom the user saw, never the mechanism.** The most common drafting failure is
-restating the patch. Two rejected drafts and their fixes:
+restating the patch. Ask yourself: *what would the user have noticed before, and what do they notice
+now?* If the draft can't be read that way, it's describing the patch.
 
-| Rejected draft | Why it failed | Better |
-|---|---|---|
-| *Added a Windows font collection so more characters render correctly in web content.* | Describes the change (adding a font list entry), not the experience. "More characters" says nothing. | *Fixed characters from some less common scripts appearing as empty boxes on web pages on Windows.* |
-| *Fixed text loss when typing with an input method on Linux, which could discard characters in some web applications.* | "Text loss" and "discard characters" are the same fact twice — the conflated-facts trap. Vague about where. | *Fixed text disappearing in Microsoft 365 Word Online on Linux when typing certain characters.* |
+**Cut the cause, keep the symptom.** Even an accurate mechanism clause gets trimmed, so **write the
+shortest form that still identifies the symptom and who saw it** and leave the diagnosis in the bug.
 
 **Platform scope is a claim about the bug, not a field you can read off it.** A summary names the
-platform the *reporter* was on. Bug 2053681 — *"…stops in Firefox Android when screen turns off"* —
-was drafted as an Android-only note, and comment 0 listed Ubuntu too, so the wording had to be widened
-after Release Management caught it. Before scoping a note to one platform, check the bug's own text,
-its `see_also` links, and its per-version status flags. Once two platforms are genuinely in play, the
-note is one object attached to both releases — see the cross-platform rule in `style-guide.md` — and
-the platform lead comes off the wording entirely.
+platform the *reporter* was on. Before scoping a note to one platform, check the bug's own text, its
+`see_also` links, and its per-version status flags. Once two platforms are genuinely in play, the note
+is one object attached to both releases — see the cross-platform rule in `style-guide.md` — and the
+platform lead comes off the wording entirely.
 
 **Keep the suggested wording on one line.** Bugzilla wraps text itself; hard-wrapping the blockquote
 just makes it awkward to copy.
 
-**Cut the cause, keep the symptom.** Even an accurate mechanism clause gets trimmed. A proposed
-*"Fixed Firefox preventing Linux systems from sleeping or suspending after a long browsing session,
-caused by silent or muted videos holding a wake lock"* shipped as *"…after a long browsing session"* —
-everything explaining *why* was removed. Across the drafts reviewed so far the editor has trimmed
-several and lengthened none, so **write the shortest form that still identifies the symptom and who
-saw it**, and leave the diagnosis in the bug.
-
 **Naming a specific site is good practice, not a scoping error** — shipped notes do it (*"…on sites
 such as Squarespace, LinkedIn, and eBay"*). If the bug names a site users recognise, use it.
-
-Ask yourself: *what would the user have noticed before, and what do they notice now?* If the draft
-can't be read that way, it's describing the patch.
 
 ### Where this fits in the documented process
 
@@ -823,20 +820,13 @@ wording nobody edits — the way to achieve that is to write vague notes, which 
 
 So separate the two kinds of reply, and only learn from the first:
 
-**Real errors — worth changing how you work:**
+**Real errors — worth changing how you work.** Two have happened, both in `calibration.md` under
+"Drafting and wording", and each produced a rule:
 
-- **Direction reversed.** Bug 1699444's summary reads "Tabs opened by extensions are displayed as
-  private when they are not". The proposed note said tabs are *no longer shown as private*. The
-  actual fix is close to the opposite: extension-created tabs now **do** open in private browsing
-  when the user is in private browsing, and private opening is **blocked** for extensions without
-  the "Run in Private Browsing" permission. **A summary of the form "X is Y when it shouldn't be"
-  can be resolved in either direction.** Read the patch to find out which; if you can't, write the
-  ask without asserting a direction. This one was factually wrong, not merely differently worded.
-- **Asserting scope you did not verify.** Bug 2051354's note said "accented or non-Latin
-  characters"; the reporter said all Greek text was affected, including unaccented, and Google
-  Sheets as well as Microsoft 365. The lesson is not the specific breadth — it is that scope
-  inferred from a bug title and its blockers should be stated loosely, or flagged as unconfirmed,
-  rather than asserted precisely and wrongly.
+- **A summary of the form "X is Y when it shouldn't be" can be resolved in either direction.** Read
+  the patch to find out which; if you can't, write the ask without asserting a direction.
+- **Scope inferred from a bug title and its blockers gets stated loosely or flagged as unconfirmed**,
+  never asserted precisely and wrongly.
 
 **Quibbles — expected, not lessons:** terminology preferences ("emulation" rather than
 "simulation"), house phrasing, a clause added or dropped. Note them and move on; don't generalise a
@@ -862,8 +852,8 @@ request the wording but do not ask for the flag, and never read the missing flag
 nomination. This applies to end-of-cycle rollups, so it should not arise in a daily pass; when it
 does, the cycle's own watchlist entry records which rollups it covers.
 
-This is measured, not theoretical. Of the first eleven asks, three set the flag and two replied
-enthusiastically *without* setting it, leaving those nominations invisible to the process.
+This is measured, not theoretical — developers have replied enthusiastically without setting the flag,
+leaving those nominations invisible to the process. The count is in `calibration.md`.
 
 So lead with the flag, link the instructions, and **needinfo the assignee** so it lands in their
 queue rather than a comment that may go unread.
