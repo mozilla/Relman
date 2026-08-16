@@ -1,17 +1,18 @@
 # Calibration: what real passes got wrong
 
-Empirical calibration for `find-release-note-candidates`, kept out of the skill body on purpose.
-Every item is a case where a pass was wrong and a Release Manager or the tree corrected it, so it
-outranks intuition.
+Empirical calibration for the release-note skills, kept out of the skill bodies on purpose. Every
+item is a case where a pass was wrong and a Release Manager or the tree corrected it, so it outranks
+intuition.
 
-**Read the tiering sections before tiering, and the later sections when you reach the step they
-belong to** — "Gate misses" alongside Step 2, "Drafting and wording" alongside Step 5, "Drop-audit
-lessons" when you audit the drop list. The skill states each rule at the step that needs it; this file
-holds the case that produced it, for when the rule looks arbitrary or you are deciding how strictly to
-read it.
+Most of the file is discovery — `find-release-note-candidates`. **Read the tiering sections before
+tiering, and the later sections when you reach the step they belong to** — "Gate misses" alongside
+Step 2, "Drafting and wording" alongside Step 5, "Drop-audit lessons" when you audit the drop list.
+"Reviewing a note set" at the end is for `review-release-notes`. The skills state each rule at the
+point that needs it; this file holds the case that produced it, for when the rule looks arbitrary or
+you are deciding how strictly to read it.
 
 It lives here because it is an incident log, and an incident log grows one entry per mistake.
-Inline it crowded out the process it was meant to inform: the skill states the method, this file
+Inline it crowded out the process it was meant to inform: the skills state the method, this file
 states what went wrong when the method was skipped. The same split already separates
 [`style-guide.md`](style-guide.md) (the checklist) from the drafting notes in the skill.
 
@@ -377,4 +378,32 @@ were rejected and why.
 - **Asks that never became nominations.** Of the first eleven asks, three set the `relnote-firefox`
   flag and two developers replied enthusiastically *without* setting it, leaving those nominations
   invisible to the process. Hence leading the ask with the flag rather than the wording.
+
+## Reviewing a note set
+
+The rules these produced are in `review-release-notes`. Four of the five are the same shape: a tool
+was available, and what reached the report came from something cheaper than using it.
+
+- **A summarizer reported a note the page did not contain.** WebFetch returned
+  *"Improved Smart Window suggestions…"*; the page had actually rendered a broken-markdown fragment,
+  *"Improved Smart Window](https://…) suggestions…"*. Only the raw HTML showed it, and it was the most
+  serious finding of that review. Hence WebFetch for a rendered page, `curl` whenever the review turns
+  on exactly what is written.
+- **A hand-written regex reviewed one note fewer than the page contains.** Every inline rebuild of
+  `note-page.py` matched `id="note-\d+"`, which silently skips the `note-mdn` item the Developer
+  section carries. Each pass that did it was quietly one note short and had no way to know.
+- **A gate check that sampled the set reported it clean.** A review resolved 5 of 43 notes, called the
+  cross-check clean, and missed bug 2057406 — the bug in "A web-platform gate is older than the change"
+  under "Gate misses" above, whose note then sat in the release queue for twelve days. It read `155+`
+  throughout, so the flag and the note's own framing agreed with each other and were both wrong, which
+  is why the flag value is no substitute for resolving the gate. One bug, two failures: discovery never
+  looked for the gate, and review looked at part of the set.
+- **Three fetches burned on publish lag.** A rendered notes page is built from Nucleus on a delay, so
+  "the edit isn't there" has two causes that look identical from the page — never saved, or not yet
+  published — and re-fetching cannot separate them. A cache-busting query string appended to someone
+  else's URL is not an answer either; asking Nucleus is.
+- **The security-advisory 404 was raised three times in one 154.0 review** before someone said it was
+  expected. MFSA pages publish at release time, so `--check-links` necessarily fails that link on any
+  pre-release page. This one is the odd case out: not a shortcut, just a finding nobody had written
+  down as normal.
 

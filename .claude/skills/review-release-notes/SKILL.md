@@ -25,6 +25,8 @@ issues, not that they're "ready to publish" or anything implying you'll act on t
 | Bug/patch lookup, REST vs MCP, platform scoping | `reference/release-notes/bugzilla-access.md` |
 | Whether a feature is really live | `reference/release-notes/gating.md` |
 | Command forms that don't trigger permission prompts | `reference/release-notes/command-forms.md` |
+| Machine setup, and what the tooling check means | `reference/release-notes/pass-setup.md` |
+| What real reviews got wrong — read "Reviewing a note set" | `reference/release-notes/calibration.md` |
 
 `style-guide.md` is the authoritative working summary (the wiki wins on conflict) and covers
 audience, tense, full stops, links, tags including **Firefox Labs**, sections to skip, mobile rules,
@@ -47,31 +49,16 @@ bar is moving, so don't flag either as anomalous.
 python3 scripts/relnotes/watchlist.py check-updates --pull
 ```
 
-Several people edit these skills and scripts, so the copy driving your review can be days behind the
-one its author is describing. This fast-forwards the checkout when it is behind, and exits 1 with a
-`STOP` banner when the pulled commits touched a `SKILL.md` — a skill body is already loaded into this
-conversation, so `/clear` is the only fix, and **`/clear` is enough; don't tell anyone to quit Claude
-Code.** Every other line it prints is context to carry into what you report, never a reason to stop.
+**Run this first, every review.** `pass-setup.md` holds the contract, and two lines of it decide what
+you do: a **`STOP` banner halts the review** and the only fix is `/clear` — **`/clear` is enough,
+don't tell anyone to quit Claude Code** — while every other line it prints is context to carry into
+what you report, never a reason to stop. That file also covers `check-setup`, which any
+`error: could not locate the Gecko checkout` is telling you to run.
 
-## First run on a machine
-
-If any script exits with **`error: could not locate the Gecko checkout`**, this machine has not been
-set up. Ask where their Gecko clone is and run it once:
-
-```
-python3 scripts/relnotes/watchlist.py check-setup --repo <path to their clone>
-```
-
-That saves the path to per-user state for every script, and reports the `Bash(git -C <clone> …)`
-permission entries the gecko reads need. Show those entries and ask before running `--write`, which
-merges them into the git-ignored `.claude/settings.local.json` — it grants standing approval, so it is
-the user's call. Never add them to the shared `settings.json`.
-
-**Expect this to come up: a gate check needs the clone.** `pref-delta.py` resolves defaults out of a
+**Expect the clone to come up: a gate check needs it.** `pref-delta.py` resolves defaults out of a
 Gecko checkout, and the framing cross-check in the review process below runs on every note set, so
 "reviewing rarely needs the clone" is only true of a review that never tests a Nightly-only claim.
-Patches can still be read on Phabricator without one, per `bugzilla-access.md`. When the clone is
-missing, this is the whole reason a first pass feels like an approval treadmill.
+Patches can still be read on Phabricator without one, per `bugzilla-access.md`.
 
 ## Invoking commands
 
@@ -82,10 +69,9 @@ other way, better than half these commands stop for a permission prompt on a fre
 One rule specific to reviewing: **use WebFetch for a rendered page, and curl only when you need the
 raw bytes.** WebFetch answers a prompt against the page rather than handing you the markup, so it will
 paraphrase. Reach for curl whenever the review turns on exactly what is written — punctuation,
-`href` targets, whether a note's wording is really what a summarizer reported. On this skill's last
-run, WebFetch reported a note as `Improved Smart Window suggestions…` while the page actually rendered
-a broken-markdown fragment, `Improved Smart Window](https://…) suggestions…`. Only the raw HTML showed
-it, and it was the most serious finding of the review.
+`href` targets, whether a note's wording is really what a summarizer reported. That last one has
+already produced a review's most serious finding, and would have been invisible without the raw HTML;
+the case is in `calibration.md`.
 
 **Read the page with `note-page.py`, not with a hand-written regex.**
 
@@ -97,33 +83,37 @@ python3 scripts/relnotes/note-page.py <src> --check-links  # resolve every link 
 python3 scripts/relnotes/note-page.py --check-url <url>…   # resolve links you mean to suggest
 ```
 
-**`--check-links` reports the security-advisory link as HTTP 404 on any pre-release page, and that
-is expected.** The `Various security fixes.` note points at
+`note-page.py` walks sections and notes in document order and reports each note's id, bug link and
+inline markup. Two reasons not to rebuild it inline: **inline Python prompts** — measured, see
+`command-forms.md`, so an ad-hoc snippet stops the review dead — and **every hand-written version has
+silently skipped a note the page contains**, which is in `calibration.md`.
+
+The `--audit` pass flags calls like `getBBox()` and dotted names like `security.webauth.u2f` sitting in
+prose. **It is deliberately narrow, and it prints its own blind spots on every run** — read them
+rather than assuming what it covers. A clean audit therefore means nothing beyond those two shapes:
+the abbreviation and code-formatting rules in `style-guide.md` still have to be read by eye.
+
+**Check links with `--check-links`, and URLs you are about to suggest with `--check-url`; never
+`curl` per URL.** Notes link to far more hosts than the allowlist covers — MDN, spec drafts, RFCs,
+Google Play, Connect — so a link sweep by `curl` prompts for approval on most of its URLs, and
+`command-forms.md` explains why adding hosts is not the fix. `--check-links` fetches through Python,
+which needs no per-host entry, and it attributes each result to the note that carries the link. It
+separates a genuinely moved page from an equivalent redirect: MDN sends every locale-less URL to
+`/en-US/…`, which is how notes are supposed to link to it, so those are counted and not listed.
+
+**`--check-links` reports the security-advisory link as HTTP 404 on any pre-release page, and that is
+expected.** The `Various security fixes.` note points at
 `https://www.mozilla.org/security/advisories/mfsaYYYY-NN/`, and MFSA pages publish at release time,
 so a draft or staging review necessarily fails that one. Count it and move on — don't list it as a
 finding, and don't ask whether the number will be filled in. A *malformed* advisory URL that will
 not self-resolve (wrong year, or pointing at a different release) is still worth one neutral
-mention. Raised three times in a single 154.0 review before someone said so.
-
-It walks sections and notes in document order and reports each note's id, bug link and inline markup.
-Two reasons not to rebuild it inline: **inline Python prompts** — measured, see `command-forms.md`, so
-an ad-hoc snippet stops the review dead — and the snippets were wrong. Every hand-written version
-matched `id="note-\d+"`, which silently skips the `note-mdn` item the Developer section carries, so
-each pass quietly reviewed one note fewer than the page contains.
-
-The `--audit` pass flags calls like `getBBox()` and dotted names like `security.webauth.u2f` sitting in
-prose. It is deliberately narrow and says so in its own output: it does **not** see single-word API
-names such as `StylePropertyMap`, hyphenated keywords, or lowercase words like `protocol`. Rules broad
-enough to catch those flagged one shipped note in five, on `macOS` and `JavaScript` and
-`drag-and-drop`. A clean audit therefore means nothing *of those two shapes* — the abbreviation and
-code-formatting rules in `style-guide.md` still have to be read.
+mention.
 
 **When an edit doesn't show up on a rendered notes page, ask Nucleus — don't re-fetch the page.**
 That page is built from Nucleus on a delay, so straight after the author saves, "the change isn't
 there" has two causes that look identical from the page: it was never saved, or it hasn't published
 yet. Re-fetching cannot tell them apart, and a cache-busting query string appended to someone else's
-URL is not an answer — a pass burned three fetches that way before reasoning its way to publish lag.
-One call settles it, because Nucleus is where the edit lands first:
+URL is not an answer. One call settles it, because Nucleus is where the edit lands first:
 
 ```
 python3 scripts/relnotes/fetch-shipped-notes.py --channel Nightly --notes-for 155.0a1
@@ -131,14 +121,6 @@ python3 scripts/relnotes/fetch-shipped-notes.py --channel Nightly --notes-for 15
 
 Present in Nucleus but not on the page means published-pending. Absent from both means it was not
 saved. Say which one it is rather than asking the author to check again.
-
-**Check links with `--check-links`, and URLs you are about to suggest with `--check-url`; never
-`curl` per URL.** Notes link to 152 different hosts
-across the corpus — MDN, spec drafts, RFCs, Google Play, Connect — and only nine are on the `curl`
-allowlist, so a link sweep by `curl` prompts for approval on most of its URLs. `--check-links` fetches
-through Python, which needs no per-host entry, and it attributes each result to the note that carries
-the link. It separates a genuinely moved page from an equivalent redirect: MDN sends every locale-less
-URL to `/en-US/…`, which is how notes are supposed to link to it, so those are counted and not listed.
 
 ## Getting the draft
 
@@ -176,8 +158,9 @@ changes were applied and the old text is still showing:
   wait a few minutes, and re-check before concluding anything.
 
 Before reviewing, confirm the **target**: which product (Firefox Desktop, Firefox for Android/iOS,
-Focus), which channel/version, and whether these are mainline, dot-release, beta, ESR/Enterprise, or
-known-issues notes. Audience scoping depends on it.
+Focus), which channel/version, and whether these are mainline, dot-release, beta, ESR or known-issues
+notes. Audience scoping depends on it. **Enterprise is not one of these** — it is a section inside a
+normal note set, not a note set of its own, and ESR is a channel that has nothing to do with it.
 
 ## Mapping notes to bugs
 
@@ -197,7 +180,7 @@ python3 scripts/relnotes/relnote-flag.py --coverage 153.0.3 --product "Firefox f
 ```
 
 `--coverage` reports both directions against the published note set: flagged bugs with no note, and
-notes whose bug was never flagged. Validated against Nightly 155 — 19 notes, 19 flagged bugs, exact
+notes whose bug was never flagged. Validated against a full Nightly note set, with exact
 correspondence both ways.
 
 **Read its output with the known distortions in mind**, all of which it labels rather than hides:
@@ -279,12 +262,12 @@ the bug summary rather than guessing.
    note that starts by grepping `dom/webidl` for the API name the note gives you. Then one
    `pref-delta.py --lookup <a,b,c,…>` call for the whole set, not one per note.
 
-   **Scope it honestly: in the 155.0a1 set that was 11 of 43 notes and about three minutes.** A
-   review that checked 5 of the 43 reported the cross-check clean and missed bug 2057406, whose
-   `StylePropertyMap.delete()` note sat in the release queue for twelve days while
-   `layout.css.typed-om.enabled` was Nightly-only. **The flag value is no substitute for the gate**:
-   that bug read `155+` throughout, so flag and framing agreed with each other and both were wrong.
-   Report which notes you resolved rather than that the check "came back clean".
+   **Scope it honestly: on one 43-note set that was 11 notes and about three minutes**, so the cost is
+   not the reason to sample. A review that resolved 5 of those 43 reported the cross-check clean and
+   missed a Nightly-only feature described as shipped — the case is in `calibration.md`. **The flag
+   value is no substitute for the gate**, because the flag and the note's own framing can agree with
+   each other and both be wrong. Report which notes you resolved rather than that the check "came back
+   clean".
 
    This is also the check that separates an **expired** carry-forward note from a **stale** one, and
    `style-guide.md` carries the three-cycle rule and the counting trap that go with that call.
@@ -294,7 +277,7 @@ audience-scoping calls that depend on product context you don't have. If you cou
 patch, say the scoping question is open rather than asserting a scope.
 
 **But "flag it as a question" is for answers that need a human, not for ones sitting in the tree.**
-The rule above is about product context you cannot obtain; a gate, a pref name and a patch are all
+The rule above is about product context you cannot obtain; a gate, a preference name and a patch are all
 obtainable, and handing one back as an open question spends a review round on work that was one grep
 away. Before writing "I could not determine", name the command that would settle it and run it.
 
