@@ -55,6 +55,22 @@ undetermined.
    these, against 579 `[Pref=…]`. `ONNX.webidl`'s `Func="InferenceSession::InInferenceProcess"`
    exposes the interface only inside Firefox's inference process, so it is invisible to web content
    however the preferences read. Read the predicate.
+
+   **A CSS pseudo-element is not in `dom/webidl` — its gate is in
+   `servo/components/style/gecko/pseudo_elements.toml`,** one section per pseudo, where a `pref =`
+   key plays exactly the role `[Pref=…]` plays for an interface. Grep the bare name, without colons:
+
+   ```
+   git -C <clone> grep -n -B 2 'pref =' origin/main -- servo/components/style/gecko/pseudo_elements.toml
+   ```
+
+   Read `enabled_in` in the same entry as well. It restricts which stylesheet origins may parse the
+   pseudo at all (the file's header defers to `longhands.toml` for the semantics), so a pseudo can be
+   out of reach for author stylesheets even with its preference on — two independent gates, and the
+   preference alone does not settle it. Worked example: `::picker`, `::checkmark` and `::picker-icon`
+   each carry `pref = "dom.select.customizable_select.enabled"`, false on all 16 configurations, so
+   those selectors do not parse on a default build — which is why DevTools support for displaying
+   their rules was declined as a note.
 2. **Grep the shortest distinctive token** in StaticPrefList:
 
    ```
