@@ -60,10 +60,26 @@ Patches can still be read on Phabricator without one, per `bugzilla-access.md`.
 them — read it rather than working from the examples below, which only show the form. Written any
 other way, better than half these commands stop for a permission prompt on a fresh checkout.
 
-One rule specific to reviewing: **use WebFetch for a rendered page, and curl only when you need the
-raw bytes.** WebFetch answers a prompt against the page rather than handing you the markup, so it will
-paraphrase. Reach for curl whenever the review turns on exactly what is written — punctuation,
-`href` targets, whether a note's wording is really what a summarizer reported. That last one has
+**Four forms prompt every time. These are inline deliberately** — a pass that opened
+`command-forms.md` produced none of them, and a pass that did not produced fourteen prompts in an
+hour, so the pointer alone is not enough:
+
+- **`cd`** — use `git -C <clone>` for the Gecko reads, absolute paths for everything else.
+- **a `<<` heredoc** — write the snippet to `/tmp` and run `python3 /tmp/x.py`.
+- **a `\`-continued chain** — issue the calls separately; they can go in one message.
+- **a shell `for` loop or `$(…)`** — loop inside Python instead.
+
+One rule specific to reviewing: **use WebFetch for a rendered page, and get the raw bytes yourself
+whenever the review turns on exactly what is written** — punctuation, `href` targets, whether a note's
+wording is really what a summarizer reported. WebFetch answers a prompt against the page rather than
+handing you the markup, so it will paraphrase. **Fetch the bytes through Python, not `curl`:** a draft
+lives on `docs.google.com`, which is not allowlisted, so a correctly-formed `curl` still prompts.
+
+```
+python3 -c "
+import sys; sys.path.insert(0,'scripts/relnotes'); import trainlib
+open('/tmp/draft.html','w').write(trainlib.fetch_text('<url>', errors='replace'))"
+``` That last one has
 already produced a review's most serious finding, and would have been invisible without the raw HTML;
 the case is in `calibration.md`.
 

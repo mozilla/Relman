@@ -215,7 +215,10 @@ dismissing … on Firefox for Android"*.
 
 Generic, reusable notes are used unless Product supplies their own:
 
-- **Generic notes** — no review needed. Skip.
+- **Generic notes** — no review needed. Skip, **and skip every restatement of them further down the
+  document.** An iOS section ends with a `For Bitrise:` block, which is the same generic text
+  flattened for a store field that rejects newlines: its literal `\n\n` is deliberate, and a
+  difference between two copies of the generic text is not a finding.
 - **Product-supplied notes** — **light review only**. Product provides these in the form they
   want; flag only clear errors (typos, broken or localized links, obviously wrong scoping) and
   otherwise leave the wording alone. Don't apply the full desktop critique.

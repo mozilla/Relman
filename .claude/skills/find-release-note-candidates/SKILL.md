@@ -72,6 +72,15 @@ these commands stop for a permission prompt on a fresh checkout.
 `reference/release-notes/command-forms.md` is the single home for the rules and the measurements
 behind them — read it rather than inferring the rules from the examples, which only show the form.
 
+**Four forms prompt every time. These are inline deliberately** — a pass that opened
+`command-forms.md` produced none of them, and a pass that did not produced fourteen prompts in an
+hour, so the pointer alone is not enough:
+
+- **`cd`** — use `git -C <clone>` for the Gecko reads, absolute paths for everything else.
+- **a `<<` heredoc** — write the snippet to `/tmp` and run `python3 /tmp/x.py`.
+- **a `\`-continued chain** — issue the calls separately; they can go in one message.
+- **a shell `for` loop or `$(…)`** — loop inside Python instead.
+
 ## Scope: you are working one release's notes
 
 **Every Firefox release has its own release owner, and you evaluate notes only for the release you

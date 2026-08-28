@@ -13,6 +13,14 @@ That is the point: **`.claude/settings.json` travels with the repo and a persona
 `settings.local.json` does not.** A command written in the matching form works for everyone. A
 command that needs a local grant works only for whoever granted it.
 
+**Read a prompt's wording as a risk explanation, not as the mechanism.** Five prompts were observed
+on 2026-08-27, each citing something about the command's content — a `cd` before `git`, a brace
+containing a quote, a backslash-escaped newline. All five were also plain matching misses, and the one
+probe that separates the two settled it: `python3 -c "print({'a': 1})"` carries the same
+brace-and-quote the heredoc was flagged for and does **not** prompt, because `Bash(python3 -c:*)`
+matches it. So a match suppresses the prompt whatever the content, and the fix for a prompt is still
+either a matching form or an entry.
+
 Permission matching is a **literal prefix** per entry, and a compound command needs **every** segment
 allowed. Two details confirmed by direct probe on 2026-08-07: an entry whose prefix ends mid-argument
 needs the glob form (`Bash(curl -s https://host/*)`, not `:*`), and a read-only utility absent from the
@@ -28,14 +36,16 @@ by matching recorded commands against the allowlist, not counts of prompts anyon
 
 ## The rules
 
-- **Never `cd`.** 101 calls in the audit opened with it, and each one prompts because `cd` is not
-  allowlisted and every segment of a compound must be. The working directory persists between calls
-  and is already the repo root; use absolute paths for anything outside it.
+- **Never `cd`.** 101 calls in the audit opened with it, and each one prompts: `cd` is not
+  allowlisted and every segment of a compound must be. Measured 2026-08-27, `cd … && git …` reports
+  it as *"changes directory before running git, which can execute untrusted hooks from the target
+  directory"*. The working directory persists between calls and is already the repo root; use
+  absolute paths outside it, and `git -C <clone>` for the Gecko reads.
 - **Invoke the scripts as `python3 scripts/relnotes/<script>.py` from the repository root.** The bare
   `scripts/relnotes/<script>.py` form matches nothing. This was the single biggest source of prompts
   in the first cold run of a candidates pass — 19 of 20 calls.
-- **Scratch files go under `/tmp`, by absolute path.** `Read(//tmp/**)` and `Edit(//tmp/**)` are
-  pre-approved, and it keeps downloaded HTML and JSON out of the working tree. Never `-o` into the
+- **Scratch files go under `/tmp`, by absolute path.** `Read(//tmp/**)`, `Edit(//tmp/**)` and
+  `Bash(mkdir -p /tmp/*)` are pre-approved, and it keeps downloaded HTML and JSON out of the working tree. Never `-o` into the
   repo root. Note the rule is spelled `Edit`, not `Write`: file-permission checks resolve every
   file-editing tool through `Edit(path)` rules, so a `Write(...)` entry silently matches nothing.
 - **`-s` (or `-sL`) goes immediately before the URL; every other flag goes after it.** The entries are
@@ -63,8 +73,10 @@ by matching recorded commands against the allowlist, not counts of prompts anyon
 - **Nothing else is allowlisted, and the answer is not to add hosts.** `developer.mozilla.org` prompts;
   so do `drafts.csswg.org`, `www.rfc-editor.org`, `connect.mozilla.org` and `play.google.com`, all of
   which the current Nightly notes link to. Release notes reference **152 distinct hosts** across the
-  shipped corpus, so a host list is a treadmill. When the task is checking links, use
-  `note-page.py --check-links`, which fetches through Python and needs no per-host approval.
+  shipped corpus, so a host list is a treadmill. **Fetch through Python instead, which needs no
+  per-host approval:** `note-page.py --check-links` for links, and `trainlib.fetch_text(url)` for the
+  raw bytes of anything else. Measured 2026-08-28: a `python3 -c` fetch of a non-allowlisted host does
+  not prompt, while the correctly-formed `curl -s "<url>" -o /tmp/… -w …` for the same host does.
 - **Bug comments, links and flag state need no `curl` at all.** `bug-detail.py <ids> --comments` gives
   comment 0 and the newest; `--comment 16`, `--comment last:5` and `--comment all` give comments in
   full with their line breaks; `see_also` URLs and the always-printed `open needinfo:` line come with
@@ -78,10 +90,12 @@ by matching recorded commands against the allowlist, not counts of prompts anyon
   and `python3 -c "print('<li>brackets</li>')"` both ran without a prompt, so the payload's content —
   angle brackets included — is not the problem. Write the file with `Edit`, then
   `python3 /tmp/analyse.py`.
-- **`python3 - <<'EOF'` heredocs prompt**, despite `Bash(python3 - <<*)` existing. They interrupted a
-  real review pass, and again in the 155 rollup. The exact trigger is unconfirmed; the likeliest
-  explanation is that the body lines are parsed as separate commands, none of which is allowlisted.
-  No entry can reach that, so there is no fix beyond not writing them — use the `/tmp` file instead.
+- **`python3 - <<'EOF'` heredocs prompt, and the trigger is the body's content rather than the
+  heredoc.** Measured 2026-08-27: three prompted with *"Contains brace with quote character
+  (expansion obfuscation)"*, on lines like `{int(s['bug']) for s in …}`. Because it scans the command
+  text, `python3 -c` looked exposed too — **it is not: probed 2026-08-27 with the same
+  brace-and-quote payload and it did not prompt**, since its entry matches. The heredoc's entry does
+  not. Use the `/tmp` file form, whose entry does.
   Reaching for a heredoc because the snippet has loops in it is exactly the case the `/tmp` form
   serves; folding those onto one `-c` line is what mangled the indentation in the 155 pass.
 - **Running scratch Python from `/tmp` is pre-approved, since 2026-08-14.** `Read(//tmp/**)` and
@@ -91,6 +105,10 @@ by matching recorded commands against the allowlist, not counts of prompts anyon
   passes prove works — a cycle pass makes dozens of script calls without a prompt. Being in the
   shared file, it reaches colleagues too, and matching is against the command string, so the platform
   does not enter into it. Unmeasured on macOS all the same, like everything else here.
+- **No `\`-continued chains.** Four `watchlist.py add … && \` chains recording one pass's verdicts
+  each prompted on 2026-08-27. The likely mechanism is prefix matching: the command now begins with a
+  backslash rather than `python3`, so no entry can match it. Same lesson as "the same command over N
+  inputs" below — issue them as separate calls in one message.
 - **Anything you write twice belongs in `scripts/relnotes/`** — matched by prefix, and the reason
   `bug-detail.py` and `note-page.py` exist.
 - **Measuring any of this requires a tool call.** Commands run with the `!` prefix execute in the
@@ -127,10 +145,9 @@ Not oversights — leave these alone:
 
 - `git commit`, `git push`, `git add`, `git reset`, `git checkout`, `rm -rf`. Anything that mutates
   the tree or history should be a conscious approval.
-- `cd` on its own. It is harmless in isolation, and allowlisting it would remove most remaining
-  prompts — but only if the matcher genuinely checks every segment of a compound command. That is
-  asserted in the settings comment, not verified, and the failure mode if it is wrong
-  (`cd /tmp && rm -rf …` auto-approved) is bad enough not to gamble on.
+- `cd` on its own. Allowlisting it would remove most remaining prompts, but only if the matcher
+  genuinely checks every segment of a compound — asserted in the settings comment, not verified, and
+  `cd /tmp && rm -rf …` auto-approved is bad enough not to gamble on.
 - `time` and `timeout`. Both wrap an arbitrary command, so allowlisting either launders everything
   after it past the allowlist.
 
@@ -146,5 +163,6 @@ that scope is what makes it acceptable. The same caveat already applied to `sed`
 already carry. The one real difference: a `/tmp` file could have been written by something other than
 the session running it, where a `-c` payload is always authored in the moment.
 
-`Bash(python3 - <<*)` is in the file for the same reason and does **not** work — heredocs prompt
-regardless, as measured above. It stays only because removing it changes nothing.
+`Bash(python3 - <<*)` is in the file for the same reason and does **not** reliably work: the prompts
+measured on heredocs came from the content scanner above, which an entry cannot satisfy. It stays only
+because removing it changes nothing.

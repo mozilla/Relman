@@ -52,6 +52,7 @@
       "Bash(python3 -c:*)",
       "Bash(python3 - <<*)",
       "Bash(python3 /tmp/*)",
+      "Bash(mkdir -p /tmp/*)",
       "Bash(python3 -m py_compile:*)",
       "Bash(python3 -m json.tool:*)",
       "Bash(chmod +x scripts/*)",

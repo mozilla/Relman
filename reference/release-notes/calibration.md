@@ -388,6 +388,11 @@ was available, and what reached the report came from something cheaper than usin
   "the edit isn't there" has two causes that look identical from the page — never saved, or not yet
   published — and re-fetching cannot separate them. A cache-busting query string appended to someone
   else's URL is not an answer either; asking Nucleus is.
+- **A reformatted copy of the generic notes was reviewed as if it were a note.** The 155 pass filed a
+  finding on trailing URL punctuation inside an iOS `For Bitrise:` block — the generic notes flattened
+  for a field that rejects newlines. The rule to skip generic notes already existed; recognising the
+  block as those notes in a different wrapper is what was missing, and it cost a hand-over turn on a
+  string that is not ours to critique.
 - **The security-advisory 404 was raised three times in one 154.0 review** before someone said it was
   expected. MFSA pages publish at release time, so `--check-links` necessarily fails that link on any
   pre-release page. This one is the odd case out: not a shortcut, just a finding nobody had written
