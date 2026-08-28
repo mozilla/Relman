@@ -32,12 +32,6 @@ issues, not that they're "ready to publish" or anything implying you'll act on t
 audience, tense, full stops, links, tags including **Firefox Labs**, sections to skip, mobile rules,
 and the two recurring wording traps. Read it before reviewing rather than working from memory.
 
-**The Enterprise section is in scope now.** It used to hold one boilerplate link out to separately
-maintained Firefox for Enterprise notes and was on the skip list; those notes stopped being
-maintained in August 2026, so it carries real notes written for administrators and gets reviewed like
-any other section. Its register is the one place the shipped corpus is thin — the style guide's
-Enterprise entry says what it looks like.
-
 Use `shipped-notes-survey.md` when a scoping or categorization call is genuinely uncertain — it has
 real shipped notes grouped by tag and sorted by length, which settles "is this the right register?"
 faster than argument. It also shows that `HTML5` is still in live use and that the `Fixed`-in-majors
@@ -159,8 +153,8 @@ changes were applied and the old text is still showing:
 
 Before reviewing, confirm the **target**: which product (Firefox Desktop, Firefox for Android/iOS,
 Focus), which channel/version, and whether these are mainline, dot-release, beta, ESR or known-issues
-notes. Audience scoping depends on it. **Enterprise is not one of these** — it is a section inside a
-normal note set, not a note set of its own, and ESR is a channel that has nothing to do with it.
+notes. Audience scoping depends on it. **Enterprise is not one of these** — it is one linked-out
+section inside a normal note set, not a note set of its own, and ESR is a channel unrelated to it.
 
 ## Mapping notes to bugs
 
@@ -271,6 +265,16 @@ the bug summary rather than guessing.
 
    This is also the check that separates an **expired** carry-forward note from a **stale** one, and
    `style-guide.md` carries the three-cycle rule and the counting trap that go with that call.
+6. **Check the enterprise link, on any set that is about to ship.** Not its wording — its URL. The
+   version in it must be the release under review, because a link left from the previous release is
+   still live and passes a plain link check:
+
+   ```
+   python3 scripts/relnotes/note-page.py --check-url https://firefox-admin-docs.mozilla.org/release-notes/version/firefox-155/
+   ```
+
+   `style-guide.md` has the rest under *Sections to skip*. Skip this step if the set carries no
+   Enterprise section.
 
 **Don't guess.** Flag anything uncertain as a question rather than a hard correction, especially
 audience-scoping calls that depend on product context you don't have. If you couldn't read a bug or
@@ -283,11 +287,32 @@ away. Before writing "I could not determine", name the command that would settle
 
 ## Output
 
-- A short summary (overall quality, biggest themes).
-- A per-note list of issues, walking the notes **in the same order they appear in the document, top
-  to bottom** (by section, then by note). The author reviews with the doc open and works straight
-  down it, so matching that order lets them apply comments in place. Don't reorder by severity or
-  theme, and don't group all the "jargon" or all the "consolidation" items together.
+**Review the whole set first, then hand it over one note at a time.** Reviewing incrementally cannot
+work: consolidation findings name other notes by position, and the cross-cutting checks are claims
+about the whole document.
+
+**Write the finished review to `/tmp/review-<version>.md` before presenting any of it.** A long
+hand-over gets interrupted or compacted, and the file is what survives that.
+
+**Then one note per turn — show it, stop, wait.** The author is applying edits as they go, and a
+whole review pasted at once scrolls away.
+
+- **One note's findings per message**, then stop and let them act. Same rule as "one day per turn" in
+  `find-release-note-candidates`.
+- **Notes with nothing wrong do not get a turn.** Say how many you passed over and move on.
+- **Lead with the position** — `note 7 of 43 · Web Platform · 4 findings left after this` — so they
+  can see the runway and choose to speed up.
+- **Take "give me the next few" or "just dump the rest".** One at a time is the default, not a rule
+  to enforce against the person reading it.
+- If they stop partway, say which note the walk reached and that the rest is in the file.
+
+**What the review contains**, whether it is being written to the file or handed over a note at a time:
+
+- A short summary (overall quality, biggest themes), before the walk starts.
+- Findings walked **in the same order the notes appear in the document, top to bottom** (by section,
+  then by note). The author reviews with the doc open and works straight down it, so matching that
+  order lets them apply comments in place. Don't reorder by severity or theme, and don't group all
+  the "jargon" or all the "consolidation" items together.
 - For each note: the original text, what's wrong (cite the rule), and a concrete suggested rewrite.
 - **Always show the full final note with all changes applied — not just a description of the
   changes.** Even for a small tweak (a comma, an added bug link, one reworded clause), write out the
@@ -295,9 +320,9 @@ away. Before writing "I could not determine", name the command that would settle
   forces them to reconstruct the result.
 - For a consolidation, raise it at the position of the **first** note involved and name the others
   (and their positions) it merges with, so it stays in reading order.
-- A short cross-cutting section *after* the in-order walk for anything genuinely spanning the whole
-  document (a coverage check against the bug query, missing full stops throughout, terminology
-  consistency). Keep per-note issues in the walk.
+- A short cross-cutting section *after* the in-order walk, in one piece, for anything genuinely
+  spanning the whole document (a coverage check against the bug query, missing full stops throughout,
+  terminology consistency). Keep per-note issues in the walk.
 - Questions attached to their note in the walk; optionally restated in a short list at the end.
 
 **A suggestion has to be pasteable without being edited first, which takes two specific things —

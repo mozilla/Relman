@@ -64,12 +64,6 @@ GECKO_MARKER = Path("modules") / "libpref" / "init" / "StaticPrefList.yaml"
 GECKO_UPSTREAM_DEFAULT = "origin/main"
 CANONICAL_GECKO_URL = re.compile(
     r"mozilla-firefox/firefox|hg\.mozilla\.org/mozilla-(central|unified)|mozilla/gecko-dev", re.I)
-# Where enterprise policy code lives, shared so the scan and the changelog check cannot drift apart.
-# Both directories are load-bearing: policy *names* are defined under browser/ (`Policies.sys.mjs`
-# and `schemas/`), while the engine, the GPO and macOS parsers and the shared helpers sit under
-# toolkit/ -- bug 2048572 moved them there, so which half a change touches is not predictable.
-ENTERPRISE_POLICY_DIRS = ("browser/components/enterprisepolicies/",
-                          "toolkit/components/enterprisepolicies/")
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "relman-relnotes"
 # json-firefoxreleases is ~12 MB; don't refetch it on every invocation.
 BUILDS_CACHE = CACHE_DIR / "firefoxreleases.json"

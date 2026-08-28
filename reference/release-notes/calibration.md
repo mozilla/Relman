@@ -190,13 +190,9 @@ intuition.
   audience. Ask how many people use the surface before asking how good the change is. **This applies
   to UI surfaces as much as to web APIs**: scoped to APIs, the rule reads past a candidate like bug
   2051292 (long-press an Android toolbar shortcut to edit it), which went out with reservations.
-  **Managed deployments are a recognized audience and are not sized by headcount** — an enterprise
-  policy note is aimed at the administrators who will look for it, so the reach test does not apply.
 - **A change to an internal configuration surface is not a note unless the surface is being
   replaced.** `about:config` and its neighbours are deliberately not promoted, whatever their
   traffic — that is a decision rather than audience size, so the reach test above does not reach it.
-  **Enterprise policies are not one of these surfaces**: they are a supported, documented management
-  interface with its own audience — see the enterprise entry below.
   Measured across the shipped corpus: `about:config` appears in 16 notes in total and is the
   *subject* of only two, both the same Firefox 71 change ("Configuration page reimplemented in
   HTML"); nearly all the rest name it as the place to flip a preference for some other feature. Bug
@@ -204,8 +200,6 @@ intuition.
   user-visible, cleared every other filter here, and was declined on this ground alone.
 - **"Now configurable via a preference" is not a note.** Notes describe default behaviour; anything
   requiring a manual `about:config` change is out of scope (bug 1418178, Ctrl-Tab preview count).
-  **A new enterprise policy is the exception**, because for its audience the configurability is the
-  feature, not a workaround — see the enterprise entry below.
   Check whether the *default* actually changed before treating a new preference as a candidate — in
   1418178 the value had been hardcoded at 7 and the preference kept it at 7, so nothing changed for
   anyone. A `pref-delta.py` line reading `None -> 7` means the preference is new, **not** that the
@@ -252,38 +246,30 @@ intuition.
   automatically mean "covered by the security advisory".** Weigh whether the *user-visible*
   behaviour is a known shortcoming worth telling people was fixed.
 
-**Enterprise policies, from 2026-08-15: a candidate class the corpus cannot calibrate.**
+**Enterprise policies are not a candidate class, and this was settled twice.** Do not spend a pass
+looking for them.
 
-Firefox for Enterprise release notes stopped being separately maintained, so Release Management now
-writes these. Three things follow, and the first is the one to internalise:
+Between 2026-08-15 and 2026-08-27 we did: the separate Firefox for Enterprise notes had stopped being
+maintained, so discovery grew an `[enterprise policy]` label, a policy-template cross-check and an
+audience exception in the style guide. That was reverted after discussion with the enterprise notes
+owner. The content is referenced from Firefox's notes, the admin docs and the policy template
+releases, so it lives on one canonical page —
+[firefox-admin-docs.mozilla.org/release-notes](https://firefox-admin-docs.mozilla.org/release-notes/)
+— and Firefox's own notes carry a link to it rather than a copy.
 
-- **Its absence from two years of shipped notes is not evidence against it.** The work was being
-  documented in another place, not judged and rejected. Anything that reasons from "how often does
-  this ship a note" — the survey's tag table, the `Fixed`-in-majors bar — reads low here for a reason
-  that no longer holds. This is the one class where the corpus argues the wrong way.
-- **In scope:** a policy added, a policy gaining options, and a policy that stopped being enforced.
-  The last is easy to skip because it reads like an ordinary regression: `DNSOverHTTPS enterprise
-  policy no longer enforced` (2044851) and `DisablePasswordReveal … no longer hides the show password
-  button` (2001459) are invisible to everyone except the deployments relying on them, which is
-  precisely why nobody else files them. There is published precedent for the regression case —
-  *"Fixed an issue where enterprise policies for the browser homepage and start page were not being
-  applied correctly"* — so it does not need arguing from first principles.
-- **The flag queue does not cover this class, so discovery is the only path.** Every FIXED
-  `Enterprise Policies` bug measured over a year carried `relnote-firefox = ---`, including bug
-  2022365, whose Enterprise note *shipped*. Both notes submitted for **155** were also unflagged:
-  2001734 (`DisableLaunchOnLogin`) and 2056928. Elsewhere an unflagged bug in a mechanical-looking
-  area is weak evidence that nobody thought it note-worthy; here it means nothing at all.
-- **One of those two is the worked example for how this class hides.** Bug 2056928 earned a 155
-  Enterprise note and sits in `Firefox :: Settings UI` with a landing reading `Make legacy disabling
-  pref work with new settings` — no policy in the component, neither "enterprise" nor "policy" in any
-  of its text. The only signal was that it touched `browser/components/enterprisepolicies/`, which is
-  why the label reads the tree as well as the summary. **So the label is a floor, not a filter:** an
-  enterprise-visible regression can be worded entirely in the vocabulary of the feature it broke.
+Two things worth keeping from the attempt, because they cost real effort to learn:
 
-`scan-window.py` labels these `[enterprise policy]` during the cycle, and after the release
-`policy-changelog.py --version N` lists what the policy templates say changed. Neither is a
-significance judgement: a policy that only administrators can even observe still has to be worth an
-administrator's attention.
+- **The class genuinely is hard to find by pattern, so a label was never going to be coverage.** Of
+  the nine bugs on the canonical page for 155, four had no policy vocabulary and no landing under the
+  policy directories: two captive-portal domain moves (1898891, 2049252 — enterprise-relevant because
+  network allowlists name the old domain), a `Firefox :: Settings UI` sibling (2055887) and a
+  taskbar-pinning bug whose summary says "group policy" but never "enterprise" (2059920). Deciding
+  those matter needs deployment context, not a regex. If anyone proposes reviving the label, that
+  measurement is the argument against.
+- **What we do instead is one check at validation time**, on the link rather than the content: see
+  *Sections to skip* in [`style-guide.md`](style-guide.md). It is version-specific for durability, and
+  the check that catches something is that the version in the URL matches the release — a stale link
+  from the previous release stays live and passes a plain liveness check.
 
 **Judge the landing, not the bug summary — this rule has already been broken once.** Bug 267369 is a
 2004 feature request ("put source URL into the saved file's properties") that was proposed as a

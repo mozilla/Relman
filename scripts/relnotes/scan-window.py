@@ -198,69 +198,6 @@ DROP_SUBJECT_PATTERNS = [
     )
 ]
 
-# Enterprise policy work, labelled rather than filtered. Release Management absorbed this class in
-# August 2026 when the separate Firefox for Enterprise release notes stopped being maintained, so a
-# new or changed policy -- and a policy that stopped being enforced -- is now ours to note.
-#
-# Two channels because neither alone is enough. The component catches the bulk; the text test catches
-# policy work owned by the feature's own team, which is where it lands when the policy is part of
-# shipping the feature: Web Serial, Data Sanitization and PSM all added policies from their own
-# components. Requiring both words keeps it off the unrelated `Enterprise Products` bugs (a separate
-# product with its own repo) and off web-platform senses of "policy" -- Referrer-Policy, permissions
-# policy, COOP.
-#
-# The third channel is the tree, and it is the one that catches the notes the other two miss. Bug
-# 2056928 shipped a 155 Enterprise note ("locking certain legacy preferences no longer disabled the
-# corresponding controls in Firefox Settings") from `Firefox :: Settings UI`, with a landing reading
-# `Make legacy disabling pref work with new settings` -- no component match and neither word in the
-# text. What gave it away is that it touched the policy directory. Pathspec-limited, so it is one
-# cheap call: a whole cycle returns a couple of dozen commits in a fifth of a second.
-#
-# Deliberately NOT a drop exemption. Measured over every FIXED bug in the component plus every one
-# matching the text test since 2025-08-01: the funnel dropped 7 of 86, and all 7 were correct --
-# tests, a typo, a cleanup, a telemetry ping, two intermittents and a pure code move. An exemption
-# keyed on this predicate would have readmitted the code move and nothing worth having. The path
-# channel makes that matter more, not less: most commits under this directory are its own tests, and
-# they stay dropped, which is why a label there costs nothing.
-ENTERPRISE_POLICY_COMPONENT = "Enterprise Policies"
-ENTERPRISE_RE = re.compile(r"enterprise", re.IGNORECASE)
-POLICY_RE = re.compile(r"polic(y|ies)", re.IGNORECASE)
-
-
-def policy_dir_bugs(repo: Path, start: str, end: str) -> set:
-    """Bugs with a landing under the enterprise policy directories, by id.
-
-    Reverts are excluded on the same reasoning as everywhere else here: a backout's subject names the
-    bug being blamed, so counting it would label a bug for breaking a policy test rather than for
-    changing a policy.
-    """
-    log = git(repo, "log", f"{start}..{end}", "--format=%s", "--",
-              *trainlib.ENTERPRISE_POLICY_DIRS)
-    out = set()
-    for subject in log.splitlines():
-        if REVERT_RE.match(subject):
-            continue
-        m = BUG_RE.search(subject)
-        if m:
-            out.add(m.group(1))
-    return out
-
-
-def is_enterprise_policy(bug: dict, subjects: list[str], in_policy_dir: set = frozenset()) -> bool:
-    """Does this bug change how administrators manage Firefox?
-
-    Landings are stripped of their reviewer list before matching, for the reason REVIEWER_SUFFIX_RE
-    exists: an `r=` group is not content, and matching against it is how a pattern comes to fire on
-    who reviewed a patch instead of what it did.
-    """
-    if bug.get("component") == ENTERPRISE_POLICY_COMPONENT:
-        return True
-    if str(bug.get("id") or "") in in_policy_dir:
-        return True
-    texts = [bug.get("summary") or "", *(strip_reviewers(s) for s in subjects)]
-    return any(ENTERPRISE_RE.search(t) and POLICY_RE.search(t) for t in texts)
-
-
 def fetch_json(url: str):
     """Thin wrapper over trainlib.fetch_json that exits with a CLI-friendly message.
 
@@ -491,8 +428,6 @@ def render_census(c: dict) -> list[str]:
         marks = []
         if r["esr"]:
             marks.append("also ESR " + ", ".join(str(v) for v in r["esr"]))
-        if r.get("enterprise_policy"):
-            marks.append("enterprise policy")
         tag = f"  [{', '.join(marks)}]" if marks else ""
         lines.append(f"  {r['bug']}  {r['product']} :: {r['component']}"
                      f"  flag={r['status_flag']}{tag}")
@@ -627,10 +562,6 @@ def run_census(repo: Path, version: int, window_bugs: set[str], esrs: list[int],
             "keywords": bug.get("keywords", []),
             "status_flag": bug.get(f"cf_status_firefox{version}"),
             "landings": subjects,
-            # Component and text channels only. Census candidates are by definition bugs whose
-            # commits are *outside* the window, so a window-scoped path set could not match them and
-            # passing one would be plumbing that reads like coverage.
-            "enterprise_policy": is_enterprise_policy(bug, subjects),
             **note_target(bug, version, esrs),
         }
         reason = drop_reason(bug, subjects)
@@ -950,10 +881,8 @@ def main() -> None:
         if c["bug"]:
             by_bug[c["bug"]].append(c)
     reverted_bugs = {c["bug"] for c in commits if c["is_revert"] and c["bug"]}
-    in_policy_dir = policy_dir_bugs(repo, start, end)
     print(f"# {len(commits)} commits, {len(by_bug)} distinct bugs, "
-          f"{len(reverted_bugs)} touched by a revert, "
-          f"{len(in_policy_dir)} touching enterprise policy code", file=sys.stderr)
+          f"{len(reverted_bugs)} touched by a revert", file=sys.stderr)
 
     bugs, missing = fetch_bugs(sorted(by_bug), nightly, esrs)
 
@@ -990,7 +919,6 @@ def main() -> None:
             "landings": [{"sha": c["sha"], "subject": c["subject"]} for c in landings],
             "commit_count": len(subjects),
             "had_revert": bug_id in reverted_bugs,
-            "enterprise_policy": is_enterprise_policy(bug, subjects, in_policy_dir),
             **note_target(bug, nightly, esrs),
         }
         if reason:
@@ -1084,8 +1012,6 @@ def main() -> None:
                 flags.append("flag=disabled")
             if trainlib.is_meta(s):
                 flags.append("meta")
-            if s.get("enterprise_policy"):
-                flags.append("enterprise policy")
             tag = f"  [{', '.join(flags)}]" if flags else ""
             lines.append(f"  {s['bug']}  {s['product']} :: {s['component']}{tag}")
             lines.append(f"        bug: {s['summary'][:140]}")

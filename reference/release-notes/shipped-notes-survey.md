@@ -8,7 +8,7 @@ Regenerate with `scripts/relnotes/fetch-shipped-notes.py --format md -o referenc
 
 ## The bar, in one line
 
-**A major release ships 20 notes (median; range 10–30) drawn from ~2,646 bugs fixed per cycle — about 1.0%, or 1 note per 98 fixed bugs.**
+**A major release ships 20 notes (median; range 10–32) drawn from ~2,648 bugs fixed per cycle — about 1.0%, or 1 note per 98 fixed bugs.**
 
 **This is a publication rate, not a shortlist budget — do not use it to prune.** It is what survived *after* a developer was asked and Release Management made a call. Discovery sits upstream of both: its job is to surface bugs worth asking a developer about, and the cost of the two errors is wildly asymmetric. A surplus candidate costs one question in a bug; a missed one ships a release with a note nobody wrote. So **err toward including** and let the tiering carry the uncertainty.
 
@@ -30,39 +30,39 @@ What the number *is* good for: sanity-checking the final published set, and cali
 | 138.0 | 18 | | 151.0 | 29 |
 | 139.0 | 22 | | 152.0 | 23 |
 | 140.0 | 19 | | 153.0 | 30 |
-| 141.0 | 16 | | | |
+| 141.0 | 16 | | 154.0 | 32 |
 
-25 major releases, 516 notes, mean 20.6. Plus 57 dot releases carrying 234 notes.
+26 major releases, 548 notes, mean 21.1. Plus 58 dot releases carrying 242 notes.
 
 ## Tags, and what each is really used for
 
 | Tag | Notes | In majors | In dots | Has bug | Median words |
 |---|---:|---:|---:|---:|---:|
-| Fixed | 264 | 50 | 214 | 211 | 16 |
-| New | 179 | 174 | 6 | 76 | 31 |
-| HTML5 | 141 | 140 | 1 | 75 | 21 |
-| Developer | 61 | 61 | 0 | 28 | 23 |
-| Changed | 48 | 46 | 2 | 26 | 28 |
-| Community | 25 | 25 | 0 | 0 | 134 |
-| (untagged) | 17 | 14 | 7 | 12 | 43 |
+| Fixed | 276 | 56 | 220 | 222 | 16 |
+| New | 189 | 184 | 6 | 83 | 30 |
+| HTML5 | 148 | 147 | 1 | 82 | 21 |
+| Developer | 62 | 62 | 0 | 29 | 23 |
+| Changed | 51 | 49 | 2 | 29 | 28 |
+| Community | 26 | 26 | 0 | 0 | 134 |
+| (untagged) | 21 | 18 | 9 | 15 | 43 |
 | Enterprise | 4 | 0 | 4 | 4 | 17 |
 | Labs | 4 | 4 | 0 | 3 | 45 |
 
 Notes are short — median **20 words** across hand-authored notes (excluding the generated Community credits). A candidate that needs three sentences to explain is usually either two notes or not a note.
 
-**The Fixed/major split is the number to watch.** Of 264 `Fixed` notes, 214 shipped in dot releases against 50 in majors — and 25 of those majors are just the standing security catch-all. Majors are carried by `New`, `HTML5`/`Developer`, and `Changed`; dot releases are where fixes live. Treat that as a description of past practice rather than a rule — it is already changing, and the next section quantifies how fast and characterizes the threshold.
+**The Fixed/major split is the number to watch.** Of 276 `Fixed` notes, 220 shipped in dot releases against 56 in majors — and 26 of those majors are just the standing security catch-all. Majors are carried by `New`, `HTML5`/`Developer`, and `Changed`; dot releases are where fixes live. Treat that as a description of past practice rather than a rule — it is already changing, and the next section quantifies how fast and characterizes the threshold.
 
 ### Opening words by tag
 
 The style guide's tense rule shows up in the data — use this to check a draft's register against what actually ships.
 
-- **Fixed** — `Fixed` (183), `Various` (37), `Improved` (10), `Security` (8), `The` (3), `Added` (2), `On` (2), `Firefox` (2)
-- **New** — `Firefox` (36), `The` (16), `You` (12), `Address` (8), `On` (8), `Added` (6), `Users` (5), `A` (4)
-- **HTML5** — `Firefox` (39), `Added` (31), `The` (29), `Support` (7), `Enabled` (4), `Implemented` (3), `Service` (2), `Both` (1)
-- **Developer** — `The` (16), `Firefox` (11), `Added` (5), `A` (4), `Support` (2), `Improved` (2), `When` (2), `Debugger` (1)
-- **Changed** — `The` (13), `Firefox` (6), `When` (3), `Improved` (3), `On` (3), `Due` (2), `Extensions` (2), `Local` (2)
-- **Community** — `With` (25)
-- **(untagged)** — `strike` (7), `For` (2), `Windows` (2), `On` (2), `Users` (1), `Due` (1), `Multiselecting` (1), `Some` (1)
+- **Fixed** — `Fixed` (194), `Various` (38), `Improved` (10), `Security` (8), `The` (3), `Added` (2), `On` (2), `Firefox` (2)
+- **New** — `Firefox` (37), `The` (19), `You` (12), `Address` (8), `On` (8), `Added` (6), `Users` (5), `A` (4)
+- **HTML5** — `Firefox` (44), `Added` (33), `The` (29), `Support` (7), `Enabled` (4), `Implemented` (3), `Service` (2), `Both` (1)
+- **Developer** — `The` (17), `Firefox` (11), `Added` (5), `A` (4), `Support` (2), `Improved` (2), `When` (2), `Debugger` (1)
+- **Changed** — `The` (13), `Firefox` (7), `When` (3), `Improved` (3), `On` (3), `Due` (2), `Extensions` (2), `Local` (2)
+- **Community** — `With` (26)
+- **(untagged)** — `strike` (7), `For` (3), `Windows` (2), `On` (2), `Following` (2), `Users` (1), `Due` (1), `Multiselecting` (1)
 
 ### Representative notes
 
@@ -71,32 +71,32 @@ Real shipped text, spread from shortest to longest within each tag.
 **Fixed**
 
 - Security fix.
-- Fixed incorrect font selection in some cases when attempting to use color fonts.
-- Fixed high CPU usage on Windows when the screen was locked or the laptop lid was closed.
-- Fixed a bug that made HTTP/3 requests containing non-UTF-8 header values time out or fall back to HTTP/2 after a while.
+- Fixed Firefox adding a new Start Menu shortcut on Windows every time it started.
+- Improved overall stability by fixing crashes related to browsing, graphics, and accessibility features. (Bugs 2001160, 1998185, 1998188)
+- Improved Firefox' connection fallback behavior to mitigate sporadic slow/failed loads on some Google sites on systems with certain third-party software installed.
 - When the timepicker is enabled for `<input type="time">` and `<input type="datetime-local">`, it now provides full keyboard and assistive technology support. This update also improves the behavior of the time spin buttons for users who prefer reduced motion. The Firefox Accessibility team hopes t...
 
 **New**
 
 - Support HEVC playback on Linux.
-- New brand-inspired wallpapers are available for New Tab on desktop, with versions for both light and dark mode.
-- On Windows, clicking a persistent notification when Firefox is closed or restarted will now properly open Firefox with the relevant webpage, instead of just opening the main page of the website.
-- Vertical Tabs: You can now keep more — or fewer — pinned tabs in view for quicker access to important windows. Just drag the divider to resize your pinned tabs section. <img src="https://www.mozilla.org/media/img/firefox/releasenotes/note-images/140_vertical_pinned_tabs_divider.png" width="700" a...
+- You can now remove extensions from the sidebar by right-clicking the extension icon and selecting `Remove from Sidebar`.
+- You can now close a Picture-in-Picture window without pausing the video. Press `Shift + Click` on the close button or use `Shift + Esc` to exit while keeping playback uninterrupted.
+- We’re excited to share another tab groups update that addresses a top request from our community! You can now drag a tab into a collapsed group without automatically expanding it. It’s a quick way to stay organized while minimizing visual distractions. <video src="https://www.mozilla.org/media/im...
 - ***Firefox Address Bar Refresh 2025 - new ways to search for things new, previously viewed, and more - all from the address bar:*** **Features** *Unified Search Button*: A new, easy-to-access button in the address bar helps you switch between search engines and search modes with ease. This featur...
 
 **HTML5**
 
 - Enabled the spec-compliant `HTMLMediaElement.captureStream()` API.
-- The Temporal proposal, a better version of Date, is now enabled by default in Firefox.
-- `window.getSelection().toString()` now correctly returns the text serialization when text is selected in a text control, improving cross-browser interoperability on some sites.
-- The initial `about:blank` document is now Web-compatible. If the first navigation of a browsing context goes to `about:blank`, it completes synchronously and is no longer replaced by a second parser-generated document.
+- The `getCapabilities` method allows applications to gather the media capabilities supported for the live MediaStreamTrack.
+- Added support for closing popovers & dialogs with the Android *Back* Button, and implemented the `CloseWatcher` API for handling this in script.
+- Firefox now supports the `text-box-trim` and `text-box-edge` CSS properties, and the associated `text-box` shorthand. These properties control the leading space above and below text, enabling simpler and more consistent vertical spacing and alignment.
 - The `fetchpriority` attribute enables web developers to optimize resource loading by specifying the relative priority of resources to be fetched by the browser. It accepts three values: `auto` (default priority), `low` (lower priority), `high` (higher priority). It can be specified on `script`, `...
 
 **Developer**
 
 - Firefox now supports the Permissions API in `Worker` Context.
-- Added support for the import map integrity field, allowing you to ensure the integrity of dynamically or statically imported modules.
-- The devtools network monitor now indicates when a connection used a certificate issued by a certificate authority not in Mozilla's Root CA Program.
+- The toolbar of the Storage Inspector now has a button to delete all entries of the currently selected storage.
+- Improved support for debugging web extensions, such as automatically reloading the web extension's source code in the Debugger when the extension is reloaded.
 - A new column has been added to the Network panel to display the full path of the request URL. This enhancement makes helps developers quickly view and analyze complete request paths.
 - The Debugger's directory root is now scoped to the specific domain where it was set, which aligns with typical usage and avoids applying it across unrelated domains. This builds on previous improvements such as a redesigned UI and easier removal of the root setting. Setting a directory root updat...
 
@@ -105,7 +105,7 @@ Real shipped text, spread from shortest to longest within each tag.
 - Rededicated previous color settings to Contrast Control settings. (Learn more)
 - Firefox on Windows 11 now uses system provided font icons for the caption buttons, more in line with Windows 11 conventions.
 - When a PDF or other file that Firefox opens directly finishes downloading, it now opens in a background tab if you've switched tabs or closed the original page.
-- Geolocation on Windows now respects the user's Windows location permission setting, instead of overriding it, when the user grants location permission to a page. Firefox will ask users to enable the Windows permission if it is needed.
+- The *TrustPanel* combines the privacy and security panels accessed from the address bar to give the user one place to check the *Privacy and Security* settings of the current page. Learn more. <img alt="TrusPanel Screenshot" src="https://www.firefox.com/media/img/firefox/releasenotes/note-images/...
 - The refreshed New Tab layout previously rolled out in Firefox 134 to users in the United States is now being made available in all countries where Stories are available. It features a repositioned logo to prioritize Web Search, Shortcuts, and Recommended Stories at the top. The update also includ...
 
 **Community**
@@ -113,7 +113,7 @@ Real shipped text, spread from shortest to longest within each tag.
 - With the release of Firefox 132, we are pleased to welcome the developers who contributed their first code change to Firefox in this release, 7 of whom were brand new volunteers! Please join us in thanking each of these diligent and enthusiastic individuals, and take a look at their contributions...
 - With the release of Firefox 141, we are pleased to welcome the developers who contributed their first code change to Firefox in this release, 12 of whom were brand new volunteers! Please join us in thanking each of these diligent and enthusiastic individuals, and take a look at their contribution...
 - With the release of Firefox 139, we are pleased to welcome the developers who contributed their first code change to Firefox in this release, 14 of whom were brand new volunteers! Please join us in thanking each of these diligent and enthusiastic individuals, and take a look at their contribution...
-- With the release of Firefox 148, we are pleased to welcome the developers who contributed their first code change to Firefox in this release, 18 of whom were brand new volunteers! Please join us in thanking each of these diligent and enthusiastic individuals, and take a look at their contribution...
+- With the release of Firefox 138, we are pleased to welcome the developers who contributed their first code change to Firefox in this release, 18 of whom were brand new volunteers! Please join us in thanking each of these diligent and enthusiastic individuals, and take a look at their contribution...
 - With the release of Firefox 151, we are pleased to welcome the developers who contributed their first code change to Firefox in this release, 37 of whom were brand new volunteers. Please join us in thanking each of these diligent and enthusiastic individuals, and take a look at their contribution...
 
 **(untagged)**
@@ -122,7 +122,7 @@ Real shipped text, spread from shortest to longest within each tag.
 - <strike> Some websites on internal or corporate networks that require a login prompt may fail to display the sign-in dialog in Firefox 150, showing a blank page instead.</strike> (Fixed in 150.0.2 in Bug 2034752)
 - On Linux (Wayland) systems, certain popups and context menus will sometimes open in the wrong place, such as the top-left corner of the window. Firefox 147.0.3 has a partial mitigation for this problem and remaining instances will be addressed in a future release.
 - <strike>Under certain conditions, copyrighted video served via digital rights management may experience playback issues . A patch is underway. For an immediate workaround, please complete the following steps: 1. Go to *about:config* in the Awesomebar. 2. Search for `media.eme.mfcdm.origin-filter....
-- ~~Some Windows users may experience a crash on startup after updating, caused by an incomplete update leaving the Firefox installation in an inconsistent state (Bug 1681745). If you are affected, downloading Firefox from firefox.com and installing it over your existing installation will repair it...
+- When toolbars are hidden in fullscreen mode (the default on Windows and Linux), the vertical tabs sidebar does not appear when moving the cursor to the left edge of the screen. As a workaround, move the cursor to the top of the screen to reveal both toolbars and sidebar together. Alternatively, y...
 
 **Enterprise** — only 4 in the corpus, so read these as instances rather than a pattern
 
@@ -140,19 +140,19 @@ Real shipped text, spread from shortest to longest within each tag.
 
 ## Where the `Fixed` threshold currently sits (majors)
 
-50 `Fixed` notes shipped in a major release in this window — but **25 of those are the standing `Various security fixes.` catch-all**, one per release. The real count of substantive mainline fix notes is **25** across 25 releases.
+56 `Fixed` notes shipped in a major release in this window — but **26 of those are the standing `Various security fixes.` catch-all**, one per release. The real count of substantive mainline fix notes is **30** across 26 releases.
 
 **And that bar is already moving:**
 
 | Window | Substantive `Fixed` notes per major |
 |---|---:|
-| 129.0–140.0 | 0.50 |
-| 141.0–153.0 | 1.46 |
-| 147.0–153.0 (most recent) | 2.14 |
+| 129.0–141.0 | 0.46 |
+| 142.0–154.0 | 1.85 |
+| 148.0–154.0 (most recent) | 2.29 |
 
-Per release: 129.0 (0), 130.0 (1), 131.0 (0), 132.0 (0), 133.0 (1), 134.0 (0), 135.0 (1), 136.0 (1), 137.0 (0), 138.0 (0), 139.0 (2), 140.0 (0), 141.0 (0), 142.0 (2), 143.0 (0), 144.0 (1), 145.0 (0), 146.0 (1), 147.0 (4), 148.0 (2), 149.0 (1), 150.0 (1), 151.0 (3), 152.0 (4), 153.0 (0). 11 of 25 majors carried no substantive fix note at all — and nearly all of those are in the older half of the window.
+Per release: 129.0 (0), 130.0 (1), 131.0 (0), 132.0 (0), 133.0 (1), 134.0 (0), 135.0 (1), 136.0 (1), 137.0 (0), 138.0 (0), 139.0 (2), 140.0 (0), 141.0 (0), 142.0 (2), 143.0 (0), 144.0 (1), 145.0 (0), 146.0 (1), 147.0 (4), 148.0 (2), 149.0 (1), 150.0 (1), 151.0 (3), 152.0 (4), 153.0 (0), 154.0 (5). 11 of 26 majors carried no substantive fix note at all — and nearly all of those are in the older half of the window.
 
-So the practice has already shifted by roughly 4× without anyone changing the guidance. Any deliberate decision to lean on `Fixed` for majors as the cycle shortens is an acceleration of a trend in progress, not a new departure — which makes the threshold question the practical one. The full list below is the evidence base.
+So the practice has already shifted by roughly 5× without anyone changing the guidance. Any deliberate decision to lean on `Fixed` for majors as the cycle shortens is an acceleration of a trend in progress, not a new departure — which makes the threshold question the practical one. The full list below is the evidence base.
 
 - **130.0** — Fixed an issue where `Copy` and `Paste` context menu items intermittently were not enabled when expected. (bug 1863246)
 - **133.0** — The “Picture-in-Picture: auto-open on tab switch” feature from Firefox Labs now behaves more reliably across a wider range of sites, automatically opening relevant videos while ignoring others.
@@ -179,6 +179,11 @@ So the practice has already shifted by roughly 4× without anyone changing the g
 - **152.0** — In multiple monitor situations, the *About Firefox* window now more reliably opens on the display with the most recently used Firefox window. (bug 1868738)
 - **152.0** — Fixed arrow-key text navigation and word selection commands that moved in the wrong direction in right-to-left text on macOS and Linux. (bug 1425483)
 - **152.0** — Fixed an issue where the Paste option could be missing from context menus when editing content on sites such as Squarespace, LinkedIn, and eBay. (bug 2043569)
+- **154.0** — Fixed PDF documents not being scaled correctly in print preview when the *Fit to Page Width* option is used. (bug 2055723)
+- **154.0** — Fixed an issue where the Windows taskbar would appear in front of a full screen Picture-in-Picture window. (bug 2048501)
+- **154.0** — Fixed an issue on macOS where closing a browser window could leave behind an invisible window that continued to capture mouse clicks over the area where it used to be. (bug 2015460)
+- **154.0** — Fixed the Vertical Tabs sidebar staying visible in full screen mode. It now hides along with the toolbars and reappears when the cursor moves to the edge of the screen. (bug 1927457)
+- **154.0** — Fixed an issue on Windows where an auto-hiding taskbar would not appear until the Firefox window had been minimized and restored after launch. (bug 1957069)
 
 Read across them and a usable threshold falls out. The fixes that clear the bar are ones where **an everyday interaction was reliably broken for an identifiable group of users, and they could tell**. Concretely, the recurring shapes are:
 
@@ -191,37 +196,37 @@ What is **absent** is as informative: no performance micro-optimizations, no cos
 
 ## Which areas produce notes
 
-Bugzilla component of every noted bug (426 of 426 resolved; the rest are security-restricted or no longer readable).
+Bugzilla component of every noted bug (456 of 456 resolved; the rest are security-restricted or no longer readable).
 
 | Component | Notes |
 |---|---:|
 | Core :: DOM: Core & HTML | 22 |
-| Core :: CSS Parsing and Computation | 18 |
-| Core :: Widget: Cocoa | 16 |
-| Core :: Audio/Video: Playback | 12 |
-| Firefox :: PDF Viewer | 10 |
+| Core :: CSS Parsing and Computation | 19 |
+| Core :: Widget: Cocoa | 17 |
+| Core :: Audio/Video: Playback | 13 |
+| Firefox :: PDF Viewer | 11 |
+| Core :: Privacy: Anti-Tracking | 11 |
+| Firefox :: Address Bar | 11 |
 | Core :: Widget: Gtk | 10 |
-| Firefox :: Address Bar | 10 |
-| Core :: Privacy: Anti-Tracking | 10 |
 | Core :: Graphics | 10 |
 | Core :: DOM: Navigation | 9 |
+| Firefox :: Settings UI | 9 |
 | Firefox :: New Tab Page | 9 |
-| Firefox :: Settings UI | 8 |
 | Firefox :: Tabbed Browser | 8 |
+| Core :: Widget: Win32 | 8 |
 | DevTools :: Inspector | 7 |
 | Core :: Networking: HTTP | 7 |
+| Firefox :: Profile Backup | 7 |
+| Core :: DOM: Networking | 6 |
 | External Software Affecting Firefox :: Other | 6 |
-| Core :: Widget: Win32 | 6 |
+| Firefox :: Sidebar | 6 |
 | Core :: DOM: UI Events & Focus Handling | 6 |
-| Firefox :: Profile Backup | 6 |
 | Toolkit :: Add-ons Manager | 5 |
-| Core :: DOM: Networking | 5 |
 | DevTools :: Netmonitor | 5 |
 | Firefox :: Theme | 5 |
 | Firefox :: Search | 5 |
-| Core :: Layout: Text and Fonts | 5 |
 
-Long tail: 140 distinct components for 426 notes. Notes cluster in the front end and in web-platform components, and are almost absent from build, test, and internal-infrastructure components — which is what the mechanical-noise filter in the scan encodes.
+Long tail: 140 distinct components for 456 notes. Notes cluster in the front end and in web-platform components, and are almost absent from build, test, and internal-infrastructure components — which is what the mechanical-noise filter in the scan encodes.
 
 ## The denominator (what does *not* get a note)
 
@@ -229,12 +234,12 @@ For each sampled version, every bug marked `fixed` for that version versus the n
 
 | Version | Bugs fixed | Notes | Rate |
 |---|---:|---:|---:|
-| 153.0 | 2,715 | 30 | 1.10% |
+| 153.0 | 2,719 | 30 | 1.10% |
 | 152.0 | 2,912 | 23 | 0.79% |
-| 151.0 | 2,512 | 29 | 1.15% |
+| 151.0 | 2,513 | 29 | 1.15% |
 | 150.0 | 2,446 | 26 | 1.06% |
 
-Aggregate: **108 notes out of 10,585 fixed bugs = 1.02%.**
+Aggregate: **108 notes out of 10,590 fixed bugs = 1.02%.**
 
 Highest note yield among components with at least 25 fixed bugs in the sampled versions (below that, one note reads as a huge percentage and means nothing):
 
@@ -244,6 +249,7 @@ Highest note yield among components with at least 25 fixed bugs in the sampled v
 | Toolkit :: General | 27 | 2 | 7.4% |
 | Firefox :: Profile Backup | 39 | 2 | 5.1% |
 | Firefox :: PDF Viewer | 90 | 4 | 4.4% |
+| Toolkit :: Form Autofill | 25 | 1 | 4.0% |
 | Core :: DOM: Web Authentication | 26 | 1 | 3.8% |
 | Core :: Graphics: Color Management | 28 | 1 | 3.6% |
 | Core :: Privacy: Anti-Tracking | 90 | 3 | 3.3% |
@@ -256,10 +262,9 @@ Highest note yield among components with at least 25 fixed bugs in the sampled v
 | DevTools :: Netmonitor | 42 | 1 | 2.4% |
 | DevTools :: General | 42 | 1 | 2.4% |
 | Release Engineering :: Release Automation | 45 | 1 | 2.2% |
-| Firefox :: Address Bar | 137 | 3 | 2.2% |
+| Firefox :: Address Bar | 136 | 3 | 2.2% |
 | Core :: Security: PSM | 47 | 1 | 2.1% |
 | Firefox :: Tabbed Browser | 49 | 1 | 2.0% |
-| WebExtensions :: General | 54 | 1 | 1.9% |
 
 And the opposite end — the busiest components that produced **no** notes at all across four releases. This is where an unfiltered scan burns most of its effort:
 
@@ -274,7 +279,7 @@ And the opposite end — the busiest components that produced **no** notes at al
 | Core :: SVG | 116 | 0 |
 | Firefox for Android :: Browser Engine | 113 | 0 |
 | Firefox for Android :: Experimentation and Telemetry | 110 | 0 |
-| Firefox Build System :: General | 106 | 0 |
+| Firefox Build System :: General | 107 | 0 |
 | Firefox for Android :: Privacy | 100 | 0 |
 | Firefox for Android :: Tabs | 96 | 0 |
 | Firefox Build System :: Task Configuration | 89 | 0 |
@@ -290,16 +295,16 @@ And the opposite end — the busiest components that produced **no** notes at al
 
 ## Observations that bear on discovery
 
-- **Bug numbers are recorded on 232 of 514 major-release notes (45%) versus 207 of 234 dot-release notes (88%).** Dot releases require bug links and mainline notes don't, which is exactly the gap you see. Nucleus keeps the bug number as a field even when the published note doesn't render a link — so this corpus can be joined to Bugzilla either way.
-- **37 notes are marked as progressive rollouts.** A gated or staged feature does get noted; being behind a rollout is not by itself a reason to hold a note, but it changes the wording.
-- **17 known-issue notes.** These recur across several versions, which is why per-release counting has to use note–release pairs rather than distinct notes.
+- **Bug numbers are recorded on 258 of 546 major-release notes (47%) versus 215 of 242 dot-release notes (89%).** Dot releases require bug links and mainline notes don't, which is exactly the gap you see. Nucleus keeps the bug number as a field even when the published note doesn't render a link — so this corpus can be joined to Bugzilla either way.
+- **38 notes are marked as progressive rollouts.** A gated or staged feature does get noted; being behind a rollout is not by itself a reason to hold a note, but it changes the wording.
+- **21 known-issue notes.** These recur across several versions, which is why per-release counting has to use note–release pairs rather than distinct notes.
 - **The `HTML5` tag is still in live use** alongside `Developer`, and is what renders as the *Web Platform* heading -- there is no `Web Platform` tag. Web-platform notes therefore appear under more than one tag historically, so match a product's established usage rather than normalizing. That is not licence to leave a note in the wrong one of the two: see the style guide for the engine-versus-DevTools split that decides it.
 
 ## Provenance
 
 - Source: `https://nucleus.mozilla.org/rna/notes/?format=json` and `https://nucleus.mozilla.org/rna/releases/?format=json` (public, unauthenticated).
 - Scope: product `Firefox`, channel `Release`, released on or after `2024-08-01`.
-- 82 releases in scope, 743 distinct public notes, 753 note–release pairs.
+- 84 releases in scope, 781 distinct public notes, 793 note–release pairs.
 - Bugzilla REST used for component lookup and fixed-bug denominators.
 - Generated by `scripts/relnotes/fetch-shipped-notes.py`; counts are as of the run date.
 

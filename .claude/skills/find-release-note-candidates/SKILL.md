@@ -64,10 +64,6 @@ section, and the zero-yield table before judging significance. Note that the `Fi
 is **actively moving** — the survey measures a roughly 4× rise over two years — so treat "fixes don't
 get mainline notes" as outdated.
 
-**One class the survey cannot calibrate: enterprise policies.** They were documented in a separate,
-separately maintained set of notes until August 2026, so the corpus reads as though they almost never
-earn one. See `calibration.md`; the corpus argues the wrong way here and nowhere else.
-
 ## Invoking the scripts
 
 **Copy the invocation form in the examples below exactly.** Written any other way, better than half
@@ -340,27 +336,6 @@ and no landing of their own. What survives all of those is **a handful** out of 
 that residue is where a **beta uplift** shows up: those commits live on the beta branch, so no scan of
 main can see them however wide the window.
 
-**And check the enterprise policies, which have their own external list:**
-
-```
-python3 scripts/relnotes/policy-changelog.py --version 153
-```
-
-The `mozilla/policy-templates` release for a version names the policies it added and changed, written
-independently of our funnel, so a policy in it that no candidate covered is a real miss. The
-descriptions are administrator-facing and are usable as drafting material. **It publishes with the
-release, not during the cycle**, so this runs after a version ships — asked about a version still on
-Nightly it says so and exits non-zero rather than reporting no policy changes. During the cycle the
-`[enterprise policy]` label on survivors is the coverage.
-
-`--list` shows every published template release and the Firefox version it covers, which is how to
-check whether a version has one yet. `--no-map` skips the per-policy bug lookup, the slow part.
-Each policy is mapped to a bug by two channels and the output says which was used: a commit under the
-policy directory that changed a line naming it, or a bug summary quoting it. **Both are scoped to the
-version**, because an established policy like `Homepage` or `Preferences` is named in bugs all over
-the tree; where that leaves more than one candidate the tool lists them rather than picking, and
-"no bug found" means look by hand, not that none exists.
-
 ### Cumulative passes
 
 Use `--cycle N` for the wider sweeps where notes have no daily granularity — feature rollups that
@@ -466,15 +441,9 @@ output** so the user can see the denominator.
 **Pass `--version N` for any historical window.** It defaults to the current Nightly, which checks
 the wrong `cf_status_firefox{N}` field entirely when you're scanning a past cycle.
 
-**`[enterprise policy]` on a survivor means treat it as a candidate class, not that it clears the
-bar.** Three channels, because each catches notes the others miss: the `Firefox :: Enterprise
-Policies` component; a summary or landing naming both "enterprise" and a policy (policy work often
-lands from the feature's own team — Web Serial, Data Sanitization and PSM each shipped one); and a
-landing under `browser/` or `toolkit/components/enterprisepolicies/`, the only channel that catches a
-bug worded entirely in the vocabulary of the feature it broke. The label does not filter or exempt
-anything — the funnel drops mechanical policy work exactly as it drops everything else — and it is a
-floor rather than a filter, so an unlabelled bug can still be one. `calibration.md` has the worked
-example of a bug only the path channel reached.
+**Enterprise policies are not part of this pass.** Firefox's notes carry a link to the separately
+maintained enterprise release notes rather than a copy, so there is nothing to discover here — see
+`calibration.md`, which records why a label for them was built and then removed.
 
 ### Validating against whattrainisitnow.com
 
@@ -681,11 +650,9 @@ From the nomination page, changes that belong in release notes:
 * **Important stability and security fixes**
 * Important system requirements changes (for example, end of support for an OS version)
 * **New locales**
-* **Enterprise policy changes** — added since Release Management absorbed these in August 2026: a
-  policy added, a policy gaining options, or a policy that stopped being enforced
 
-Three of these are easy to forget: system-requirements changes and new locales rarely look like
-"features" in a commit log, and policy work reads like plumbing. Watch for them.
+Two of these are easy to forget: system-requirements changes and new locales rarely look like
+"features" in a commit log. Watch for them.
 
 Note the tension with the calibration below: the criteria admit "important stability and security
 fixes", but in practice the bar is high — Release Management's working guidance is that crash and

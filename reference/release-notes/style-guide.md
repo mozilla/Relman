@@ -31,23 +31,6 @@ published note of the last two years.
   configurable) was skipped on exactly this basis.
 - **Developer / Web Platform notes are the exception to the plain-language rule**: that audience is
   developers, so these may be technical, reference APIs, and use inline `code` and MDN links.
-- **Enterprise notes are the other audience exception**: they are written for administrators of
-  managed deployments. Two things follow.
-  - **"Configurable rather than default" does not disqualify the note.** A new policy *is* the
-    deliverable for this audience, and its whole point is that an administrator sets it
-    deliberately. Say what the policy lets them control; don't ask what a user sees by default.
-  - **Name the policy when the note is that a policy was added**, because the name is what an
-    administrator will search for. The 155 submission is the form to copy: *"Added the
-    `DisableLaunchOnLogin` policy to control whether Firefox launches automatically when users log
-    in to Windows."* Naming it is not the preference-name problem — that rule is about sending a
-    general reader to `about:config`. For a note about a policy that **stopped working**, describe
-    the behaviour instead, which is what shipped: *"Fixed an issue where locking certain legacy
-    preferences no longer disabled the corresponding controls in Firefox Settings."*
-  - **Say so when the policy does not apply to ESR.** Managed deployments run ESR heavily, so
-    "applies to Firefox but not Firefox ESR" is load-bearing for this audience in a way it is not
-    for any other tag. The 155 note carries it as its own closing sentence: *"This policy does not
-    apply to Firefox ESR."*
-
 ## Wording and grammar
 
 - **Fixed** notes lead with a **past-tense verb**: "Fixed", "Removed", "Improved", "Updated".
@@ -115,15 +98,11 @@ published note of the last two years.
 - **Community** — contributor credits. Generated elsewhere (see below). Individual contributors are
   *occasionally* named inline in another tag's note (e.g. an experimental CSS property credited to
   its implementer). It is unusual enough to be worth querying, but it is not an error.
-- **Enterprise** — changes to how administrators manage Firefox: a policy added, a policy gaining
-  options, or a policy that stopped being enforced. **This tag changed meaning in August 2026.**
-  Until then it was almost always a single boilerplate link out to the separately maintained Firefox
-  for Enterprise release notes; those are no longer maintained, so the content that used to live
-  there is written here instead. **The corpus is therefore thin here and understates how often this
-  tag should now appear** — the survey excludes the old pointer notes, leaving only the few that were
-  hand-authored while the separate document existed. The two submitted for 155 (bugs 2001734 and
-  2056928) are the most current examples of the register; see the audience rules above.
-  `policy-changelog.py --version N` lists the policies a version actually changed.
+- **Enterprise** — one link out to the enterprise release notes, maintained separately at
+  [firefox-admin-docs.mozilla.org/release-notes](https://firefox-admin-docs.mozilla.org/release-notes/).
+  **Not ours to write, and not hunted for during the cycle.** Doing that was tried in August 2026 and
+  reverted on 2026-08-27: the content is referenced from too many places to live anywhere but one
+  canonical page. The only thing to check here is the link — see *Sections to skip*.
 
 ## Nightly release notes
 
@@ -190,9 +169,16 @@ Focus on user impact. If a workaround exists, give clear step-by-step instructio
 
 ## Sections to skip when reviewing
 
-**Enterprise is no longer one of them.** It was skipped while it held a link to a separately
-maintained document; it now holds real notes and gets reviewed like any other section.
-
+- **Enterprise** — one link out to the separately maintained enterprise release notes. No wording to
+  review, but **check the link before go-live**, and note that a plain link check is not enough:
+  - **It must be version-specific** — `…/release-notes/version/firefox-<N>/`, not the bare
+    `…/release-notes/` index. The index serves every version on one growing page led by the newest,
+    so a bare link read from an archived note leaves the reader hunting. Pinned links keep working:
+    pages stay published, currently back to Firefox 143.
+  - **The version in the URL must match the release under review.** This is the check that catches
+    something. A link left over from the previous release resolves perfectly well, because that
+    version's page is still live — so liveness alone would report it clean.
+  - **Then confirm it resolves.** An unpublished version 404s, which is what makes it checkable.
 - **Community contributions** — generated elsewhere, not hand-authored. Disregard entirely.
 - **Any empty section** — the draft is an intermediate staging document and empty sections don't
   carry over to the publishing system. Ignore them; don't flag them as needing to be cleared.

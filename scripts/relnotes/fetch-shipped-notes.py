@@ -80,13 +80,22 @@ STUB_RE = re.compile(r"^\s*reference link to\b", re.IGNORECASE)
 # either the significance bar or the phrasing analysis.
 SURVEY_PATH = "reference/release-notes/shipped-notes-survey.md"
 NON_AUTHORED_TAGS = {"Community"}
-# `Enterprise` used to be in that set, because nearly every note under it was one generated pointer
-# at the separately maintained Firefox for Enterprise notes. Those stopped being maintained in August
-# 2026 and Release Management writes these notes now, so the tag is hand-authored going forward and
-# excluding it would hide the only examples of the register. Excluding the *pointer text* instead
-# keeps the old boilerplate out and needs no further edit as real notes accumulate.
+# `Enterprise` is a pointer at the separately maintained enterprise release notes, not a note we
+# write -- so it must not calibrate the bar or the phrasing. The tag itself stays out of the set
+# above all the same, because a handful of genuinely hand-authored notes carry it (dot-release policy
+# fixes), and excluding the tag would drop those with the boilerplate.
+#
+# Matched by URL rather than by prose, because the prose is the unstable part: the pointer has been
+# reworded at least four times ("You can see more details in...", "See more details in...", "You can
+# find more information in...", "you can find information about policy updates"), and one 95.0
+# version carried no link at all. The URL is structural -- a pointer aims at the notes *index*, first
+# on SUMO and now at the canonical admin-docs page. A real note links the policy it describes under
+# `/reference/policies/<name>/`, which is why the path and not the host is what this matches. The
+# prose form is kept as a second alternative for a link-less pointer.
 ENTERPRISE_POINTER_RE = re.compile(
-    r"you can find information about policy updates", re.IGNORECASE)
+    r"support\.mozilla\.org/kb/firefox-enterprise-[\d.]+-release-notes"
+    r"|firefox-admin-docs\.mozilla\.org/release-notes"
+    r"|you can find information about policy updates", re.IGNORECASE)
 # The standing per-release catch-all. It ships in every major, so counting it
 # alongside real Fixed notes doubles the apparent Fixed-in-majors rate.
 BOILERPLATE_RE = re.compile(r"^(various\s+)?security fix", re.IGNORECASE)
