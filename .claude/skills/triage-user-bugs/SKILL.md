@@ -61,7 +61,11 @@ Per-bug, also note: a wrong bugbug auto-component, cross-links/See-Also, and whe
 
 ## Finding regressors
 
-**Regressor hunting is a first-class pass, not an afterthought — prioritize it whenever the bucket qualifies.** Run regressor discovery on **every** bug that lands in **CLEAR-FUNCTIONAL-REGRESSION**, **REGRESSION-FINDABLE**, and **VALID-NEW** — not just the `regressionwindow-wanted` set. For VALID-NEW the hunt doubles as a regression check: conclude "longstanding / not a regression" with git evidence when that's what the archaeology shows — don't force a candidate, but don't skip the check either (a bug mis-triaged as "longstanding" can hide a live regression with a trivial fix). **Skip** the minor buckets: DUPLICATE, INVALID/WORKSFORME, NEEDS-INFO, FEATURE-REQUEST, and out-of-scope (for a DUPLICATE, only validate an already-set `regressed_by`; NEEDS-INFO by definition lacks the signal to hunt). Priority order: shipped-channel CLEAR-FUNCTIONAL-REGRESSION first, then REGRESSION-FINDABLE, then VALID-NEW. **Do the code archaeology — do not default to recommending a mozregression range.** Only fall back to mozregression when archaeology is genuinely blocked, and then state the specific reason and the narrowest range.
+**Regressor hunting is a first-class pass, not an afterthought — prioritize it whenever the bucket qualifies.** Run regressor discovery on **every** bug that lands in **CLEAR-FUNCTIONAL-REGRESSION**, **REGRESSION-FINDABLE**, and **VALID-NEW** — not just the `regressionwindow-wanted` set. For VALID-NEW the hunt doubles as a regression check: conclude "longstanding / not a regression" with git evidence when that's what the archaeology shows — don't force a candidate, but don't skip the check either (a bug mis-triaged as "longstanding" can hide a live regression with a trivial fix). **Skip** the minor buckets: INVALID/WORKSFORME, NEEDS-INFO, FEATURE-REQUEST, and out-of-scope (NEEDS-INFO by definition lacks the signal to hunt).
+
+**DUPLICATE is conditional — this is the easy one to get wrong.** Skip the hunt only when duping really is the *only* action left, i.e. the dup target already has a `regressed_by` (then just validate it, per step 1 below). If **neither the duplicate nor its target has a regressor**, run the full hunt on the target. Closing a bug forward without doing so buries a findable regressor, and the newer duplicate is often the better-evidenced report — a second reporter usually adds the boundary, testcase, or partial-failure detail that makes the archaeology possible in the first place.
+
+Priority order: shipped-channel CLEAR-FUNCTIONAL-REGRESSION first, then REGRESSION-FINDABLE, then VALID-NEW, then regressor-less DUPLICATE pairs. **Do the code archaeology — do not default to recommending a mozregression range.** Only fall back to mozregression when archaeology is genuinely blocked, and then state the specific reason and the narrowest range.
 
 Attempt discovery in this order — don't jump straight to "needs a mozregression range":
 
@@ -75,6 +79,26 @@ Attempt discovery in this order — don't jump straight to "needs a mozregressio
    - For dot-release regressions, diff the two release tags directly (e.g. `FIREFOX_152_0_1_RELEASE..FIREFOX_152_0_2_RELEASE`) — those ranges are small (tens of commits) and often pinpoint it.
 
 3. **Otherwise — recommend a mozregression range from the reporter, and say why** code archaeology wasn't viable (vague boundary like "a few weeks ago" with no version, no reproducible STR, or no identifiable subsystem). mozregression (download-and-bisect builds against a live repro) is the fallback, not the first resort.
+
+### Deep-dive every candidate before you name it
+
+A candidate is a hypothesis until it survives this. **Do not report a regressor candidate without working the whole list** — a plausible-looking candidate that turns out wrong is worse than "no regressor found," because someone will set `regressed_by` on it and stop looking. Run all seven:
+
+1. **Prove version timing by tag containment, not by arithmetic.** `git merge-base --is-ancestor <commit> FIREFOX_<ver>_RELEASE` against the version the bug was reported against, plus the tag *before* it. Do not infer the shipping version from the landing date and the merge calendar — that reasoning is wrong often enough to matter (a candidate that looks like it landed one cycle late can be in the release tag anyway). Also read `target_milestone` / `cf_status_firefoxNN` on the candidate bug itself and reconcile the two; if they disagree, containment wins and say so.
+
+2. **Read the pre-patch state, not just the diff.** `git show <commit>^:<path>` and compare against current. The claim you need is "before this, X happened; after, Y happens" — a commit merely *touching* the implicated area is not evidence. This is the single highest-value step; it is what separates a real mechanism from area pattern-matching.
+
+3. **Make the mechanism explain every observation, including the ones that work.** A reporter who says "A fails, B works, C works" has handed you three constraints. A candidate that explains only the failure is weak; one that explains all three is strong. If any reported-working case contradicts your mechanism, the mechanism is wrong — say so rather than filing off the corner.
+
+4. **Mine the candidate's own `regressions` list and follow-up bugs.** If the candidate already caused a same-symptom-family regression, that is the strongest corroboration available, and it often hands you a fix that already exists. Check whether that fix is on other branches — it changes the recommendation from "needs a fix" to "needs an uplift decision," which is a different and more urgent action.
+
+5. **Confirm the mechanism is live in the affected build.** Check any gating pref's value *in that version's tree* (`git show FIREFOX_<ver>_RELEASE:modules/libpref/init/StaticPrefList.yaml`), plus Nimbus/XPI gating where relevant. A mechanism behind a pref that is off in the shipped build cannot be the cause.
+
+6. **Try to falsify it.** Name the check that would disprove your candidate and run it. Expect to discard hypotheses at this step — a reverted commit in a dot-release diff that merely *sounds* related, or a mechanism whose code path turns out never to be reached. Retract cleanly in the output; a corrected mechanism is a result, not a failure.
+
+7. **State the residual gap and the one cheap test that closes it.** If you cannot verify end-to-end from code (no build, behavior only observable at runtime), say exactly what is unverified, then name the narrowest decisive test — usually two specific adjacent versions bracketing the candidate's landing (`N-1` vs `N`), or a currently-downloadable ESR that predates it. That beats a blind mozregression range and is a far better ask of a reporter.
+
+Only after all seven: report it as `candidate`. Reserve `validated` for a candidate that already had `regressed_by` set and passed steps 1–5, or one where the mechanism is confirmed end-to-end. Never write to Bugzilla either way.
 
 `searchfox-cli` may not be installed in every environment; if it isn't, use a current local checkout with narrow `rg` / `git log` and note the constraint.
 
@@ -90,19 +114,37 @@ This is the "tell me like the last chemspill" signal (e.g. the 152.0.2 newtab/l1
 
 ## Execution model (adaptive)
 
-Two passes: **(1) classify**, then **(2) hunt regressors** on the CLEAR-FUNCTIONAL-REGRESSION / REGRESSION-FINDABLE / VALID-NEW buckets (see Finding regressors → prioritize the hunt). Pass 2 is not optional when qualifying bugs exist.
+Two passes: **(1) classify**, then **(2) hunt regressors** on the CLEAR-FUNCTIONAL-REGRESSION / REGRESSION-FINDABLE / VALID-NEW buckets, plus any DUPLICATE pair where neither bug has a regressor (see Finding regressors → prioritize the hunt). Pass 2 is not optional when qualifying bugs exist.
 
 - **Small list (≲ 15 bugs):** classify inline one bug at a time, then hunt regressors on the qualifying buckets.
-- **Larger list:** fan out parallel subagents in batches (e.g. ~7–8 bugs each) for pass 1. For pass 2, fan out one focused regressor-hunt subagent per qualifying bug (or small groups of related bugs), each instructed to do archaeology first and label any candidate "candidate." Give every subagent the freshness + version-timing guardrails verbatim. Then synthesize.
+- **Larger list:** fan out parallel subagents in batches (e.g. ~7–8 bugs each) for pass 1. For pass 2, fan out one focused regressor-hunt subagent per qualifying bug (or small groups of related bugs), each instructed to do archaeology first and label any candidate "candidate." Give every subagent the freshness + version-timing guardrails **and the seven-step candidate deep dive** verbatim — a subagent that returns a candidate without the deep-dive evidence has not finished, so send it back rather than relaying an unverified candidate. Then synthesize.
+
+When synthesizing, spot-check any candidate you intend to relay, especially one that contradicts a hypothesis already posted on the bug: re-run steps 1 and 2 yourself. Subagents report plausible-sounding candidates confidently; the containment test and the pre-patch read are cheap enough to repeat and are what catch it.
 
 Dedupe across the two sources before assigning batches (a bug can be in both).
 
 ## Output
 
-Lead with escalations, then group by bucket. Per bug, one tight line:
-`<id> [BUCKET] <product::component>` + one-line reason + dup#/regressor (validated? candidate?) + ESCALATE marker if applicable.
+Group by **topic** — Escalations first, then one section per bucket. Under each topic, a table with exactly three columns and one row per bug. Nothing else per bug.
 
-Close with a short methodology note: the exact query window, the **UNCONFIRMED-proxy disclaimer**, which lookups used the MCP vs REST, freshness basis (checkout HEAD/searchfox), and anything you could not determine (and why). Keep it scannable — this is a working queue, not an essay.
+| Bug # | Regressor candidate | Explanation |
+|---|---|---|
+| 2071835 | bug 1859385 — candidate | Explicit `border-color` on a pseudo-element of a visited link collapses to `currentColor`. Fix exists in 157 only; wontfix on 155 and 156. Reconsider the 156 uplift before it ships. |
+| 2071749 | none — longstanding | `filter: blur()` dropped at exactly `0.5turn`/`scale:-1`; the predicate that misclassifies it is unchanged since 2021. |
+
+Column rules:
+
+- **Bug #** — the id alone. Add the bucket in brackets only when the section isn't bucket-named (e.g. under Escalations).
+- **Regressor candidate** — a bug number plus `candidate` or `validated`, or one of `none — longstanding` / `none — blocked (reason)` / `n/a`. Never assert a candidate as certain.
+- **Explanation** — one to three sentences: why it's in this bucket, the mechanism if found, and the recommended action. This column absorbs the dup number, the component move, and the escalation reason — do not give any of them their own column or line.
+
+**Do not** put per-bug component inventories, See-Also lists, evidence rundowns, or drafted comments in the tables. If there are needinfo drafts or component moves to apply, collect them in one short section after the tables — drafts verbatim, moves as a single list of `id → component`.
+
+Close with a brief methodology note: the exact query window, the **UNCONFIRMED-proxy disclaimer**, MCP vs REST, freshness basis (checkout HEAD/searchfox), and anything you could not determine (and why). A few lines, not a section per item.
+
+**Regressor deep dives** get their own section after the tables — one short block per candidate, and only for bugs where a candidate was actually named. Each block: the candidate, the before/after mechanism in a sentence or two, the containment result, the corroboration, and the residual gap plus the decisive test. Keep it to a handful of lines each; the table row stays a one-cell summary that points here. This keeps the queue scannable while leaving the verification auditable — the evidence is the reason anyone should trust the candidate, so it cannot be dropped, but it does not belong inline.
+
+Keep the whole report scannable — this is a working queue, not an essay. Nothing else earns more than its row unless the user asks for it.
 
 ## Mozilla context cheatsheet
 
