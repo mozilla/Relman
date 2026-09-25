@@ -30,6 +30,7 @@ Usage:
 import argparse
 import collections
 import json
+import posixpath
 import re
 import sys
 from pathlib import Path
@@ -972,6 +973,267 @@ def near_names(name: str, table, limit: int = 5) -> list[str]:
     return sorted(best, key=lambda c: best[c])[:limit]
 
 
+FENIX_FML = "mobile/android/fenix/app/nimbus.fml.yaml"
+FML_NOTE = ("tree defaults only: a Nimbus experiment or rollout can override these, and whether one "
+            "is live is an Experimenter question")
+
+
+def _fml_scalar(v: str) -> str:
+    v = re.sub(r"\s+#.*$", "", v).strip().rstrip(",")
+    if v[:1] in "{[" or v in ("", ">", "|", ">-", "|-"):
+        return "<complex>"
+    return v[1:-1] if len(v) > 1 and v[0] == v[-1] and v[0] in "\"'" else v
+
+
+def _fml_lines(text: str) -> list[tuple[int, str]]:
+    """(indent, text) for every line that carries content; blank and comment-only lines dropped."""
+    out = []
+    for raw in text.splitlines():
+        s = raw.strip()
+        if s and not s.startswith("#") and s != "---":
+            out.append((len(raw) - len(raw.lstrip(" ")), s))
+    return out
+
+
+def _fml_children(lines, i: int) -> tuple[int, int]:
+    """[start, end) of the lines nested under lines[i]."""
+    j = i + 1
+    while j < len(lines) and lines[j][0] > lines[i][0]:
+        j += 1
+    return i + 1, j
+
+
+def _fml_keys(lines, start: int, end: int) -> dict[str, int]:
+    """{key: line index} for the mapping keys directly inside [start, end)."""
+    if start >= end:
+        return {}
+    ind = lines[start][0]
+    out = {}
+    for k in range(start, end):
+        m = re.match(r"^([\w.-]+|\"[^\"]+\"):(\s|$)", lines[k][1])
+        if lines[k][0] == ind and m:
+            out.setdefault(m.group(1).strip('"'), k)
+    return out
+
+
+def _fml_flow_map(text: str) -> dict[str, str]:
+    """Top-level `key: scalar` pairs of a `{...}` flow map; nested values become <complex>."""
+    body, parts, depth, quote, cur = text.strip()[1:-1], [], 0, None, ""
+    for ch in body:
+        if quote:
+            quote = None if ch == quote else quote
+        elif ch in "\"'":
+            quote = ch
+        elif ch in "{[":
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append(cur)
+            cur = ""
+            continue
+        cur += ch
+    parts.append(cur)
+    out = {}
+    for part in parts:
+        if ":" in part:
+            k, v = part.split(":", 1)
+            out[k.strip().strip("\"'")] = _fml_scalar(v)
+    return out
+
+
+def _fml_value(lines, k: int, end: int) -> dict[str, str]:
+    """The `value:` of a defaults entry at line k, inline flow map or nested block mapping."""
+    inline = lines[k][1].split(":", 1)[1].strip()
+    start, stop = _fml_children(lines, k)
+    stop = min(stop, end)
+    if inline.startswith("{"):
+        text, j = inline, start
+        while text.count("{") > text.count("}") and j < stop:
+            text += " " + lines[j][1]
+            j += 1
+        return _fml_flow_map(text)
+    return {key: _fml_scalar(lines[ln][1].split(":", 1)[1])
+            for key, ln in _fml_keys(lines, start, stop).items()}
+
+
+def _fml_entries(lines, start: int, end: int) -> list[tuple[list[str] | None, dict[str, str]]]:
+    """A defaults list: [(channels or None for every channel, {variable: value})], in file order."""
+    out = []
+    items = [k for k in range(start, end)
+             if lines[k][1].startswith("- ") and lines[k][0] == lines[start][0]]
+    for n, k in enumerate(items):
+        stop = items[n + 1] if n + 1 < len(items) else end
+        # The item's first key sits on the dash line; re-indent it so it reads as a sibling.
+        sub = [(lines[k][0] + 2, lines[k][1][2:])] + lines[k + 1:stop]
+        keys = _fml_keys(sub, 0, len(sub))
+        chans = None
+        if "channel" in keys:
+            chans = [_fml_scalar(sub[keys["channel"]][1].split(":", 1)[1])]
+        elif "channels" in keys:
+            ln = keys["channels"]
+            inline = sub[ln][1].split(":", 1)[1].strip()
+            if inline.startswith("["):
+                chans = [c.strip().strip("\"'") for c in inline[1:-1].split(",") if c.strip()]
+            else:
+                cs, ce = _fml_children(sub, ln)
+                chans = [s[2:].strip() for _, s in sub[cs:ce] if s.startswith("- ")]
+        out.append((chans, _fml_value(sub, keys["value"], len(sub)) if "value" in keys else {}))
+    return out
+
+
+def _fml_features(text: str) -> tuple[dict, dict, list]:
+    """(features, top-level keys, lines) where features is {name: {"vars": {v: (type, default)},
+    "entries": [...]}} for the `features:` block of one manifest."""
+    lines = _fml_lines(text)
+    top = _fml_keys(lines, 0, len(lines))
+    feats = {}
+    if "features" in top:
+        fs, fe = _fml_children(lines, top["features"])
+        for name, ln in _fml_keys(lines, fs, fe).items():
+            cs, ce = _fml_children(lines, ln)
+            keys = _fml_keys(lines, cs, ce)
+            vars_ = {}
+            if "variables" in keys:
+                vs, ve = _fml_children(lines, keys["variables"])
+                for var, vl in _fml_keys(lines, vs, ve).items():
+                    ps, pe = _fml_children(lines, vl)
+                    props = _fml_keys(lines, ps, pe)
+                    typ = (lines[props["type"]][1].split(":", 1)[1].strip()
+                           if "type" in props else "?")
+                    dflt = (_fml_scalar(lines[props["default"]][1].split(":", 1)[1])
+                            if "default" in props else "<complex>")
+                    vars_[var] = (typ, dflt)
+            entries = []
+            if "defaults" in keys:
+                es, ee = _fml_children(lines, keys["defaults"])
+                entries = _fml_entries(lines, es, ee)
+            feats[name] = {"vars": vars_, "entries": entries}
+    return feats, top, lines
+
+
+def _apply(values: dict, entries, channel: str) -> dict:
+    out = dict(values)
+    for chans, vals in entries:
+        if chans is None or channel in chans:
+            out.update({k: v for k, v in vals.items() if k in out})
+    return out
+
+
+def fml_lookup(repo: Path, rev: str, names: list[str]) -> list[dict]:
+    """Per-channel defaults of Fenix Nimbus features, in the same result shape as --lookup.
+
+    Reads what gating.md sends a pass to read by hand: a feature's variable defaults in
+    `nimbus.fml.yaml` (and the manifests it includes), then each `defaults:` entry for the channel
+    in file order -- and, for a feature defined in an android-components manifest, that manifest's
+    defaults for the channel the app imports it at, then the app's own overrides. A targeted reader
+    rather than a YAML parser, because the scripts are stdlib-only; values it cannot read as one
+    scalar (maps, lists) are reported as <complex> rather than guessed.
+    """
+    app_text = show(repo, rev, FENIX_FML)
+    feats, top, lines = _fml_features(app_text)
+    origin = {n: FENIX_FML for n in feats}
+    base_dir = FENIX_FML.rsplit("/", 1)[0]
+    channels = []
+    if "channels" in top:
+        cs, ce = _fml_children(lines, top["channels"])
+        channels = [s[2:].strip() for _, s in lines[cs:ce] if s.startswith("- ")]
+    if "includes" in top:
+        cs, ce = _fml_children(lines, top["includes"])
+        for _, s in lines[cs:ce]:
+            if s.startswith("- "):
+                path = f"{base_dir}/{s[2:].strip()}"
+                inc = _fml_features(show_optional(repo, rev, path) or "")[0]
+                feats.update(inc)
+                origin.update({n: path for n in inc})
+    imported = {}   # name -> (path, import channel, app overrides)
+    if "import" in top:
+        cs, ce = _fml_children(lines, top["import"])
+        items = [k for k in range(cs, ce) if lines[k][1].startswith("- ")
+                 and lines[k][0] == lines[cs][0]]
+        for n, k in enumerate(items):
+            stop = items[n + 1] if n + 1 < len(items) else ce
+            sub = [(lines[k][0] + 2, lines[k][1][2:])] + lines[k + 1:stop]
+            keys = _fml_keys(sub, 0, len(sub))
+            rel = _fml_scalar(sub[keys["path"]][1].split(":", 1)[1])
+            path = posixpath.normpath(f"{base_dir}/{rel}")
+            chan = _fml_scalar(sub[keys["channel"]][1].split(":", 1)[1]) if "channel" in keys else ""
+            overrides = {}
+            if "features" in keys:
+                fs, fe = _fml_children(sub, keys["features"])
+                for fname, fl in _fml_keys(sub, fs, fe).items():
+                    es, ee = _fml_children(sub, fl)
+                    overrides[fname] = _fml_entries(sub, es, ee)
+            for fname, spec in _fml_features(show_optional(repo, rev, path) or "")[0].items():
+                imported[fname] = (path, chan, spec, overrides.get(fname, []))
+
+    results = []
+    for name in names:
+        if name in feats:
+            spec, extra, src, fixed = feats[name], [], origin[name], None
+        elif name in imported:
+            src, chan, spec, extra = imported[name]
+            fixed = chan
+        else:
+            known = sorted(set(feats) | set(imported))
+            last = git(repo, "log", "-1", "--format=%h %cs %s", "-S", f"{name}:", rev, "--",
+                       "mobile/android/*.fml.yaml").strip()
+            results.append({"pref": f"fml:{name}", "found": False, "written_at": [],
+                            "near": [k for k in known if _shares_any(name, k)][:5],
+                            "last_change": last})
+            continue
+        base = {v: d for v, (_t, d) in spec["vars"].items()}
+        if fixed is not None:
+            # An imported manifest is read at one of its own channels for every app channel.
+            base = _apply(base, spec["entries"], fixed)
+        values, summary, per = {}, [], {}
+        for ch in channels:
+            per[ch] = _apply(_apply(base, [] if fixed is not None else spec["entries"], ch),
+                             extra, ch)
+            for v, val in per[ch].items():
+                values[f"{ch}/{v}"] = val
+        for v, (typ, _d) in spec["vars"].items():
+            if typ != "Boolean":
+                continue
+            on = [ch for ch in channels if per[ch].get(v) == "true"]
+            summary.append(f"{v}: " + ("on everywhere" if len(on) == len(channels) else
+                                       "off on all channels" if not on else
+                                       f"on in {', '.join(on)} only"))
+        results.append({"pref": f"fml:{name}", "found": True, "unresolved_define": [],
+                        "summary": "; ".join(summary) or "no Boolean variables; see values",
+                        "meta": {"source": src + (f" (imported at channel {fixed})" if fixed else "")},
+                        "values": values})
+    return results
+
+
+def _shares_any(name: str, cand: str) -> bool:
+    words = {w for w in name.split("-") if len(w) > 2} - {"enabled", "feature"}
+    return bool(words & set(cand.split("-")))
+
+
+def print_fml(results: list[dict], rev: str) -> None:
+    for r in results:
+        if not r["found"]:
+            print(f"{r['pref']}: NOT FOUND in the Fenix manifests at {rev}")
+            if r["last_change"]:
+                # The usual reason a gate disappears is that the feature shipped and its flag was
+                # deleted -- bug 2069046 removed media-notification-improvements that way.
+                print(f"  last commit that added or removed this name: {r['last_change']}")
+                print("  a removed flag usually means the feature shipped unconditionally or was "
+                      "taken out; read that commit")
+            else:
+                print("  no FML file has ever named it; check the spelling")
+            if r["near"]:
+                print(f"  features with a shared word: {', '.join(r['near'])}")
+            continue
+        print(r["pref"])
+        print(f"  {r['summary']}")
+        print(f"  source: {r['meta']['source']}")
+        for k, v in r["values"].items():
+            print(f"    {k:<32} {v}")
+        print(f"  ({FML_NOTE})")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description="Detect preference flips and resolve effective defaults per channel."
@@ -984,6 +1246,9 @@ def main() -> None:
     p.add_argument("--range", dest="rev_range", default=None, help="explicit START..END")
     p.add_argument("--lookup", default=None,
                    help="comma-separated preference names to resolve (skips flip detection)")
+    p.add_argument("--fml", default=None,
+                   help="comma-separated Fenix Nimbus feature names to resolve per channel from "
+                        "nimbus.fml.yaml (skips flip detection; combines with --lookup)")
     p.add_argument("--no-fetch", action="store_true", help="skip git fetch origin")
     p.add_argument("--channels", default="nightly,beta-early,beta-late,release")
     p.add_argument("--platforms", default="win,mac,linux,android",
@@ -999,15 +1264,31 @@ def main() -> None:
     platforms = [x.strip() for x in args.platforms.split(",") if x.strip() in PLATFORMS]
 
     if not args.no_fetch:
+        # Throttled, unlike scan-window's fetch: a window end can be a build newer than the last
+        # fetch, but a default read from an upstream ref at most two hours old is still current
+        # for a branch that moves a few times a day, and this is the call a pass repeats.
         trainlib.fetch_origin(repo, remote=trainlib.gecko_remote(),
                               consequence="Defaults below are resolved from a possibly stale "
-                                    f"{args.rev}; do not label them verified.")
+                                    f"{args.rev}; do not label them verified.",
+                              max_age=trainlib.GECKO_FETCH_MAX_AGE)
+
+    fml_res = (fml_lookup(repo, args.rev, [n.strip() for n in args.fml.split(",") if n.strip()])
+               if args.fml else [])
+    if args.fml and not args.lookup:
+        # No preference asked about, so skip resolving the preference files at all.
+        if args.format == "json":
+            print(json.dumps(fml_res, indent=2))
+        else:
+            print_fml(fml_res, args.rev)
+        return
 
     print(f"# resolving defaults from {args.rev}", file=sys.stderr)
     eff = effective_defaults(repo, args.rev, channels, platforms)
     print(f"# {len(eff['table'])} preferences resolved across "
           f"{len(channels)}x{len(platforms)} build configurations", file=sys.stderr)
-    if _UNRESOLVED:
+    # A lookup prints its own "DEFAULT IS A GUESS" on each result the warning would name, so the
+    # tree-wide list only repeated ~16 lines of preferences nobody asked about on every call.
+    if _UNRESOLVED and not args.lookup:
         # Louder than the parse-failure warning below, because these answers *look* fine. Each of
         # these preferences was read out of one branch of a guard whose condition depends on a build
         # define this evaluator does not model, so the printed default is whichever branch happened
@@ -1063,8 +1344,9 @@ def main() -> None:
                 "values": {f"{c}/{p}": vals.get((c, p)) for c in channels for p in platforms},
             })
         if args.format == "json":
-            print(json.dumps(results, indent=2))
+            print(json.dumps(results + fml_res, indent=2))
         else:
+            print_fml(fml_res, args.rev)
             for r in results:
                 if not r["found"]:
                     if r["written_at"]:

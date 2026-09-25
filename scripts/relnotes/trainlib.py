@@ -267,8 +267,16 @@ def detect_gecko_upstream(repo: Path) -> tuple[str, str]:
     return "", f"no remote has a resolvable main ({named})"
 
 
+# How recently a successful Gecko fetch lets pref-delta skip the next one. firefox-main moves only a
+# handful of times a day, while one pass fetched it from every standalone --lookup, --fml, --gate
+# and `gates`. A timer rather than once per session because a session can run all day.
+# RELMAN_FETCH_MAX_AGE (seconds) overrides; 0 always fetches. scan-window does not use it.
+GECKO_FETCH_MAX_AGE = int(os.environ.get("RELMAN_FETCH_MAX_AGE", 2 * 3600))
+FETCH_STAMPS = CACHE_DIR / "fetch-stamps.json"
+
+
 def fetch_origin(repo: Path, consequence: str, timeout: int | None = None,
-                 remote: str = "origin") -> bool:
+                 remote: str = "origin", max_age: int = 0) -> bool:
     """Update the mirror, saying so if it failed. True when the mirror is current.
 
     A failed fetch used to be discarded, which left every downstream answer describing a stale tree
@@ -286,7 +294,21 @@ def fetch_origin(repo: Path, consequence: str, timeout: int | None = None,
     rather than the point -- offline or off-VPN, an unreachable remote would otherwise hang them.
     It defaults off because a legitimate Gecko fetch can take minutes and cutting one short would
     turn a slow answer into a wrong one.
+
+    `max_age` skips the fetch when this repo and remote were fetched successfully within that many
+    seconds, and says so; only successful fetches are recorded, so a failure is retried next call.
+    The Relman checkout never passes it: noticing that someone changed the skills is its purpose.
     """
+    key = f"{Path(repo).resolve()}::{remote}"
+    try:
+        stamps = json.loads(FETCH_STAMPS.read_text())
+    except (OSError, ValueError):
+        stamps = {}
+    age = time.time() - stamps.get(key, 0)
+    if max_age and age < max_age:
+        print(f"# {remote} fetched {int(age // 60)} min ago; not fetching again "
+              f"(RELMAN_FETCH_MAX_AGE={max_age}s)", file=sys.stderr)
+        return True
     print(f"# fetching {remote}...", file=sys.stderr)
     try:
         r = subprocess.run(["git", "-C", str(repo), "fetch", "--quiet", remote],
@@ -296,6 +318,9 @@ def fetch_origin(repo: Path, consequence: str, timeout: int | None = None,
               f"{remote}. {consequence}", file=sys.stderr)
         return False
     if r.returncode == 0:
+        stamps[key] = time.time()
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        write_json_atomic(FETCH_STAMPS, stamps)
         return True
     sys.stderr.write(r.stderr)
     print(f"# WARNING: git fetch exited {r.returncode}, so the mirror may be behind {remote}. "

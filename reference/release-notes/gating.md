@@ -7,7 +7,9 @@ to be fully off on every channel before now — including Nightly.
 **Every lookup in this file must read from `origin/main`, never the working tree.** Use
 `git show origin/main:<path>`. The working tree is routinely on another branch or days behind, and
 will report pre-landing defaults. See the freshness rules in
-[`bugzilla-access.md`](bugzilla-access.md).
+[`bugzilla-access.md`](bugzilla-access.md). `pref-delta.py` refreshes that ref at most every two
+hours and prints a line when it skips the fetch; `RELMAN_FETCH_MAX_AGE=0` forces one, for a flip you
+know landed in the last couple of hours.
 
 Sort every candidate into one of three states:
 
@@ -193,6 +195,15 @@ Three mechanisms, in this order:
    Live on Nightly and Beta, off on Release. That is not "hold until it ships" — it is a `nightly+`
    candidate now, with the mainline note waiting for the release flip. Reporting it as a plain `New`
    note for the current version would have been wrong in both directions.
+
+   **Resolve it with `pref-delta.py --fml <feature>` rather than reading the file.** It applies the
+   variable defaults and every `defaults:` entry per channel, including the manifests
+   `nimbus.fml.yaml` includes and the android-components manifests it imports with their
+   app-level overrides, and prints `on in beta, nightly only` style verdicts. When the feature is
+   gone it names the last commit that touched the name, which is how a shipped feature whose flag
+   was deleted shows up (bug 2069046 removed `media-notification-improvements` above). It reads
+   tree defaults only; a live Nimbus rollout is still an Experimenter question. Focus's manifest is
+   not covered.
 
 Worked example: `security.pki.certificate_transparency.mode` carried a platform/channel condition in
 StaticPrefList while Certificate Transparency had already shipped to Android release separately — see

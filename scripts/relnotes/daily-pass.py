@@ -453,18 +453,27 @@ def main() -> None:
         watchlist.print_gate_report(rep)
         print()
     if standing:
-        print("STANDING WATCHLIST (not in this window; re-surface when the gate flips):")
+        # One line each: these are reminders, re-read on every pass, and full summaries of several
+        # hundred characters made this the largest section of the report. The cut is marked.
+        print("STANDING WATCHLIST (not in this window; re-surface when the gate flips; "
+              "`watchlist.py list -v` has the full notes):")
         for k, it in sorted(standing.items()):
             flag = "  <-- GATE MOVED, see above" if k in moved else ""
-            print(f"  {k}: [{it.get('status','?')}] Fx{it.get('release','?')} "
-                  f"{it.get('summary','')}{flag}")
+            s = " ".join(it.get("summary", "").split())
+            s = s if len(s) <= 110 else s[:110] + " [...]"
+            print(f"  {k}: [{it.get('status','?')}] Fx{it.get('release','?')} {s}{flag}")
         print()
 
     if r4.returncode != 0:
         print(f"FEATURE CLUSTERS UNAVAILABLE -- bug-tree exited {r4.returncode}. This is not "
               "'no feature clusters'; the survivors were never clustered.")
     else:
-        print(r4.stdout.rstrip() or "No feature clusters.")
+        # A pointer, not a copy: the full listing is clusters.txt, and embedding it here meant a
+        # pass reading both files read the same several hundred lines twice.
+        head = next((ln for ln in r4.stdout.splitlines() if "clusters (min" in ln),
+                    "clusters computed")
+        print(f"FEATURE CLUSTERS: {head.strip()} -- read {outdir}/clusters.txt, whose header also "
+              "lists what bug-tree declined to cluster")
     print()
     print("BUGZILLA LINKS (open them all at once):")
     if survivors:

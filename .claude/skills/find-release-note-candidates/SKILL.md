@@ -409,7 +409,8 @@ daily report still listed them as gated. `--gate` resolves the preference on the
 name is refused, with the nearest real names) and stores its per-channel defaults; every
 `daily-pass` then re-resolves them and reports `CHANGED`, `GONE` or `UNKNOWN` until someone acts:
 `--gate` again re-records a changed one, `--drop-gate <pref>` retires a gone or unknown one. A
-gate that is not a preference (an FML block, a hardcoded getter, a meta bug) still goes in the note.
+Fenix Nimbus feature is recorded the same way as `--gate fml:<feature>`. A gate that is neither (a
+hardcoded getter, a meta bug) still goes in the note.
 
 **`rm` deletes the entry and everything recorded on it**, with no confirmation and nothing to undo:
 its summary, its `--note` trail and its due date all go. The watchlist is per-user, so that history

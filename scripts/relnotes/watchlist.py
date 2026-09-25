@@ -140,7 +140,13 @@ def resolve_prefs(names: list[str], fetch: bool = True,
     Through pref-delta rather than a second parser, so a recorded gate and a `--lookup` by hand
     can never disagree about what the same preference defaults to.
     """
-    cmd = [sys.executable, str(PREF_DELTA), "--lookup", ",".join(names), "--format", "json"]
+    prefs = [n for n in names if not n.startswith("fml:")]
+    fmls = [n[4:] for n in names if n.startswith("fml:")]
+    cmd = [sys.executable, str(PREF_DELTA), "--format", "json"]
+    if prefs:
+        cmd += ["--lookup", ",".join(prefs)]
+    if fmls:
+        cmd += ["--fml", ",".join(fmls)]
     if not fetch:
         cmd.append("--no-fetch")
     if repo:
@@ -163,7 +169,13 @@ def gate_record(res: dict) -> dict:
 
 
 def gate_caveat(rec: dict) -> str:
-    return f"  (GUESS: behind {', '.join(rec['guess'])})" if rec.get("guess") else ""
+    bits = []
+    if rec.get("guess"):
+        bits.append(f"GUESS: behind {', '.join(rec['guess'])}")
+    blind = sorted({k.split("/", 1)[1] for k, v in rec["values"].items() if v == "<complex>"})
+    if blind:
+        bits.append(f"NOT COMPARED: {', '.join(blind)} (map/list values; changes there go unseen)")
+    return "".join(f"  ({b})" for b in bits)
 
 
 def release_on(values: dict) -> bool:
@@ -196,7 +208,8 @@ def check_gates(data: dict, fetch: bool = True, repo: Path | None = None) -> dic
         row = {"release": rel, "key": key, "pref": pref, "was": rec["state"],
                "recorded": rec.get("recorded", "?")}
         if not res["found"]:
-            out["unresolvable" if res.get("written_at") else "gone"].append(row)
+            out["unresolvable" if res.get("written_at") else "gone"].append(
+                {**row, "last_change": res.get("last_change", "")})
         elif res["values"] != rec["values"]:
             out["changed"].append({**row, "now": res["summary"],
                                    "release_on": release_on(res["values"])
@@ -222,9 +235,11 @@ def print_gate_report(rep: dict) -> None:
         print(f"           was ({row['recorded']}): {row['was']}")
         print(f"           now: {row['now']}")
     for row in rep["gone"]:
+        where = (f"last touched by {row['last_change']}" if row.get("last_change")
+                 else "find which with git log -S on the name")
         print(f"  GONE     Fx{row['release']} {row['key']}: {row['pref']} is no longer in the tree. "
               "The gate was removed, so the feature has shipped unconditionally or been taken "
-              "out; find which with git log -S on the preference name.")
+              f"out; {where}.")
     for row in rep["unresolvable"]:
         print(f"  UNKNOWN  Fx{row['release']} {row['key']}: {row['pref']} is in the tree but "
               "pref-delta computed no default for it; run --lookup on it to see why.")
@@ -257,9 +272,10 @@ def cmd_add(args) -> None:
             res = found.get(pref, {"found": False})
             if not res["found"]:
                 hint = (f" Nearest names: {', '.join(res['near'])}." if res.get("near") else "")
+                probe = (f"--fml {pref[4:]}" if pref.startswith("fml:") else f"--lookup {pref}")
                 sys.exit(f"error: --gate {pref}: pref-delta has no default for it at "
                          f"{trainlib.gecko_upstream()}, so there is nothing to watch.{hint} "
-                         f"Run pref-delta.py --lookup {pref} for the detail. Nothing was recorded.")
+                         f"Run pref-delta.py {probe} for the detail. Nothing was recorded.")
             gates[pref] = gate_record(res)
     b = bucket(data, rel)
     item = b["items"].get(key, {"added": now(), "log": []})
@@ -1006,7 +1022,8 @@ def main() -> None:
                    help="YYYY-MM-DD to follow up after, for commitments like 'I'll revisit "
                         "next week' that are easy to forget")
     a.add_argument("--gate", action="append", default=None, metavar="PREF",
-                   help="preference that keeps this off; its current defaults are recorded and "
+                   help="preference that keeps this off, or fml:<feature> for a Fenix Nimbus "
+                        "feature; its current defaults are recorded and "
                         "re-checked by `gates` and every daily-pass. Repeatable; re-recording one "
                         "replaces its baseline")
     a.add_argument("--drop-gate", action="append", default=None, metavar="PREF",
