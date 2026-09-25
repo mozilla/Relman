@@ -75,6 +75,7 @@ PLACEHOLDERS = {
     "<text>": "audit probe", "<pass summary>": "audit probe", "<s>": "asked",
     "<YYYYMMDD>": "20260801", "<gecko clone>": "", "<path>": "",
     "<short description>": "audit probe", "<date>": "2026-08-01",
+    "<pref>": "browser.nova.enabled",
 }
 # Options that write outside the throwaway state directory, so the audit must not execute them:
 # `--pull` fast-forwards the real checkout and `--write` edits settings.local.json. This is a
@@ -163,10 +164,13 @@ def seed_args(argv: tuple, key: str) -> list:
     literal here would start doing that the first time a doc example moves to the next cycle.
     """
     out = ["add", key, "--status", "watching", "--note", "audit seed"]
-    if "--release" in argv:
-        i = argv.index("--release")
-        if i + 1 < len(argv):
-            out += ["--release", argv[i + 1]]
+    # `carry --from N` looks for the entry in N, so that is where the seed has to go.
+    for flag in ("--from", "--release"):
+        if flag in argv:
+            i = argv.index(flag)
+            if i + 1 < len(argv):
+                out += ["--release", argv[i + 1]]
+                break
     return out
 
 

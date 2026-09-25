@@ -27,11 +27,16 @@ Usage:
   watchlist.py done 2051691
   watchlist.py days 20260731             # record a reviewed Nightly day
   watchlist.py summary                   # per-release counts
+  watchlist.py add 2051691 --status gated --gate browser.referrals.enabled
+  watchlist.py gates                     # re-check every recorded gate
+  watchlist.py carry 2051691 css-line-clamp --from 155
+  watchlist.py drop-release 155          # refuses while 155 has open entries
 """
 
 import argparse
 import json
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -125,10 +130,137 @@ def find(data: dict, key: str, release: str | None) -> tuple[str, dict] | None:
     return None
 
 
+PREF_DELTA = Path(__file__).resolve().parent / "pref-delta.py"
+
+
+def resolve_prefs(names: list[str], fetch: bool = True,
+                  repo: Path | None = None) -> dict[str, dict]:
+    """pref-delta's --lookup verdict per name, keyed by name. Raises RuntimeError if it fails.
+
+    Through pref-delta rather than a second parser, so a recorded gate and a `--lookup` by hand
+    can never disagree about what the same preference defaults to.
+    """
+    cmd = [sys.executable, str(PREF_DELTA), "--lookup", ",".join(names), "--format", "json"]
+    if not fetch:
+        cmd.append("--no-fetch")
+    if repo:
+        cmd += ["--repo", str(repo)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        tail = (r.stderr.strip().splitlines() or ["no output"])[-1]
+        raise RuntimeError(f"pref-delta exited {r.returncode}: {tail}")
+    # pref-delta exits 0 after a failed fetch, and that warning is the only sign the defaults
+    # below describe a stale tree.
+    for ln in r.stderr.splitlines():
+        if "WARNING: git fetch" in ln:
+            print(ln, file=sys.stderr)
+    return {res["pref"]: res for res in json.loads(r.stdout)}
+
+
+def gate_record(res: dict) -> dict:
+    return {"state": res["summary"], "values": res["values"], "recorded": now(),
+            "guess": res.get("unresolved_define") or []}
+
+
+def gate_caveat(rec: dict) -> str:
+    return f"  (GUESS: behind {', '.join(rec['guess'])})" if rec.get("guess") else ""
+
+
+def release_on(values: dict) -> bool:
+    return any(v == "true" for k, v in values.items() if k.startswith("release/"))
+
+
+def check_gates(data: dict, fetch: bool = True, repo: Path | None = None) -> dict:
+    """Re-resolve every gate recorded on an open item and compare it with what was recorded.
+
+    Deliberately never updates the stored baseline: a change keeps being reported on every pass
+    until someone acts on it (re-records the gate with `add --gate`, or closes the item). A report
+    that quietly absorbed the change would show a flip exactly once, to whichever pass happened to
+    run first, and in the 155 state 11 of 36 open entries had flipped unnoticed across three cycles
+    while every daily report kept listing them as gated.
+    """
+    rows = [(rel, key, pref, rec)
+            for rel, b in data["releases"].items()
+            for key, it in b["items"].items() if it.get("status") not in CLOSED
+            for pref, rec in (it.get("gates") or {}).items()]
+    out = {"changed": [], "gone": [], "unresolvable": [], "same": [], "error": None}
+    if not rows:
+        return out
+    try:
+        now_state = resolve_prefs(sorted({r[2] for r in rows}), fetch=fetch, repo=repo)
+    except RuntimeError as e:
+        out["error"] = str(e)
+        return out
+    for rel, key, pref, rec in rows:
+        res = now_state.get(pref, {"found": False, "written_at": []})
+        row = {"release": rel, "key": key, "pref": pref, "was": rec["state"],
+               "recorded": rec.get("recorded", "?")}
+        if not res["found"]:
+            out["unresolvable" if res.get("written_at") else "gone"].append(row)
+        elif res["values"] != rec["values"]:
+            out["changed"].append({**row, "now": res["summary"],
+                                   "release_on": release_on(res["values"])
+                                   and not release_on(rec["values"])})
+        else:
+            out["same"].append(row)
+    return out
+
+
+def print_gate_report(rep: dict) -> None:
+    """Shared by `gates` and daily-pass, so the two cannot describe the same result differently."""
+    if rep["error"]:
+        print(f"GATE RE-CHECK FAILED -- {rep['error']}. This is not 'no gate changes'; the recorded "
+              "gates were never compared.")
+        return
+    total = sum(len(rep[k]) for k in ("changed", "gone", "unresolvable", "same"))
+    if not total:
+        print("No open item carries a recorded gate (add one with `add <key> --gate <pref>`).")
+        return
+    for row in rep["changed"]:
+        loud = "  *** NOW ON FOR RELEASE ***" if row["release_on"] else ""
+        print(f"  CHANGED  Fx{row['release']} {row['key']}: {row['pref']}{loud}")
+        print(f"           was ({row['recorded']}): {row['was']}")
+        print(f"           now: {row['now']}")
+    for row in rep["gone"]:
+        print(f"  GONE     Fx{row['release']} {row['key']}: {row['pref']} is no longer in the tree. "
+              "The gate was removed, so the feature has shipped unconditionally or been taken "
+              "out; find which with git log -S on the preference name.")
+    for row in rep["unresolvable"]:
+        print(f"  UNKNOWN  Fx{row['release']} {row['key']}: {row['pref']} is in the tree but "
+              "pref-delta computed no default for it; run --lookup on it to see why.")
+    print(f"  {len(rep['same'])} of {total} recorded gate(s) unchanged. A reported gate repeats "
+          "until acted on: `add <key> --gate <pref>` re-records a changed one, `--drop-gate "
+          "<pref>` retires a gone or unknown one, and closing the item stops both.")
+
+
+def cmd_gates(args) -> None:
+    print_gate_report(check_gates(load(), fetch=not args.no_fetch))
+
+
 def cmd_add(args) -> None:
     data = load()
-    rel = args.release or current_release(required=True)
     key = str(args.key)
+    # A gate change is acted on where the entry lives: filing it under the current Nightly would
+    # create a second entry and leave the reported one repeating its CHANGED line forever.
+    hit = find(data, key, None) if (args.gate or args.drop_gate) and not args.release else None
+    rel = hit[0] if hit else (args.release or current_release(required=True))
+    gates = {}
+    if args.gate:
+        # Resolved before anything is written: a misspelt name has to fail here, where the person
+        # recording it is looking, not surface weeks later as a GONE on a gate that never existed.
+        # dom.scoped-custom-element-registries.enabled is hyphenated and its C++ accessor is not.
+        try:
+            found = resolve_prefs(args.gate, fetch=not args.no_fetch)
+        except RuntimeError as e:
+            sys.exit(f"error: could not resolve --gate: {e}")
+        for pref in args.gate:
+            res = found.get(pref, {"found": False})
+            if not res["found"]:
+                hint = (f" Nearest names: {', '.join(res['near'])}." if res.get("near") else "")
+                sys.exit(f"error: --gate {pref}: pref-delta has no default for it at "
+                         f"{trainlib.gecko_upstream()}, so there is nothing to watch.{hint} "
+                         f"Run pref-delta.py --lookup {pref} for the detail. Nothing was recorded.")
+            gates[pref] = gate_record(res)
     b = bucket(data, rel)
     item = b["items"].get(key, {"added": now(), "log": []})
     item.update({
@@ -145,9 +277,21 @@ def cmd_add(args) -> None:
         item.setdefault("asked_on", item.get("added") or now())
     if args.note:
         item["log"].append({"date": now(), "text": args.note})
+    if gates:
+        item.setdefault("gates", {}).update(gates)
+        item["log"].append({"date": now(), "text": "gate recorded: " + "; ".join(
+            f"{p} = {g['state']}{gate_caveat(g)}" for p, g in gates.items())})
+    for pref in args.drop_gate or []:
+        if pref not in item.get("gates", {}):
+            sys.exit(f"error: --drop-gate {pref}: {key} has no such recorded gate. Nothing was "
+                     "recorded.")
+        was = item["gates"].pop(pref)["state"]
+        item["log"].append({"date": now(), "text": f"gate dropped: {pref} (was {was})"})
     b["items"][key] = item
     save(data)
     print(f"[{rel}] {key}: {item['status']}")
+    for pref, g in gates.items():
+        print(f"    gate {pref}: {g['state']}{gate_caveat(g)}")
 
 
 def cmd_note(args) -> None:
@@ -200,6 +344,76 @@ def cmd_rm(args) -> None:
     data["releases"][rel]["items"].pop(str(args.key))
     save(data)
     print(f"[{rel}] removed {args.key}")
+
+
+def cmd_carry(args) -> None:
+    """Move open entries from an older release into this one, keeping their whole log.
+
+    What makes a cycle's state safe to drop: the entries still worth watching come forward first.
+    All keys are checked before any moves, so a typo leaves both releases untouched.
+    """
+    data = load()
+    args.keys = list(dict.fromkeys(args.keys))
+    src = str(args.from_release)
+    dst = args.release or current_release(required=True)
+    if src == dst:
+        sys.exit(f"error: --from {src} is the destination release")
+    have = data["releases"].get(src, {}).get("items", {})
+    missing = [k for k in args.keys if k not in have]
+    if missing:
+        sys.exit(f"error: not tracked in Firefox {src}: {', '.join(missing)}. Nothing was moved.")
+    taken = [k for k in args.keys if k in data["releases"].get(dst, {}).get("items", {})]
+    if taken:
+        sys.exit(f"error: already tracked in Firefox {dst}: {', '.join(taken)}. Nothing was moved.")
+    b = bucket(data, dst)
+    gated = 0
+    for k in args.keys:
+        item = have.pop(k)
+        if "target" in item:
+            item["target"] = dst
+        item["updated"] = now()
+        item.setdefault("log", []).append(
+            {"date": now(), "text": f"carried from Fx{src}" + (f": {args.note}" if args.note else "")})
+        b["items"][k] = item
+        gated += bool(item.get("gates"))
+    save(data)
+    print(f"[{dst}] carried {len(args.keys)} from Fx{src}: {', '.join(args.keys)}")
+    if gated:
+        print(f"    with a recorded gate: {gated}; `watchlist.py gates` re-checks them")
+
+
+def cmd_drop_release(args) -> None:
+    """Delete a release's whole state: items, reviewed days and log.
+
+    Refuses while it still holds open entries, because an open entry in an old release is what the
+    daily pass re-surfaces, and losing one silently is how a feature ships without a note.
+    """
+    data = load()
+    rel = str(args.release_to_drop)
+    b = data["releases"].get(rel)
+    if b is None:
+        print(f"Firefox {rel} has no state; nothing to drop.")
+        return
+    cur = current_release()
+    if not args.force and rel == cur:
+        sys.exit(f"error: Firefox {rel} is the current Nightly. Pass --force to drop it anyway.")
+    if not args.force and cur == "unknown":
+        sys.exit(f"error: cannot determine the current Nightly, so cannot rule out that it is "
+                 f"Firefox {rel}. Pass --force to drop it anyway.")
+    open_items = sorted(k for k, v in b["items"].items() if v.get("status") not in CLOSED)
+    if open_items and not args.force:
+        print(f"error: Firefox {rel} still has {len(open_items)} open item(s):", file=sys.stderr)
+        for k in open_items:
+            it = b["items"][k]
+            gate = "  [gate recorded]" if it.get("gates") else ""
+            print(f"  {k:<12} [{it.get('status')}]{gate} {it.get('summary', '')[:80]}",
+                  file=sys.stderr)
+        sys.exit(f"Carry the ones still worth watching first (watchlist.py carry <key>... --from "
+                 f"{rel}), then re-run; --force drops them all.")
+    data["releases"].pop(rel)
+    save(data)
+    print(f"dropped Firefox {rel}: {len(b['items'])} item(s), "
+          f"{len(b.get('days_reviewed', []))} reviewed day(s), {len(b.get('log', []))} log entries")
 
 
 def cmd_log(args) -> None:
@@ -791,7 +1005,34 @@ def main() -> None:
     a.add_argument("--due", default=None,
                    help="YYYY-MM-DD to follow up after, for commitments like 'I'll revisit "
                         "next week' that are easy to forget")
+    a.add_argument("--gate", action="append", default=None, metavar="PREF",
+                   help="preference that keeps this off; its current defaults are recorded and "
+                        "re-checked by `gates` and every daily-pass. Repeatable; re-recording one "
+                        "replaces its baseline")
+    a.add_argument("--drop-gate", action="append", default=None, metavar="PREF",
+                   help="stop watching a recorded gate, e.g. one `gates` reports as GONE or "
+                        "UNKNOWN, which cannot be re-recorded")
+    a.add_argument("--no-fetch", action="store_true",
+                   help="resolve --gate without fetching the Gecko clone first")
     a.set_defaults(func=cmd_add)
+
+    g = add_parser("gates", help="re-check the preference recorded on every open item with --gate")
+    g.add_argument("--no-fetch", action="store_true",
+                   help="resolve from the Gecko clone as-is, without fetching first")
+    g.set_defaults(func=cmd_gates)
+
+    c = add_parser("carry", help="move open entries from an older release into this one, log intact")
+    c.add_argument("keys", nargs="+")
+    c.add_argument("--from", dest="from_release", required=True, help="release to take them from")
+    c.add_argument("--note", default=None, help="appended to each carried entry's log")
+    c.set_defaults(func=cmd_carry)
+
+    dr = add_parser("drop-release",
+                    help="delete a release's whole state; refuses while it has open entries")
+    dr.add_argument("release_to_drop", metavar="release")
+    dr.add_argument("--force", action="store_true",
+                    help="drop open entries too, or the current Nightly")
+    dr.set_defaults(func=cmd_drop_release)
 
     n = add_parser("note")
     n.add_argument("key")

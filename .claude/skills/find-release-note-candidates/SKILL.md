@@ -328,6 +328,10 @@ decide whether the finished body of work now deserves a single rollup note. Inte
 feature pushes and preference-gated features that flipped late are the usual candidates. Track
 deferrals in the watchlist (`--status watching`) so they resurface rather than being rediscovered.
 
+**Once a cycle has shipped, retire its state.** Re-check each open entry's gate, `carry` the ones
+still gated into the current release, and `drop-release` the old one. The drop refuses while open
+entries remain (`--force` overrides), which is the point: those are what the daily pass re-surfaces.
+
 **Then check coverage from Bugzilla's side**, which is the one question a window scan cannot answer
 about itself:
 
@@ -393,7 +397,19 @@ watchlist.py noted <bug> --note "<where it shipped>"   # the note is live in Nuc
 watchlist.py log "<pass summary>"        # release-level context; resume replays these
 watchlist.py days 20260801               # record the day as reviewed
 watchlist.py rm <bug>                    # delete the entry outright -- see the caveat below
+watchlist.py add <bug> --status gated --gate <pref>   # record the gating preference; see below
+watchlist.py gates                       # re-check every recorded gate now
+watchlist.py carry <bug> --from 155      # move an open entry from an older release, log intact
+watchlist.py drop-release 155            # delete a finished release; refuses while it has open entries
 ```
+
+**Record a preference gate with `--gate`, not only in the note.** A gate written in prose is never
+looked at again: the 155 state went three cycles with 11 of its 36 open entries shipped while every
+daily report still listed them as gated. `--gate` resolves the preference on the spot (a misspelt
+name is refused, with the nearest real names) and stores its per-channel defaults; every
+`daily-pass` then re-resolves them and reports `CHANGED`, `GONE` or `UNKNOWN` until someone acts:
+`--gate` again re-records a changed one, `--drop-gate <pref>` retires a gone or unknown one. A
+gate that is not a preference (an FML block, a hardcoded getter, a meta bug) still goes in the note.
 
 **`rm` deletes the entry and everything recorded on it**, with no confirmation and nothing to undo:
 its summary, its `--note` trail and its due date all go. The watchlist is per-user, so that history
@@ -591,7 +607,8 @@ gate in that hunk*; the honest phrasing is "no gate found in `<file>`", labelled
 **verified** for a gate you positively located: a `--lookup` verdict, an FML block, a hardcoded
 `false`.
 
-**A gated-off bug still has to appear in the report** — as a watchlist line naming the gate.
+**A gated-off bug still has to appear in the report** — as a watchlist line naming the gate, and
+recorded with `add --gate <pref>` when the gate is a preference, so later passes notice it flip.
 "Correctly excluded" and "invisible to the reader" are different outcomes and only the first is
 acceptable.
 

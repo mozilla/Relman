@@ -439,11 +439,25 @@ def main() -> None:
                   f"{it.get('summary','')}")
         print()
     standing = watchlist.standing(exclude=set(tracked))
+    moved = set()
+    rep = None
+    if any(it.get("gates") and it.get("status") not in watchlist.CLOSED
+           for it in {**standing, **tracked}.values()):
+        # The scan above already fetched the clone, so resolving again without a fetch reads the
+        # same upstream state the window's pref delta did.
+        rep = watchlist.check_gates(watchlist.load(), fetch=False,
+                                    repo=trainlib.resolve_repo(args.repo))
+        moved = {r["key"] for k in ("changed", "gone", "unresolvable") for r in rep[k]}
+        print("RECORDED GATES ON YOUR WATCHLIST (re-resolved now; a change repeats every pass "
+              "until acted on):")
+        watchlist.print_gate_report(rep)
+        print()
     if standing:
         print("STANDING WATCHLIST (not in this window; re-surface when the gate flips):")
         for k, it in sorted(standing.items()):
+            flag = "  <-- GATE MOVED, see above" if k in moved else ""
             print(f"  {k}: [{it.get('status','?')}] Fx{it.get('release','?')} "
-                  f"{it.get('summary','')}")
+                  f"{it.get('summary','')}{flag}")
         print()
 
     if r4.returncode != 0:
@@ -479,6 +493,13 @@ def main() -> None:
         prefs = (outdir / "prefs.txt").read_text()
         flips = [l for l in prefs.splitlines() if l.startswith("== ")]
         print("PREFS   " + ("; ".join(flips) if flips else "no preference changes"))
+        if rep:
+            # A moved gate is a headline, not a detail: it is the one line that says a feature this
+            # watchlist was holding may now be reaching users.
+            print("GATES   " + (f"RE-CHECK FAILED: {rep['error']}" if rep["error"] else
+                                f"{len(rep['changed'])} changed, {len(rep['gone'])} gone, "
+                                f"{len(rep['unresolvable'])} unknown, {len(rep['same'])} unchanged"
+                                + (" -- see RECORDED GATES in the report" if moved else "")))
         print(f"\nFull report: {outdir}/report.txt")
         print(f"Survivors:   {outdir}/scan.txt")
         print(f"Drops:       {outdir}/dropped.txt  ({len(dropped)} to audit)")
