@@ -228,9 +228,9 @@ Then ask which start point they want, and say why it matters:
 Add `--save-state` to record the window end once the run succeeds, so the next day resumes cleanly
 with no gap and no double-reporting.
 
-**One day per turn. Report it, then stop and wait for verdicts.** When the user asks for several
-days, do not scan the next one — not even in the background — until they have worked through the
-first. Two reasons beyond not talking over them:
+**One day at a time. Walk it, then wait for verdicts before scanning the next.** When the user asks
+for several days, do not scan the next one — not even in the background — until they have worked
+through the first. Two reasons beyond not talking over them:
 
 - **Their verdicts are calibration input for the days that follow.** A decline reasoned "very likely
   to be uplifted per the comments" or "no duplicates in five years, so it's minor" changes how the
@@ -822,7 +822,9 @@ Two things follow that the skill should respect:
 ### Emit the bug comment ready to paste
 
 The point of a candidate is a request on the bug, so produce that text — don't make the user compose
-it from a table.
+it from a table. **It goes inside that candidate's block, directly after its reasoning**, never in a
+section of asks after the tiers: the user asks as they review each candidate, and an ask printed
+elsewhere has to be matched back to its bug.
 
 **The single most important thing the ask must do is get `relnote-firefox` set to `?`.** Nomination
 happens by flag, not by comment: Release Management monitors that flag, and setting it pops up a
@@ -915,6 +917,25 @@ python3 scripts/relnotes/watchlist.py add <bug> --kind bug --status asked --rele
 
 ## Output
 
+**Finish the whole pass first, write the report to `<outdir>/candidates.md`, then hand the candidates
+over one per turn.** A whole report pasted at once buries the candidates, and the user ends up scrolling
+back to the top to find the one they are asking about. It runs the way `review-release-notes` hands
+over notes:
+
+- **The opening message** is the funnel line, the buglist link, the preference flips, any other
+  owners' uplift items (they are time-critical, see Step 1) and a one-line list of the candidates
+  to walk. Stop there.
+- **Then one candidate per message**, Tier 1 first, as the block in item 2 below with its ask at the
+  end. Lead with the position (`candidate 2 of 6 · Tier 1`). Stop and wait for the verdict, and
+  record it before showing the next one.
+- **After the last verdict**, one closing message with the rollups, the watchlist, the drop audit
+  and the methodology note. A false drop the audit rescues is a candidate: walk it with the others,
+  and leave only the counts for the closing message.
+- If they stop partway, say which candidate the walk reached and that the rest is in the file, and
+  name that path in the pass's `log` entry so `resume` can find it.
+- **Take "just dump the rest".** One at a time is the default, not a rule to enforce against the
+  reader.
+
 Lead with the funnel line (commits → bugs → FIXED → survivors → candidates), the window, and the
 Nightly version and channel mapping used — then, **before any analysis**, a Bugzilla buglist link
 covering every candidate, so all of them open in one go rather than one click at a time:
@@ -926,16 +947,15 @@ https://bugzilla.mozilla.org/buglist.cgi?bug_id_type=anyexact&bug_id=<comma-sepa
 **That link belongs at the top, not down with the tiers.** The reader opens the bugs first and then
 reads the analysis alongside them, so a link printed after the tier tables sits a hundred lines
 below the moment it was wanted. `daily-pass.py` prints equivalents for the survivor and dropped
-sets; build this one from your tiered candidates, and repeat it per tier inside each tier when the
-list is long.
+sets; build this one from your tiered candidates.
 
 Then:
 
 1. **Preference flips** — what became live or hidden, with per-channel defaults and bug numbers. First,
    because it's the highest-signal section.
 2. **Tier 1 / Tier 2 / Tier 3 candidates** — **one block per candidate, never one wide table per
-   tier.** Each candidate gets its own two-column table, field name on the left, and its reasoning
-   goes immediately after it, before the next candidate begins:
+   tier.** Each candidate gets its own two-column table, field name on the left, then its reasoning,
+   then the ready-to-paste ask from Step 6:
 
    ```
    | | |

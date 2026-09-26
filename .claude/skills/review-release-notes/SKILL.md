@@ -313,8 +313,8 @@ hand-over gets interrupted or compacted, and the file is what survives that.
 **Then one note per turn — show it, stop, wait.** The author is applying edits as they go, and a
 whole review pasted at once scrolls away.
 
-- **One note's findings per message**, then stop and let them act. Same rule as "one day per turn" in
-  `find-release-note-candidates`.
+- **One note's findings per message**, then stop and let them act. Same rule as the one-candidate-
+  per-message handover in `find-release-note-candidates`.
 - **Notes with nothing wrong do not get a turn.** Say how many you passed over and move on.
 - **Lead with the position** — `note 7 of 43 · Web Platform · 4 findings left after this` — so they
   can see the runway and choose to speed up.
