@@ -40,15 +40,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import trainlib  # noqa: E402
 
-BUGZILLA_REST = "https://bugzilla.mozilla.org/rest/bug"
 # What `limit=0` actually returns at most, measured 2026-08-14. The response carries no total and no
 # truncation marker, so hitting this is indistinguishable from a complete answer unless counted.
 BUGZILLA_MAX_RESULTS = 10000
 # Bugzilla's answer to "did this land in N". Shared by is_fixed() and the --census search, so
 # the query cannot drift from the predicate.
 LANDED_IN_VERSION = ("fixed", "verified", "disabled")
-PRODUCT_DETAILS = "https://product-details.mozilla.org/1.0/firefox_versions.json"
-USER_AGENT = "Relman-relnotes-scan/1.0"
 
 BUG_RE = re.compile(r"\b[Bb]ug\s+(\d{5,8})\b")
 REVERT_RE = re.compile(r"^\s*(Revert\b|Backed out\b|backout\b)", re.IGNORECASE)
@@ -198,46 +195,9 @@ DROP_SUBJECT_PATTERNS = [
     )
 ]
 
-def fetch_json(url: str):
-    """Thin wrapper over trainlib.fetch_json that exits with a CLI-friendly message.
-
-    trainlib raises so importers can decide; the command-line tools all want to stop.
-    """
-    try:
-        return trainlib.fetch_json(url)
-    except RuntimeError as e:
-        sys.exit(f"error: {e}")
-
-
-def git(repo: Path, *args: str) -> str:
-    try:
-        return trainlib.git(repo, *args)
-    except RuntimeError as e:
-        sys.exit(f"error: {e}")
-
-
-def nightly_version() -> int:
-    data = fetch_json(PRODUCT_DETAILS)
-    m = re.match(r"(\d+)", data["FIREFOX_NIGHTLY"])
-    if not m:
-        sys.exit("error: could not parse FIREFOX_NIGHTLY from product-details")
-    return int(m.group(1))
-
-
-def esr_versions() -> list[int]:
-    """Live ESR majors, for uplift detection."""
-    data = fetch_json(PRODUCT_DETAILS)
-    out = []
-    for key in ("FIREFOX_ESR", "FIREFOX_ESR_NEXT"):
-        m = re.match(r"(\d+)", data.get(key) or "")
-        if m:
-            out.append(int(m.group(1)))
-    return sorted(set(out))
-
-
 def enumerate_commits(repo: Path, start: str, end: str, first_parent: bool = False) -> list[dict]:
     extra = ["--first-parent"] if first_parent else []
-    log = git(repo, "log", f"{start}..{end}", *extra, "--format=%H%x09%s")
+    log = trainlib.git(repo, "log", f"{start}..{end}", *extra, "--format=%H%x09%s")
     commits = []
     for line in log.splitlines():
         if "\t" not in line:
@@ -266,17 +226,8 @@ def fetch_bugs(
         "type", "whiteboard", "blocks", "depends_on", "priority", "severity",
         *version_fields,
     ])
-    out: dict[str, dict] = {}
-    ids = list(bug_ids)
-    for i in range(0, len(ids), 120):
-        batch = ids[i:i + 120]
-        qs = url_parse.urlencode({"id": ",".join(batch), "include_fields": fields})
-        payload = fetch_json(f"{BUGZILLA_REST}?{qs}")
-        for bug in payload.get("bugs", []):
-            out[str(bug["id"])] = bug
-        print(f"# fetched {min(i + 120, len(ids))}/{len(ids)} bugs", file=sys.stderr)
-    missing = [b for b in ids if b not in out]
-    return out, missing
+    out = trainlib.bugzilla_bugs(bug_ids, fields, label="bugs")
+    return out, [b for b in bug_ids if b not in out]
 
 
 def is_fixed(bug: dict, nightly: int) -> bool:
@@ -314,10 +265,8 @@ def note_target(bug: dict, nightly: int, esrs: list[int]) -> dict:
     later. So this has to be re-checked before notes are finalized, not just at
     discovery time.
     """
-    shipped_in = []
-    for v in (nightly - 2, nightly - 1, nightly):
-        if bug.get(f"cf_status_firefox{v}") in SHIPPED_FLAGS:
-            shipped_in.append(v)
+    shipped_in = [v for v in (nightly - 2, nightly - 1, nightly)
+                  if bug.get(f"cf_status_firefox{v}") in SHIPPED_FLAGS]
     esr_hits = [v for v in esrs if bug.get(f"cf_status_firefox_esr{v}") in SHIPPED_FLAGS]
     earliest = shipped_in[0] if shipped_in else nightly
     return {
@@ -356,6 +305,15 @@ def capped(items: list[str], limit: int = 40) -> str:
                     if len(items) > limit else "")
 
 
+def landing_lines(subjects: list[str], total: int, shown: int, width: int,
+                  indent: str) -> list[str]:
+    """The first `shown` landing subjects, tidied and cut to `width`, then a count of the rest."""
+    lines = [f"{indent}landed: {tidy_subject(s)[:width]}" for s in subjects[:shown]]
+    if total > len(lines):
+        lines.append(f"{indent}... and {total - len(lines)} more landings")
+    return lines
+
+
 def render_dropped(dropped: list[dict]) -> list[str]:
     """The mechanical drop list, grouped by reason, as lines.
 
@@ -387,11 +345,9 @@ def render_dropped(dropped: list[dict]) -> list[str]:
         lines.append(f"== {len(items)} dropped: {reason}")
         for d in items:
             lines.append(f"     {d['bug']}  {d['summary'][:90]}")
-            landings = [c for c in d.get("landings", []) if not REVERT_RE.match(c["subject"])]
-            for c in landings[:2]:
-                lines.append(f"              landed: {tidy_subject(c['subject'])[:88]}")
-            if len(landings) > 2:
-                lines.append(f"              ... and {len(landings) - 2} more landings")
+            landings = [c["subject"] for c in d.get("landings", [])
+                        if not REVERT_RE.match(c["subject"])]
+            lines += landing_lines(landings, len(landings), 2, 88, " " * 14)
         lines.append("")
     return lines
 
@@ -432,10 +388,7 @@ def render_census(c: dict) -> list[str]:
         lines.append(f"  {r['bug']}  {r['product']} :: {r['component']}"
                      f"  flag={r['status_flag']}{tag}")
         lines.append(f"        bug: {r['summary'][:140]}")
-        for s in r["landings"][:3]:
-            lines.append(f"        landed: {tidy_subject(s)[:140]}")
-        if len(r["landings"]) > 3:
-            lines.append(f"        ... and {len(r['landings']) - 3} more landings")
+        lines += landing_lines(r["landings"], len(r["landings"]), 3, 140, " " * 8)
     if c["earlier"]:
         lines.append("")
         lines.append(f"Flagged for an earlier version too ({len(c['earlier'])}) -- usually QA "
@@ -499,7 +452,7 @@ def census_ids(version: int) -> list[str]:
         "order": "bug_id",
         "limit": 0,
     })
-    payload = fetch_json(f"{BUGZILLA_REST}?{qs}")
+    payload = trainlib.fetch_json(f"{trainlib.BUGZILLA_REST}/bug?{qs}")
     return [str(b["id"]) for b in payload.get("bugs", [])]
 
 
@@ -515,7 +468,8 @@ def landings_anywhere(repo: Path, bug_ids: list[str]) -> dict[str, list[str]]:
     found: dict[str, list[str]] = collections.defaultdict(list)
     for i in range(0, len(bug_ids), 200):
         batch = set(bug_ids[i:i + 200])
-        log = git(repo, "log", "--all", "--format=%s", *[f"--grep={b}" for b in sorted(batch)])
+        log = trainlib.git(repo, "log", "--all", "--format=%s",
+                           *[f"--grep={b}" for b in sorted(batch)])
         for subject in log.splitlines():
             m = BUG_RE.search(subject)
             # Membership is against this batch, not all ids: a commit matched here for a body mention
@@ -523,6 +477,20 @@ def landings_anywhere(repo: Path, bug_ids: list[str]) -> dict[str, list[str]]:
             if m and m.group(1) in batch:
                 found[m.group(1)].append(subject)
     return found
+
+
+def base_record(bug_id: str, bug: dict, version: int, esrs: list[int]) -> dict:
+    """The fields a survivor, a drop and a census row all carry."""
+    return {
+        "bug": bug_id,
+        "summary": bug.get("summary", ""),
+        "product": bug.get("product", ""),
+        "component": bug.get("component", ""),
+        "type": bug.get("type"),
+        "keywords": bug.get("keywords", []),
+        "status_flag": bug.get(f"cf_status_firefox{version}"),
+        **note_target(bug, version, esrs),
+    }
 
 
 def run_census(repo: Path, version: int, window_bugs: set[str], esrs: list[int],
@@ -553,17 +521,7 @@ def run_census(repo: Path, version: int, window_bugs: set[str], esrs: list[int],
         if bug is None:
             continue
         subjects = [s for s in elsewhere.get(bug_id, []) if not REVERT_RE.match(s)]
-        rec = {
-            "bug": bug_id,
-            "summary": bug.get("summary", ""),
-            "product": bug.get("product", ""),
-            "component": bug.get("component", ""),
-            "type": bug.get("type"),
-            "keywords": bug.get("keywords", []),
-            "status_flag": bug.get(f"cf_status_firefox{version}"),
-            "landings": subjects,
-            **note_target(bug, version, esrs),
-        }
+        rec = {**base_record(bug_id, bug, version, esrs), "landings": subjects}
         reason = drop_reason(bug, subjects)
         if reason:
             rec["drop_reason"] = reason
@@ -659,6 +617,14 @@ def show_state(repo: Path, nightly: int) -> None:
     print("Add --save-state to record the new watermark when done.")
 
 
+def build_commit(build_id: str) -> str:
+    """The git commit a nightly build was made from; exits if it cannot be mapped."""
+    b = trainlib.resolve_build(build_id)
+    if not b or not b.get("git"):
+        sys.exit(f"error: could not resolve build {build_id} to a git commit")
+    return b["git"]
+
+
 def resolve_window(repo: Path, args, nightly_now: int) -> tuple[str, str, str]:
     """Turn the CLI options into (start, end, human-readable basis).
 
@@ -666,52 +632,26 @@ def resolve_window(repo: Path, args, nightly_now: int) -> tuple[str, str, str]:
     non-monotonic, so a date boundary silently under-covers. See trainlib's module
     docstring for the measured case (29 of 57 bugs).
     """
-    end = args.rev
-
-    if args.to_build:
-        b = trainlib.resolve_build(args.to_build)
-        if not b or not b.get("git"):
-            sys.exit(f"error: could not resolve build {args.to_build} to a git commit")
-        end = b["git"]
+    end = build_commit(args.to_build) if args.to_build else args.rev
 
     if args.rev_range:
         start, end = args.rev_range.split("..", 1)
         return start, end, f"explicit range {args.rev_range}"
 
-    if args.build:
-        builds = trainlib.nightly_builds(limit=100000)
-        ids = sorted(b["buildid"] for b in builds)
-        if args.build not in ids:
-            sys.exit(f"error: build {args.build} not found in the nightly build list")
-        i = ids.index(args.build)
-        if i == 0:
-            sys.exit(f"error: {args.build} is the oldest known build; no previous boundary")
-        this_b = trainlib.resolve_build(args.build)
-        prev_b = trainlib.resolve_build(ids[i - 1])
-        if not (this_b and this_b.get("git") and prev_b and prev_b.get("git")):
-            sys.exit("error: could not map both build boundaries to git commits")
-        return (prev_b["git"], this_b["git"],
-                f"nightly build {args.build} (from previous build {ids[i - 1]})")
-
-    if args.build_day:
-        bounds = trainlib.day_boundaries(args.build_day)
-        if not bounds:
-            sys.exit(f"error: no nightly builds found for {args.build_day}")
-        prev_id, last_id = bounds
-        prev_b = trainlib.resolve_build(prev_id)
-        last_b = trainlib.resolve_build(last_id)
-        if not (prev_b and prev_b.get("git") and last_b and last_b.get("git")):
-            sys.exit("error: could not map the day's build boundaries to git commits")
-        n = len(trainlib.builds_on_day(args.build_day))
-        return (prev_b["git"], last_b["git"],
-                f"all {n} nightly build(s) on {args.build_day} "
-                f"(from previous build {prev_id} to {last_id})")
+    if args.build or args.build_day:
+        prefix = args.build or args.build_day
+        bounds = trainlib.day_boundaries(prefix)
+        # Only an exact id is one build; a shorter --build would match a whole day's builds.
+        if not bounds or (args.build and bounds[1] != args.build):
+            sys.exit(f"error: no nightly build {prefix} with an earlier build before it")
+        prev_id, last_id, n = bounds
+        desc = (f"nightly build {args.build} (from previous build {prev_id})" if args.build
+                else f"all {n} nightly build(s) on {args.build_day} "
+                     f"(from previous build {prev_id} to {last_id})")
+        return build_commit(prev_id), build_commit(last_id), desc
 
     if args.from_build:
-        b = trainlib.resolve_build(args.from_build)
-        if not b or not b.get("git"):
-            sys.exit(f"error: could not resolve build {args.from_build} to a git commit")
-        return b["git"], end, f"from nightly build {args.from_build}"
+        return build_commit(args.from_build), end, f"from nightly build {args.from_build}"
 
     if args.cycle:
         rng = trainlib.cycle_range(repo, args.cycle, head=args.rev)
@@ -746,6 +686,73 @@ def resolve_window(repo: Path, args, nightly_now: int) -> tuple[str, str, str]:
         "error: no window specified. Run --show-state to see where you left off, then use one of "
         "--since-last / --build <id> / --from-build <id> / --cycle N / --range A..B."
     )
+
+
+def render_text(result: dict, show_dropped: bool) -> str:
+    """The readable survivor list. Serves stdout and --text-out alike, so they cannot drift."""
+    start_desc, end_desc = result["window"]["start_desc"], result["window"]["end_desc"]
+    nightly = result["window"]["nightly_version"]
+    missing = result["security_restricted_bugs"]
+    not_fixed_ids = result["not_fixed_bugs"]
+    census = result["census"]
+    survivors, dropped = result["survivors"], result["dropped"]
+    lines = []
+    f = result["funnel"]
+    lines.append(f"Tooling: {result['tooling']['version']}")
+    lines.append(f"Window: {start_desc} .. {end_desc}   (Nightly {nightly})")
+    lines.append(
+        f"Funnel: {f['commits']} commits -> {f['distinct_bugs']} bugs -> "
+        f"{f['distinct_bugs'] - f['not_currently_fixed'] - f['security_restricted']} FIXED -> "
+        f"{f['survivors']} survivors "
+        f"({f['dropped_mechanical']} dropped as mechanical, "
+        f"{f['not_currently_fixed']} not currently FIXED, "
+        f"{f['security_restricted']} security-restricted)"
+    )
+    # Name both, because a count cannot be audited. Security-restricted bugs are the window's
+    # largest blind spot and the skill asks for them in the report; a not-currently-FIXED bug is
+    # a candidate that may simply land its resolution later.
+    if missing:
+        lines.append(f"Security-restricted, not fetchable ({len(missing)}): "
+                     + capped(sorted(missing)))
+    if not_fixed_ids:
+        lines.append(f"Not currently FIXED ({len(not_fixed_ids)}): "
+                     + capped([f"{r['bug']} [{r['status']}]" for r in not_fixed_ids]))
+    if census:
+        lines.append("")
+        lines += render_census(census)
+    lines.append("")
+    areas = collections.Counter(f"{s['product']} :: {s['component']}" for s in survivors)
+    lines.append(f"Survivors by area ({len(areas)} areas):")
+    for area, n in areas.most_common():
+        lines.append(f"  {n:>3}  {area}")
+    lines.append("")
+    lines.append("Survivors (most landings first -- multi-commit bugs are feature-shaped).")
+    lines.append("Judge the LANDED lines, not the bug summary: a bug titled like test work")
+    lines.append("often lands real changes, and vice versa.")
+    lines.append("")
+    for s in survivors:
+        flags = []
+        if s["commit_count"] > 1:
+            flags.append(f"{s['commit_count']} commits")
+        if s["had_revert"]:
+            flags.append("RE-LANDED?")
+        if s["uplifted"]:
+            flags.append(f"UPLIFTED -> note belongs to {s['note_version']}")
+        if s["esr"]:
+            flags.append("also ESR " + ", ".join(str(v) for v in s["esr"]))
+        if s["status_flag"] == "disabled":
+            flags.append("flag=disabled")
+        if trainlib.is_meta(s):
+            flags.append("meta")
+        tag = f"  [{', '.join(flags)}]" if flags else ""
+        lines.append(f"  {s['bug']}  {s['product']} :: {s['component']}{tag}")
+        lines.append(f"        bug: {s['summary'][:140]}")
+        landings = [c["subject"] for c in s["landings"] if not REVERT_RE.match(c["subject"])]
+        lines += landing_lines(landings, s["commit_count"], 3, 140, " " * 8)
+    if show_dropped:
+        lines.append("")
+        lines += render_dropped(dropped)
+    return "\n".join(lines) + "\n"
 
 
 def main() -> None:
@@ -796,6 +803,9 @@ def main() -> None:
     p.add_argument("--dropped-out", metavar="PATH", default=None,
                    help="also write the grouped drop list to PATH. One renderer serves this and "
                         "--show-dropped, so the audit file and the inline listing cannot drift.")
+    p.add_argument("--text-out", metavar="PATH", default=None,
+                   help="also write the readable survivor list to PATH, so one --format json run "
+                        "yields both and daily-pass does not scan the window twice")
     p.add_argument("--format", choices=["text", "json"], default="text")
     p.add_argument("-o", "--output", default=None)
     args = p.parse_args()
@@ -807,7 +817,10 @@ def main() -> None:
                               consequence="The window may stop short of the newest landings, so a survivor "
                                     "count from this run can be low without saying so.")
 
-    nightly_now = nightly_version()
+    trains = trainlib.train_versions()
+    nightly_now = trains["nightly"]
+    if nightly_now is None:
+        sys.exit("error: could not parse FIREFOX_NIGHTLY from product-details")
 
     if args.show_state:
         show_state(repo, nightly_now)
@@ -815,11 +828,11 @@ def main() -> None:
 
     start, end, basis = resolve_window(repo, args, nightly_now)
 
-    start_desc = git(repo, "log", "-1", "--format=%h %cd", "--date=iso", start).strip()
-    end_desc = git(repo, "log", "-1", "--format=%h %cd", "--date=iso", end).strip()
+    start_desc = trainlib.git(repo, "log", "-1", "--format=%h %cd", "--date=iso", start).strip()
+    end_desc = trainlib.git(repo, "log", "-1", "--format=%h %cd", "--date=iso", end).strip()
     print(f"# window basis: {basis}", file=sys.stderr)
     nightly = args.version or nightly_now
-    esrs = esr_versions()
+    esrs = trains["esr"]
     src = "explicit --version" if args.version else "current Nightly from product-details"
     print(f"# window {start_desc} .. {end_desc} (checking cf_status_firefox{nightly}, {src})",
           file=sys.stderr)
@@ -854,7 +867,8 @@ def main() -> None:
             sys.exit(f"error: --census needs cycle bounds for {nightly}, and this checkout has no "
                      f"FIREFOX_NIGHTLY_{nightly - 1}_END tag.")
         c_start, c_end, cycle_open = rng
-        resolved = [git(repo, "rev-parse", r).strip() for r in (start, end, c_start, c_end)]
+        resolved = [trainlib.git(repo, "rev-parse", r).strip()
+                    for r in (start, end, c_start, c_end)]
         if resolved[:2] != resolved[2:]:
             sys.exit(
                 f"error: --census compares every bug flagged cf_status_firefox{nightly} against "
@@ -867,7 +881,7 @@ def main() -> None:
     # version bump belong to N-1, those after to N. The uplift heuristic cannot tell
     # "landed in N-1 before the merge" from "uplifted to N-1 afterwards" -- both show an
     # earliest landed version below the Nightly -- so say so rather than mislabel them.
-    bump = git(repo, "log", f"{start}..{end}", "--format=%H %cd %s", "--date=short",
+    bump = trainlib.git(repo, "log", f"{start}..{end}", "--format=%H %cd %s", "--date=short",
                "--", "browser/config/version.txt").strip()
     if bump:
         line = bump.splitlines()[0]
@@ -906,20 +920,13 @@ def main() -> None:
         subjects = [c["subject"] for c in landings if not c["is_revert"]]
         reason = drop_reason(bug, subjects)
         rec = {
-            "bug": bug_id,
-            "summary": bug.get("summary", ""),
-            "product": bug.get("product", ""),
-            "component": bug.get("component", ""),
-            "type": bug.get("type"),
-            "keywords": bug.get("keywords", []),
+            **base_record(bug_id, bug, nightly, esrs),
             "whiteboard": bug.get("whiteboard", ""),
             "blocks": bug.get("blocks", []),
             "depends_on": bug.get("depends_on", []),
-            "status_flag": bug.get(f"cf_status_firefox{nightly}"),
             "landings": [{"sha": c["sha"], "subject": c["subject"]} for c in landings],
             "commit_count": len(subjects),
             "had_revert": bug_id in reverted_bugs,
-            **note_target(bug, nightly, esrs),
         }
         if reason:
             rec["drop_reason"] = reason
@@ -961,69 +968,12 @@ def main() -> None:
         "census": census,
     }
 
-    if args.format == "json":
-        out = json.dumps(result, indent=2)
-    else:
-        lines = []
-        f = result["funnel"]
-        lines.append(f"Tooling: {result['tooling']['version']}")
-        lines.append(f"Window: {start_desc} .. {end_desc}   (Nightly {nightly})")
-        lines.append(
-            f"Funnel: {f['commits']} commits -> {f['distinct_bugs']} bugs -> "
-            f"{f['distinct_bugs'] - f['not_currently_fixed'] - f['security_restricted']} FIXED -> "
-            f"{f['survivors']} survivors "
-            f"({f['dropped_mechanical']} dropped as mechanical, "
-            f"{f['not_currently_fixed']} not currently FIXED, "
-            f"{f['security_restricted']} security-restricted)"
-        )
-        # Name both, because a count cannot be audited. Security-restricted bugs are the window's
-        # largest blind spot and the skill asks for them in the report; a not-currently-FIXED bug is
-        # a candidate that may simply land its resolution later.
-        if missing:
-            lines.append(f"Security-restricted, not fetchable ({len(missing)}): "
-                         + capped(sorted(missing)))
-        if not_fixed_ids:
-            lines.append(f"Not currently FIXED ({len(not_fixed_ids)}): "
-                         + capped([f"{r['bug']} [{r['status']}]" for r in not_fixed_ids]))
-        if census:
-            lines.append("")
-            lines += render_census(census)
-        lines.append("")
-        areas = collections.Counter(f"{s['product']} :: {s['component']}" for s in survivors)
-        lines.append(f"Survivors by area ({len(areas)} areas):")
-        for area, n in areas.most_common():
-            lines.append(f"  {n:>3}  {area}")
-        lines.append("")
-        lines.append("Survivors (most landings first -- multi-commit bugs are feature-shaped).")
-        lines.append("Judge the LANDED lines, not the bug summary: a bug titled like test work")
-        lines.append("often lands real changes, and vice versa.")
-        lines.append("")
-        for s in survivors:
-            flags = []
-            if s["commit_count"] > 1:
-                flags.append(f"{s['commit_count']} commits")
-            if s["had_revert"]:
-                flags.append("RE-LANDED?")
-            if s["uplifted"]:
-                flags.append(f"UPLIFTED -> note belongs to {s['note_version']}")
-            if s["esr"]:
-                flags.append("also ESR " + ", ".join(str(v) for v in s["esr"]))
-            if s["status_flag"] == "disabled":
-                flags.append("flag=disabled")
-            if trainlib.is_meta(s):
-                flags.append("meta")
-            tag = f"  [{', '.join(flags)}]" if flags else ""
-            lines.append(f"  {s['bug']}  {s['product']} :: {s['component']}{tag}")
-            lines.append(f"        bug: {s['summary'][:140]}")
-            shown = [c for c in s["landings"] if not REVERT_RE.match(c["subject"])][:3]
-            for c in shown:
-                lines.append(f"        landed: {tidy_subject(c['subject'])[:140]}")
-            if s["commit_count"] > len(shown):
-                lines.append(f"        ... and {s['commit_count'] - len(shown)} more landings")
-        if args.show_dropped:
-            lines.append("")
-            lines += render_dropped(dropped)
-        out = "\n".join(lines) + "\n"
+    text = (render_text(result, args.show_dropped)
+            if args.format == "text" or args.text_out else "")
+    out = json.dumps(result, indent=2) if args.format == "json" else text
+    if args.text_out:
+        Path(args.text_out).write_text(text)
+        print(f"# wrote {args.text_out}", file=sys.stderr)
 
     if args.census_out:
         if census is None:
@@ -1044,9 +994,9 @@ def main() -> None:
         sys.stdout.write(out)
 
     if args.save_state:
-        resolved_end = git(repo, "rev-parse", end).strip()
+        resolved_end = trainlib.git(repo, "rev-parse", end).strip()
         try:
-            path = trainlib.write_watermark(resolved_end, note=basis, repo=repo)
+            path = trainlib.write_watermark(repo, resolved_end, note=basis)
         except RuntimeError as e:
             print(f"# {e}", file=sys.stderr)
             return
@@ -1054,4 +1004,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except RuntimeError as e:
+        sys.exit(f"error: {e}")

@@ -13,8 +13,7 @@ channel, version, and release date. Joining the two on the release id yields a
 queryable corpus -- no HTML scraping of firefox.com required.
 
 This script does that join, filters to a product/channel/date window, and emits
-either the distilled Markdown survey that the skills read as their calibration
-reference, or the filtered corpus as JSON.
+the distilled Markdown survey that the skills read as their calibration reference.
 
 Two optional passes hit the Bugzilla REST API for context Nucleus does not have:
 
@@ -25,25 +24,25 @@ Two optional passes hit the Bugzilla REST API for context Nucleus does not have:
                 This is the empirical significance bar: the denominator.
 
 Read-only. Network JSON is cached under `$XDG_CACHE_HOME/relman-relnotes/nucleus`
-so repeat runs and multiple --format passes are cheap -- `--workdir` moves it,
-`--refresh` bypasses it. `--notes-for` always refetches, because it is read while
-someone is editing those notes; other Nucleus reads expire in 15 minutes, and
-Bugzilla answers about shipped majors are settled history and are kept for a day.
+so repeat runs and multiple --format passes are cheap -- `--refresh` bypasses it.
+`--notes-for` always refetches, because it is read while someone is editing those
+notes; other Nucleus reads expire in 15 minutes, and Bugzilla answers about shipped
+majors are settled history and are kept for a day.
 
 Usage:
   fetch-shipped-notes.py --format md -o reference/release-notes/shipped-notes-survey.md \\
       --areas --negative 153.0,152.0,151.0,150.0
-  fetch-shipped-notes.py --format json -o /tmp/corpus.json
   fetch-shipped-notes.py --format stats
 """
 
 import argparse
 import collections
-import json
+import datetime
+import itertools
 import re
 import statistics
 import sys
-import time
+import textwrap
 import urllib.parse as url_parse
 from pathlib import Path
 
@@ -52,11 +51,9 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import trainlib  # noqa: E402
 
-NUCLEUS_NOTES = "https://nucleus.mozilla.org/rna/notes/?format=json"
-NUCLEUS_RELEASES = "https://nucleus.mozilla.org/rna/releases/?format=json"
-BUGZILLA_REST = "https://bugzilla.mozilla.org/rest/bug"
-
-USER_AGENT = "Relman-relnotes-survey/1.0 (+release-note skill calibration)"
+NUCLEUS_NOTES = trainlib.NUCLEUS_NOTES
+NUCLEUS_RELEASES = trainlib.NUCLEUS_RELEASES
+BUGZILLA_BUG = f"{trainlib.BUGZILLA_REST}/bug"
 
 # How many matches `--search` lists. A broad term matches hundreds ('performance' matches 242), and
 # the point of the search is precedent calibration, which a wall of output does not help.
@@ -118,27 +115,13 @@ BUGZILLA_CACHE_TTL = 24 * 3600
 _FORCE_REFRESH = False
 
 
-def fetch_json(url: str, cache: Path | None, label: str,
-               ttl: int = NUCLEUS_CACHE_TTL) -> Any:
-    """GET url as JSON, memoized on disk under cache/label.json for `ttl` seconds."""
-    if cache is not None and not _FORCE_REFRESH:
-        blob = cache / f"{label}.json"
-        if blob.exists() and (time.time() - blob.stat().st_mtime) < ttl:
-            try:
-                return json.loads(blob.read_text())
-            except ValueError as e:
-                # Refetching repairs a half-written cache, so this is not fatal -- but say so, or a
-                # write that keeps failing refetches megabytes on every run in silence.
-                print(f"# warning: rewriting unreadable cache {blob} ({e})", file=sys.stderr)
-    # Nucleus 502s and times out often enough that a single attempt is not evidence it is down;
-    # trainlib.fetch_json retries 5xx/429/timeouts, which is why this does not open its own request.
+def fetch_json(url: str, label: str, ttl: int = NUCLEUS_CACHE_TTL) -> Any:
+    """GET url as JSON, memoized on disk under DEFAULT_CACHE/label.json for `ttl` seconds."""
     try:
-        payload = trainlib.fetch_json(url)
+        return trainlib.cached_json(url, DEFAULT_CACHE / f"{label}.json",
+                                    0 if _FORCE_REFRESH else ttl)
     except RuntimeError as e:
         sys.exit(f"error: {e}")
-    if cache is not None:
-        (cache / f"{label}.json").write_text(json.dumps(payload))
-    return payload
 
 
 def release_id(url: str) -> str | None:
@@ -172,14 +155,10 @@ def is_major(version: str) -> bool:
     return MAJOR_VERSION_RE.match(version) is not None
 
 
-def major_number(version: str) -> int:
-    """Sort key: 153.0 and 153.0.2 both sort under 153."""
-    m = re.match(r"^(\d+)", version)
-    return int(m.group(1)) if m else 0
-
-
-def version_sort_key(version: str) -> tuple:
-    return tuple(int(p) if p.isdigit() else 0 for p in version.split("."))
+def version_key(version: str) -> tuple:
+    """Sort as versions, not strings: lexically "99.0" beats "153.0". Tolerates the non-numeric
+    versions Nucleus also carries ('duplicate-26.0', '155.0a1')."""
+    return tuple(int(x) for x in re.findall(r"\d+", version)) or (-1,)
 
 
 def clean_note(text: str) -> str:
@@ -242,23 +221,22 @@ def build_pairs(
     return pairs, scoped, stubs, pointers
 
 
-def fetch_bug_fields(bug_ids: list[int], fields: str, cache: Path | None, label: str) -> dict[int, dict]:
+def fetch_bug_fields(bug_ids: list[int], fields: str, label: str) -> dict[int, dict]:
     """Batch-fetch Bugzilla bugs by id. Security-restricted bugs simply don't come back."""
     out: dict[int, dict] = {}
     batch_size = 120
     batches = [bug_ids[i : i + batch_size] for i in range(0, len(bug_ids), batch_size)]
     for i, batch in enumerate(batches):
         qs = url_parse.urlencode({"id": ",".join(str(b) for b in batch), "include_fields": fields})
-        payload = fetch_json(f"{BUGZILLA_REST}?{qs}", cache, f"{label}-{i}",
-                             ttl=BUGZILLA_CACHE_TTL)
+        payload = fetch_json(f"{BUGZILLA_BUG}?{qs}", f"{label}-{i}", ttl=BUGZILLA_CACHE_TTL)
         for bug in payload.get("bugs", []):
             out[bug["id"]] = bug
     return out
 
 
-def fetch_fixed_in_version(version: str, cache: Path | None) -> list[dict]:
+def fetch_fixed_in_version(version: str) -> list[dict]:
     """Every bug flagged fixed in a given Firefox major version."""
-    major = major_number(version)
+    major = version_key(version)[0]
     qs = url_parse.urlencode(
         {
             f"cf_status_firefox{major}": "fixed",
@@ -266,8 +244,7 @@ def fetch_fixed_in_version(version: str, cache: Path | None) -> list[dict]:
             "limit": "0",
         }
     )
-    payload = fetch_json(f"{BUGZILLA_REST}?{qs}", cache, f"fixed-{major}",
-                         ttl=BUGZILLA_CACHE_TTL)
+    payload = fetch_json(f"{BUGZILLA_BUG}?{qs}", f"fixed-{major}", ttl=BUGZILLA_CACHE_TTL)
     return payload.get("bugs", [])
 
 
@@ -280,7 +257,8 @@ def summarize(pairs: list[tuple[dict, dict]], scoped: dict[str, dict]) -> dict:
 
     majors = {v: ns for v, ns in per_version.items() if is_major(v)}
     dots = {v: ns for v, ns in per_version.items() if not is_major(v)}
-    major_counts = sorted(((v, len(ns)) for v, ns in majors.items()), key=lambda x: version_sort_key(x[0]))
+    major_counts = sorted(((v, len(ns)) for v, ns in majors.items()),
+                          key=lambda x: version_key(x[0]))
     counts_only = [c for _, c in major_counts]
 
     def tag_of(n: dict) -> str:
@@ -299,7 +277,7 @@ def summarize(pairs: list[tuple[dict, dict]], scoped: dict[str, dict]) -> dict:
     fixed_in_majors = []
     substantive_per_major: dict[str, int] = {v: 0 for v in majors}
     boilerplate_fixed = 0
-    for version, ns in sorted(majors.items(), key=lambda x: version_sort_key(x[0])):
+    for version, ns in sorted(majors.items(), key=lambda x: version_key(x[0])):
         for n in ns:
             if (n.get("tag") or "") != "Fixed":
                 continue
@@ -311,7 +289,7 @@ def summarize(pairs: list[tuple[dict, dict]], scoped: dict[str, dict]) -> dict:
 
     # Is the Fixed-in-majors bar moving? Compare the older and newer halves of
     # the window, plus the most recent few releases.
-    ordered_majors = sorted(majors, key=version_sort_key)
+    ordered_majors = sorted(majors, key=version_key)
 
     def rate(versions: list[str]) -> float:
         return (
@@ -348,7 +326,6 @@ def summarize(pairs: list[tuple[dict, dict]], scoped: dict[str, dict]) -> dict:
             "max_words": max(words) if words else 0,
             "openers": collections.Counter(first_word(c) for c in cleaned).most_common(12),
             "examples": cleaned,
-            "notes": ns,
         }
 
     # Median length across hand-authored notes only: the Community blurb is generated elsewhere and
@@ -365,7 +342,6 @@ def summarize(pairs: list[tuple[dict, dict]], scoped: dict[str, dict]) -> dict:
         "distinct_notes": len(notes_by_id),
         "releases": len(scoped),
         "major_notes": len(major_note_ids),
-        "dot_note_count": len(dot_note_ids),
         "fixed_in_majors": fixed_in_majors,
         "fixed_trend": fixed_trend,
         "authored_median_words": int(statistics.median(authored_words)) if authored_words else 0,
@@ -475,14 +451,9 @@ def emit_markdown(s: dict, meta: dict, areas: dict | None, negative: dict | None
     w("|---|---:|---|---|---:|")
     majors = s["majors"]
     half = (len(majors) + 1) // 2
-    left, right = majors[:half], majors[half:]
-    for i in range(half):
-        lv, lc = left[i]
-        if i < len(right):
-            rv, rc = right[i]
-            w(f"| {lv} | {lc} | | {rv} | {rc} |")
-        else:
-            w(f"| {lv} | {lc} | | | |")
+    for (lv, lc), (rv, rc) in itertools.zip_longest(majors[:half], majors[half:],
+                                                     fillvalue=("", "")):
+        w(f"| {lv} | {lc} | | {rv} | {rc} |")
     w("")
     w(
         f"{len(majors)} major releases, {s['major_total']} notes, mean {s['major_mean']:.1f}. "
@@ -547,10 +518,7 @@ def emit_markdown(s: dict, meta: dict, areas: dict | None, negative: dict | None
                           "than a pattern" if st["count"] < 5 else ""))
         w("")
         for ex in pick_examples(st["examples"], 5):
-            flat = " ".join(ex.split())
-            if len(flat) > 300:
-                flat = flat[:297] + "..."
-            w(f"- {flat}")
+            w(f"- {textwrap.shorten(ex, 300, placeholder='...')}")
         w("")
 
     t = s["fixed_trend"]
@@ -590,9 +558,7 @@ def emit_markdown(s: dict, meta: dict, areas: dict | None, negative: dict | None
         cleaned = clean_note(n["note"])
         if BOILERPLATE_RE.match(cleaned):
             continue  # the catch-all, counted above; listing it 26 times adds nothing
-        flat = " ".join(cleaned.split())
-        if len(flat) > 220:
-            flat = flat[:217] + "..."
+        flat = textwrap.shorten(cleaned, 220, placeholder="...")
         bug = f" (bug {n['bug']})" if n.get("bug") else ""
         w(f"- **{version}** — {flat}{bug}")
     w("")
@@ -713,8 +679,8 @@ def emit_markdown(s: dict, meta: dict, areas: dict | None, negative: dict | None
     w(
         f"- **Bug numbers are recorded on {s['major_with_bug']} of {s['major_notes']} major-release "
         f"notes ({100 * s['major_with_bug'] / s['major_notes']:.0f}%) versus {s['dot_with_bug']} of "
-        f"{s['dot_note_count']} dot-release notes "
-        f"({100 * s['dot_with_bug'] / s['dot_note_count']:.0f}%).** Dot releases require bug links "
+        f"{s['dot_notes']} dot-release notes "
+        f"({100 * s['dot_with_bug'] / s['dot_notes']:.0f}%).** Dot releases require bug links "
         "and mainline notes don't, which is exactly the gap you see. Nucleus keeps the bug number "
         "as a field even when the published note doesn't render a link — so this corpus can be "
         "joined to Bugzilla either way."
@@ -807,46 +773,9 @@ def emit_stats(s: dict) -> str:
     return "\n".join(o) + "\n"
 
 
-def emit_json(s: dict, meta: dict) -> str:
-    records = []
-    for r, n in meta["pairs"]:
-        records.append(
-            {
-                "note_id": n["id"],
-                "version": r["version"],
-                "release_date": r["release_date"],
-                "is_major": is_major(r["version"]),
-                "tag": n.get("tag") or "",
-                "bug": n.get("bug"),
-                "is_known_issue": n.get("is_known_issue", False),
-                "progressive_rollout": n.get("progressive_rollout", False),
-                "note_raw": n["note"],
-                "note_clean": clean_note(n["note"]),
-            }
-        )
-    records.sort(key=lambda x: (version_sort_key(x["version"]), x["tag"], x["note_id"]))
-    return json.dumps(
-        {
-            "scope": {
-                "product": meta["product"],
-                "channel": meta["channel"],
-                "since": meta["since"],
-                "source": [NUCLEUS_NOTES, NUCLEUS_RELEASES],
-            },
-            "counts": {
-                "releases": s["releases"],
-                "pairs": s["pairs"],
-                "distinct_notes": s["distinct_notes"],
-            },
-            "notes": records,
-        },
-        indent=2,
-    )
-
-
-def compute_areas(s: dict, cache: Path | None) -> dict:
+def compute_areas(s: dict) -> dict:
     bug_ids = sorted({n["bug"] for n in s["notes_by_id"].values() if n.get("bug")})
-    bugs = fetch_bug_fields(bug_ids, "id,component,product,summary", cache, "noted-bugs")
+    bugs = fetch_bug_fields(bug_ids, "id,component,product,summary", "noted-bugs")
     counter = collections.Counter(
         f"{b['product']} :: {b['component']}" for b in bugs.values()
     )
@@ -859,12 +788,12 @@ def compute_areas(s: dict, cache: Path | None) -> dict:
     }
 
 
-def compute_negative(s: dict, versions: list[str], areas: dict | None, cache: Path | None) -> dict:
+def compute_negative(s: dict, versions: list[str], areas: dict | None) -> dict:
     per_version = {}
     total_fixed = total_notes = 0
     fixed_components: collections.Counter = collections.Counter()
     for v in versions:
-        fixed = fetch_fixed_in_version(v, cache)
+        fixed = fetch_fixed_in_version(v)
         notes = s["per_version"].get(v, [])
         rate = 100.0 * len(notes) / len(fixed) if fixed else 0.0
         per_version[v] = {"fixed": len(fixed), "notes": len(notes), "rate": rate}
@@ -875,6 +804,9 @@ def compute_negative(s: dict, versions: list[str], areas: dict | None, cache: Pa
 
     component_conversion: list = []
     component_zero_yield: list = []
+    # A component with 3 fixed bugs and 1 note is not a 33% converter, it is
+    # noise. Require real volume before ranking by rate.
+    min_volume = 25
     if areas:
         noted_components = collections.Counter()
         sampled_bugs = {
@@ -884,9 +816,6 @@ def compute_negative(s: dict, versions: list[str], areas: dict | None, cache: Pa
             b = areas["by_bug"].get(bug_id)
             if b:
                 noted_components[f"{b['product']} :: {b['component']}"] += 1
-        # A component with 3 fixed bugs and 1 note is not a 33% converter, it is
-        # noise. Require real volume before ranking by rate.
-        min_volume = 25
         rows = []
         for comp, fixed in fixed_components.items():
             if fixed < min_volume:
@@ -909,7 +838,7 @@ def compute_negative(s: dict, versions: list[str], areas: dict | None, cache: Pa
         "mean_fixed": total_fixed / len(versions) if versions else 0,
         "component_conversion": component_conversion,
         "component_zero_yield": component_zero_yield,
-        "min_volume": 25,
+        "min_volume": min_volume,
     }
 
 
@@ -926,11 +855,6 @@ def main() -> None:
         help="only releases on or after this ISO date (default: 24 months back from --months)",
     )
     p.add_argument("--months", type=int, default=24, help="window in months if --since is absent")
-    p.add_argument(
-        "--workdir",
-        default=None,
-        help=f"cache directory for fetched JSON (default: {DEFAULT_CACHE})",
-    )
     p.add_argument("--refresh", action="store_true",
                    help="ignore the cache and refetch everything")
     p.add_argument("--areas", action="store_true", help="resolve noted bugs to Bugzilla components")
@@ -949,7 +873,7 @@ def main() -> None:
                    help="case-insensitive regex: show every shipped note matching it, across ALL "
                         "channels and years. Use this to check precedent before proposing a "
                         "candidate -- 'have we ever noted this kind of thing?'")
-    p.add_argument("--format", choices=["md", "json", "stats"], default="stats")
+    p.add_argument("--format", choices=["md", "stats"], default="stats")
     p.add_argument("-o", "--output", default=None, help="write to this path instead of stdout")
     args = p.parse_args()
 
@@ -957,8 +881,6 @@ def main() -> None:
         since = args.since if "T" in args.since else f"{args.since}T00:00:00Z"
     else:
         # Approximate months back without pulling in dateutil.
-        import datetime
-
         cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(
             days=int(args.months * 30.44)
         )
@@ -966,9 +888,7 @@ def main() -> None:
 
     global _FORCE_REFRESH
     _FORCE_REFRESH = args.refresh
-    workdir = Path(args.workdir).expanduser() if args.workdir else DEFAULT_CACHE
-    workdir.mkdir(parents=True, exist_ok=True)
-    print(f"# cache: {workdir}", file=sys.stderr)
+    print(f"# cache: {DEFAULT_CACHE}", file=sys.stderr)
 
     # --notes-for is the *review input*: it is read straight after an author has edited Nucleus, so a
     # cached copy is a copy of the very text they just changed. Every other mode here reads settled
@@ -977,8 +897,8 @@ def main() -> None:
     # --help for a bypass seven seconds after the author said "fixed in nucleus", and then passing
     # --refresh by hand on every re-read for the rest of the review.
     notes_ttl = 0 if args.notes_for else NUCLEUS_CACHE_TTL
-    notes = fetch_json(NUCLEUS_NOTES, workdir, "nucleus-notes", ttl=notes_ttl)
-    releases = fetch_json(NUCLEUS_RELEASES, workdir, "nucleus-releases", ttl=notes_ttl)
+    notes = fetch_json(NUCLEUS_NOTES, "nucleus-notes", ttl=notes_ttl)
+    releases = fetch_json(NUCLEUS_RELEASES, "nucleus-releases", ttl=notes_ttl)
 
     if args.notes_for:
         rel_by_id = {release_id(r["url"]): r for r in releases}
@@ -992,15 +912,11 @@ def main() -> None:
                 and r.get("version") == version
             }
             if not targets:
-                # Sorted as versions, not as strings: lexically "99.0" beats "153.0", so a plain
-                # sort offered 98.0 and 99.0 as the most recent Firefox releases. Nucleus also
-                # carries non-numeric versions ('duplicate-26.0'), hence the tolerant key.
-                def vkey(v: str):
-                    parts = re.findall(r"\d+", v)
-                    return ([int(x) for x in parts] if parts else [-1], v)
+                # A plain string sort offered 98.0 and 99.0 as the most recent Firefox releases.
                 avail = sorted({r["version"] for r in rel_by_id.values()
                                 if r.get("product") == args.product
-                                and r.get("channel") == args.channel}, key=vkey)[-6:]
+                                and r.get("channel") == args.channel},
+                               key=lambda v: (version_key(v), v))[-6:]
                 if avail:
                     sys.exit(f"error: no {args.product} {args.channel} release {version!r}. "
                              f"Recent: {', '.join(avail)}")
@@ -1023,7 +939,7 @@ def main() -> None:
 
     if args.search:
         rx = re.compile(args.search, re.IGNORECASE)
-        rel_by_id = {re.search(r"/releases/(\d+)/", r["url"]).group(1): r for r in releases}
+        rel_by_id = {release_id(r["url"]): r for r in releases}
         hits = []
         pointer_hits = 0
         for n in notes:
@@ -1087,32 +1003,26 @@ def main() -> None:
         )
     s = summarize(pairs, scoped)
 
-    areas = compute_areas(s, workdir) if args.areas else None
+    areas = compute_areas(s) if args.areas else None
     negative = None
     if args.negative:
         versions = [v.strip() for v in args.negative.split(",") if v.strip()]
         missing = [v for v in versions if v not in s["per_version"]]
         if missing:
             print(f"# warning: no notes in scope for {', '.join(missing)}", file=sys.stderr)
-        negative = compute_negative(s, versions, areas, workdir)
+        negative = compute_negative(s, versions, areas)
 
     meta = {
         "product": args.product,
         "channel": args.channel,
         "since": since,
-        "pairs": pairs,
         # None when --since pinned the floor, a month count when it was derived from --months. The
         # difference is not cosmetic: a derived floor moves forward on every run, so the report has
         # to say which kind it is rather than printing a date that looks fixed either way.
         "window_months": None if args.since else args.months,
     }
 
-    if args.format == "md":
-        out = emit_markdown(s, meta, areas, negative)
-    elif args.format == "json":
-        out = emit_json(s, meta)
-    else:
-        out = emit_stats(s)
+    out = emit_markdown(s, meta, areas, negative) if args.format == "md" else emit_stats(s)
 
     if args.output:
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)

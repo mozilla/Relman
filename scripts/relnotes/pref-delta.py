@@ -29,6 +29,7 @@ Usage:
 
 import argparse
 import collections
+import functools
 import json
 import posixpath
 import re
@@ -155,41 +156,16 @@ class CannotEvaluate(Exception):
     """
 
 # Channel guard truth tables. EARLY_BETA_OR_EARLIER is true on nightly and the
-# first half of a beta cycle; RELEASE_OR_BETA is the complement of nightly.
-CHANNELS = {
-    "nightly": {
-        "NIGHTLY_BUILD": True,
-        "EARLY_BETA_OR_EARLIER": True,
-        "RELEASE_OR_BETA": False,
-        "MOZ_DEV_EDITION": False,
-        "MOZILLA_OFFICIAL": True,
-        "DEBUG": False,
-    },
-    "beta-early": {
-        "NIGHTLY_BUILD": False,
-        "EARLY_BETA_OR_EARLIER": True,
-        "RELEASE_OR_BETA": True,
-        "MOZ_DEV_EDITION": False,
-        "MOZILLA_OFFICIAL": True,
-        "DEBUG": False,
-    },
-    "beta-late": {
-        "NIGHTLY_BUILD": False,
-        "EARLY_BETA_OR_EARLIER": False,
-        "RELEASE_OR_BETA": True,
-        "MOZ_DEV_EDITION": False,
-        "MOZILLA_OFFICIAL": True,
-        "DEBUG": False,
-    },
-    "release": {
-        "NIGHTLY_BUILD": False,
-        "EARLY_BETA_OR_EARLIER": False,
-        "RELEASE_OR_BETA": True,
-        "MOZ_DEV_EDITION": False,
-        "MOZILLA_OFFICIAL": True,
-        "DEBUG": False,
-    },
-}
+# first half of a beta cycle; RELEASE_OR_BETA is the complement of nightly. Every symbol is written
+# for every row, true or false, so an unlisted symbol stays distinguishable from a false one.
+CHANNEL_SYMBOLS = ("NIGHTLY_BUILD", "EARLY_BETA_OR_EARLIER", "RELEASE_OR_BETA", "MOZ_DEV_EDITION",
+                   "MOZILLA_OFFICIAL", "DEBUG")
+CHANNELS = {c: {sym: sym in on for sym in CHANNEL_SYMBOLS} for c, on in {
+    "nightly": {"NIGHTLY_BUILD", "EARLY_BETA_OR_EARLIER", "MOZILLA_OFFICIAL"},
+    "beta-early": {"EARLY_BETA_OR_EARLIER", "RELEASE_OR_BETA", "MOZILLA_OFFICIAL"},
+    "beta-late": {"RELEASE_OR_BETA", "MOZILLA_OFFICIAL"},
+    "release": {"RELEASE_OR_BETA", "MOZILLA_OFFICIAL"},
+}.items()}
 
 # Values checked against https://wiki.mozilla.org/Platform/Platform-specific_build_defines and
 # `build/moz.configure/init.configure`, which is authoritative when the two disagree (the wiki's
@@ -203,45 +179,27 @@ CHANNELS = {
 # The BSDs and Solaris are false everywhere here because this tool models four Firefox
 # configurations, none of which is a BSD or Solaris build; `MOZ_THUNDERBIRD` for the same reason.
 # Adding them is what lets a `#if defined(XP_LINUX) || defined(XP_FREEBSD)` guard resolve at all.
-PLATFORMS = {
-    "win": {"XP_WIN": True, "XP_MACOSX": False, "XP_DARWIN": False, "MOZ_WIDGET_GTK": False,
-            "ANDROID": False, "MOZ_WIDGET_ANDROID": False, "XP_UNIX": False, "XP_LINUX": False,
-            "UNIX_BUT_NOT_MAC": False, "XP_IOS": False, "MOZ_WIDGET_UIKIT": False,
-            "XP_FREEBSD": False, "XP_OPENBSD": False, "XP_NETBSD": False, "XP_SOLARIS": False,
-            "MOZ_THUNDERBIRD": False},
-    "mac": {"XP_WIN": False, "XP_MACOSX": True, "XP_DARWIN": True, "MOZ_WIDGET_GTK": False,
-            "ANDROID": False, "MOZ_WIDGET_ANDROID": False, "XP_UNIX": True, "XP_LINUX": False,
-            "UNIX_BUT_NOT_MAC": False, "XP_IOS": False, "MOZ_WIDGET_UIKIT": False,
-            "XP_FREEBSD": False, "XP_OPENBSD": False, "XP_NETBSD": False, "XP_SOLARIS": False,
-            "MOZ_THUNDERBIRD": False},
-    "linux": {"XP_WIN": False, "XP_MACOSX": False, "XP_DARWIN": False, "MOZ_WIDGET_GTK": True,
-              "ANDROID": False, "MOZ_WIDGET_ANDROID": False, "XP_UNIX": True, "XP_LINUX": True,
-              "UNIX_BUT_NOT_MAC": True, "XP_IOS": False, "MOZ_WIDGET_UIKIT": False,
-              "XP_FREEBSD": False, "XP_OPENBSD": False, "XP_NETBSD": False, "XP_SOLARIS": False,
-              "MOZ_THUNDERBIRD": False},
-    # `UNIX_BUT_NOT_MAC` stays False here even though XP_UNIX is true and XP_MACOSX is not: Gecko
-    # uses that symbol in `firefox.js` only, which is never read for Android, so the value is
-    # unreachable rather than wrong.
-    "android": {"XP_WIN": False, "XP_MACOSX": False, "XP_DARWIN": False, "MOZ_WIDGET_GTK": False,
-                "ANDROID": True, "MOZ_WIDGET_ANDROID": True, "XP_UNIX": True, "XP_LINUX": True,
-                "UNIX_BUT_NOT_MAC": False, "XP_IOS": False, "MOZ_WIDGET_UIKIT": False,
-                "XP_FREEBSD": False, "XP_OPENBSD": False, "XP_NETBSD": False, "XP_SOLARIS": False,
-                "MOZ_THUNDERBIRD": False},
-}
+#
+# `UNIX_BUT_NOT_MAC` stays False on Android even though XP_UNIX is true and XP_MACOSX is not: Gecko
+# uses that symbol in `firefox.js` only, which is never read for Android, so the value is
+# unreachable rather than wrong.
+PLATFORM_SYMBOLS = ("XP_WIN", "XP_MACOSX", "XP_DARWIN", "MOZ_WIDGET_GTK", "ANDROID",
+                    "MOZ_WIDGET_ANDROID", "XP_UNIX", "XP_LINUX", "UNIX_BUT_NOT_MAC", "XP_IOS",
+                    "MOZ_WIDGET_UIKIT", "XP_FREEBSD", "XP_OPENBSD", "XP_NETBSD", "XP_SOLARIS",
+                    "MOZ_THUNDERBIRD")
+PLATFORMS = {p: {sym: sym in on for sym in PLATFORM_SYMBOLS} for p, on in {
+    "win": {"XP_WIN"},
+    "mac": {"XP_MACOSX", "XP_DARWIN", "XP_UNIX"},
+    "linux": {"MOZ_WIDGET_GTK", "XP_UNIX", "XP_LINUX", "UNIX_BUT_NOT_MAC"},
+    "android": {"ANDROID", "MOZ_WIDGET_ANDROID", "XP_UNIX", "XP_LINUX"},
+}.items()}
 
 DESKTOP = ["win", "mac", "linux"]
 
 
-def git(repo: Path, *args: str) -> str:
-    try:
-        return trainlib.git(repo, *args)
-    except RuntimeError as e:
-        sys.exit(f"error: {e}")
-
-
 def show(repo: Path, rev: str, path: str) -> str:
     """Read a file at a revision. Never touches the working tree."""
-    return git(repo, "show", f"{rev}:{path}")
+    return trainlib.git(repo, "show", f"{rev}:{path}")
 
 
 def show_optional(repo: Path, rev: str, path: str) -> str | None:
@@ -258,7 +216,7 @@ def show_optional(repo: Path, rev: str, path: str) -> str | None:
         msg = str(e)
         if "does not exist" in msg or "exists on disk, but not in" in msg:
             return None
-        sys.exit(f"error: {e}")
+        raise
 
 
 class Preprocessor:
@@ -560,10 +518,7 @@ def summarize_values(vals: dict[str, str | None], channels: list[str],
     single `#ifdef` on one axis.
     """
     keys = [f"{c}/{p}" for c in channels for p in platforms]
-    distinct: list[str | None] = []
-    for k in keys:
-        if vals[k] not in distinct:
-            distinct.append(vals[k])
+    distinct = list(dict.fromkeys(vals[k] for k in keys))
     if len(distinct) == 1:
         return distinct[0]
 
@@ -683,7 +638,7 @@ def attribution_map(repo: Path, start: str, end: str) -> dict[str, list[str]]:
     string and `value: false` -> `value: true` leaves the pref name's count untouched, so the
     flips that matter most are the ones it misses.
     """
-    log = git(repo, "log", f"{start}..{end}", "--format=%h %s", "--", *PREF_FILES)
+    log = trainlib.git(repo, "log", f"{start}..{end}", "--format=%h %s", "--", *PREF_FILES)
     commits = [ln for ln in log.splitlines() if ln.strip()]
 
     # One read per (rev, file) even though consecutive commits share versions.
@@ -833,9 +788,11 @@ def unmodelled_symbols(guard: str) -> list[str]:
     ids = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", expr))
     return sorted(ids - _MODELLED_SYMBOLS - _GUARD_WORDS)
 
-# Keyed by (rev, path): a lookup of several missing names would otherwise re-read the same
-# 20,000-line file once per name.
-_file_cache: dict[tuple[str, str], str] = {}
+@functools.lru_cache(maxsize=len(PREF_FILES))
+def pref_file(repo: Path, rev: str, path: str) -> str:
+    """A preference file at a revision, "" when absent. Cached because a lookup of several missing
+    names would otherwise re-read the same 20,000-line file once per name."""
+    return show_optional(repo, rev, path) or ""
 
 
 def locate_entry(repo: Path, rev: str, name: str) -> list[dict]:
@@ -856,10 +813,7 @@ def locate_entry(repo: Path, rev: str, name: str) -> list[dict]:
     quoted = (f'"{name}"', f"'{name}'")
     found = []
     for path in PREF_FILES:
-        text = _file_cache.get((rev, path))
-        if text is None:
-            text = show_optional(repo, rev, path) or ""
-            _file_cache[(rev, path)] = text
+        text = pref_file(repo, rev, path)
         if not text:
             continue
         lines = text.splitlines()
@@ -1057,16 +1011,27 @@ def _fml_value(lines, k: int, end: int) -> dict[str, str]:
             for key, ln in _fml_keys(lines, start, stop).items()}
 
 
-def _fml_entries(lines, start: int, end: int) -> list[tuple[list[str] | None, dict[str, str]]]:
-    """A defaults list: [(channels or None for every channel, {variable: value})], in file order."""
-    out = []
+def _fml_items(lines, start: int, end: int):
+    """(sub-document, its keys) for each `- ` item of the block list in lines[start:end]."""
     items = [k for k in range(start, end)
              if lines[k][1].startswith("- ") and lines[k][0] == lines[start][0]]
     for n, k in enumerate(items):
         stop = items[n + 1] if n + 1 < len(items) else end
         # The item's first key sits on the dash line; re-indent it so it reads as a sibling.
         sub = [(lines[k][0] + 2, lines[k][1][2:])] + lines[k + 1:stop]
-        keys = _fml_keys(sub, 0, len(sub))
+        yield sub, _fml_keys(sub, 0, len(sub))
+
+
+def _fml_list(lines, ln: int) -> list[str]:
+    """The scalars of the block list under line ln."""
+    cs, ce = _fml_children(lines, ln)
+    return [s[2:].strip() for _, s in lines[cs:ce] if s.startswith("- ")]
+
+
+def _fml_entries(lines, start: int, end: int) -> list[tuple[list[str] | None, dict[str, str]]]:
+    """A defaults list: [(channels or None for every channel, {variable: value})], in file order."""
+    out = []
+    for sub, keys in _fml_items(lines, start, end):
         chans = None
         if "channel" in keys:
             chans = [_fml_scalar(sub[keys["channel"]][1].split(":", 1)[1])]
@@ -1076,8 +1041,7 @@ def _fml_entries(lines, start: int, end: int) -> list[tuple[list[str] | None, di
             if inline.startswith("["):
                 chans = [c.strip().strip("\"'") for c in inline[1:-1].split(",") if c.strip()]
             else:
-                cs, ce = _fml_children(sub, ln)
-                chans = [s[2:].strip() for _, s in sub[cs:ce] if s.startswith("- ")]
+                chans = _fml_list(sub, ln)
         out.append((chans, _fml_value(sub, keys["value"], len(sub)) if "value" in keys else {}))
     return out
 
@@ -1134,27 +1098,15 @@ def fml_lookup(repo: Path, rev: str, names: list[str]) -> list[dict]:
     feats, top, lines = _fml_features(app_text)
     origin = {n: FENIX_FML for n in feats}
     base_dir = FENIX_FML.rsplit("/", 1)[0]
-    channels = []
-    if "channels" in top:
-        cs, ce = _fml_children(lines, top["channels"])
-        channels = [s[2:].strip() for _, s in lines[cs:ce] if s.startswith("- ")]
-    if "includes" in top:
-        cs, ce = _fml_children(lines, top["includes"])
-        for _, s in lines[cs:ce]:
-            if s.startswith("- "):
-                path = f"{base_dir}/{s[2:].strip()}"
-                inc = _fml_features(show_optional(repo, rev, path) or "")[0]
-                feats.update(inc)
-                origin.update({n: path for n in inc})
+    channels = _fml_list(lines, top["channels"]) if "channels" in top else []
+    for rel in (_fml_list(lines, top["includes"]) if "includes" in top else []):
+        path = f"{base_dir}/{rel}"
+        inc = _fml_features(show_optional(repo, rev, path) or "")[0]
+        feats.update(inc)
+        origin.update({n: path for n in inc})
     imported = {}   # name -> (path, import channel, app overrides)
     if "import" in top:
-        cs, ce = _fml_children(lines, top["import"])
-        items = [k for k in range(cs, ce) if lines[k][1].startswith("- ")
-                 and lines[k][0] == lines[cs][0]]
-        for n, k in enumerate(items):
-            stop = items[n + 1] if n + 1 < len(items) else ce
-            sub = [(lines[k][0] + 2, lines[k][1][2:])] + lines[k + 1:stop]
-            keys = _fml_keys(sub, 0, len(sub))
+        for sub, keys in _fml_items(lines, *_fml_children(lines, top["import"])):
             rel = _fml_scalar(sub[keys["path"]][1].split(":", 1)[1])
             path = posixpath.normpath(f"{base_dir}/{rel}")
             chan = _fml_scalar(sub[keys["channel"]][1].split(":", 1)[1]) if "channel" in keys else ""
@@ -1176,8 +1128,8 @@ def fml_lookup(repo: Path, rev: str, names: list[str]) -> list[dict]:
             fixed = chan
         else:
             known = sorted(set(feats) | set(imported))
-            last = git(repo, "log", "-1", "--format=%h %cs %s", "-S", f"{name}:", rev, "--",
-                       "mobile/android/*.fml.yaml").strip()
+            last = trainlib.git(repo, "log", "-1", "--format=%h %cs %s", "-S", f"{name}:", rev,
+                                "--", "mobile/android/*.fml.yaml").strip()
             results.append({"pref": f"fml:{name}", "found": False, "written_at": [],
                             "near": [k for k in known if _shares_any(name, k)][:5],
                             "last_change": last})
@@ -1250,7 +1202,6 @@ def main() -> None:
                    help="comma-separated Fenix Nimbus feature names to resolve per channel from "
                         "nimbus.fml.yaml (skips flip detection; combines with --lookup)")
     p.add_argument("--no-fetch", action="store_true", help="skip git fetch origin")
-    p.add_argument("--channels", default="nightly,beta-early,beta-late,release")
     p.add_argument("--platforms", default="win,mac,linux,android",
                    help="build configurations to resolve. android is on by default because an "
                         "#ifdef ANDROID default, or an override in geckoview-prefs.js, is how a "
@@ -1260,7 +1211,7 @@ def main() -> None:
 
     repo = trainlib.resolve_repo(args.repo)
 
-    channels = [c.strip() for c in args.channels.split(",") if c.strip() in CHANNELS]
+    channels = list(CHANNELS)
     platforms = [x.strip() for x in args.platforms.split(",") if x.strip() in PLATFORMS]
 
     if not args.no_fetch:
@@ -1381,7 +1332,7 @@ def main() -> None:
                             print(f"    *** NO DEFAULT WAS COMPUTED for "
                                   f"{','.join(channels)} x {','.join(platforms)}: the entry exists "
                                   f"but nothing asked about includes it. Widen "
-                                  f"--platforms/--channels; do not report this as ungated. ***")
+                                  f"--platforms; do not report this as ungated. ***")
                         continue
                     print(f"{r['pref']}: NOT FOUND at {args.rev}")
                     # Says what the miss does and does not establish. Read as a fact about the
@@ -1428,8 +1379,8 @@ def main() -> None:
                  "Get boundary commits from: python3 scripts/relnotes/scan-window.py --show-state\n"
                  "Or use --lookup <pref> to resolve current defaults without a window.")
     start, end = args.rev_range.split("..", 1)
-    start_desc = git(repo, "log", "-1", "--format=%h %cd", "--date=short", start).strip()
-    end_desc = git(repo, "log", "-1", "--format=%h %cd", "--date=short", end).strip()
+    start_desc = trainlib.git(repo, "log", "-1", "--format=%h %cd", "--date=short", start).strip()
+    end_desc = trainlib.git(repo, "log", "-1", "--format=%h %cd", "--date=short", end).strip()
     print(f"# window {start_desc} .. {end_desc}", file=sys.stderr)
 
     # Also resolve defaults *at the window end*. `effective now` reads today's tree, which
@@ -1437,15 +1388,16 @@ def main() -> None:
     # browser.promo.cookiebanners.enabled shows FLIPPED ON while "effective now" says off,
     # because it was flipped back three days later. Scanning forward day by day this never
     # bites; backfilling old windows it always does.
-    end_sha = git(repo, "rev-parse", end).strip()
-    rev_sha = git(repo, "rev-parse", args.rev).strip()
+    end_sha = trainlib.git(repo, "rev-parse", end).strip()
+    rev_sha = trainlib.git(repo, "rev-parse", args.rev).strip()
     if end_sha != rev_sha:
         print(f"# also resolving defaults at the window end ({end_sha[:12]})", file=sys.stderr)
         eff_end = effective_defaults(repo, end_sha, channels, platforms)
     else:
         eff_end = eff  # the window ends at the revision we already resolved
 
-    print(f"# resolving defaults at the window start ({git(repo, 'rev-parse', start)[:12]})",
+    start_sha = trainlib.git(repo, "rev-parse", start)
+    print(f"# resolving defaults at the window start ({start_sha[:12]})",
           file=sys.stderr)
     eff_start = effective_defaults(repo, start, channels, platforms)
     changes = changed_prefs(eff_start["table"], eff_end["table"], channels, platforms)
@@ -1529,4 +1481,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except RuntimeError as e:
+        sys.exit(f"error: {e}")

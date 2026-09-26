@@ -50,9 +50,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import trainlib  # noqa: E402
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = trainlib.RELMAN_ROOT
 WATCHLIST = REPO / "scripts" / "relnotes" / "watchlist.py"
-DOC_GLOBS = (".claude/skills/*/SKILL.md", "reference/release-notes/*.md", "README.md")
+DOC_GLOBS = trainlib.DOC_GLOBS
 # Only the watchlist state is isolated; the Gecko clone is handed to the children explicitly.
 # Without this a child finds no config.json in the throwaway state directory and falls through
 # resolve_repo to the legacy ~/repos/firefox guess -- correct on the machine that guess was written

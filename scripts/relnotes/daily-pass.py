@@ -30,11 +30,12 @@ Usage:
 """
 
 import argparse
+import io
 import json
 import subprocess
 import sys
 import tempfile
-import urllib.parse as url_parse
+import textwrap
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -42,54 +43,49 @@ sys.path.insert(0, str(HERE))
 import trainlib  # noqa: E402
 import watchlist  # noqa: E402
 
-BUGZILLA_REST = "https://bugzilla.mozilla.org/rest"
+# Components whose changes reach users through a train-hop system add-on, outside the release
+# cycle, so there is no Firefox version to note them against (calibration.md, bug 2046143).
+TRAIN_HOP_COMPONENTS = {"Firefox :: New Tab Page"}
 
 def run(cmd: list[str], capture: bool = True) -> subprocess.CompletedProcess:
     print(f"# $ {' '.join(cmd)}", file=sys.stderr)
     return subprocess.run(cmd, capture_output=capture, text=True, check=False)
 
 
-def write_artifact(path: Path, res: subprocess.CompletedProcess) -> None:
+def write_artifact(path: Path, res: subprocess.CompletedProcess, body: str | None = None) -> None:
     """A child's output with its diagnostics folded in above it.
 
-    Diagnostics are where a child says what it could *not* do -- a parent list truncated by
-    --max-parents, the meta bugs skipped as too broad, a preference whose default is a guess -- and
-    they arrive on stderr. These files are re-read weeks later, so a caveat that stayed in a terminal
-    is a caveat nobody has: bug-tree dropped 31 parents and skipped 71 metas on the cycle-155 rollup
-    and clusters.txt recorded neither.
+    Diagnostics are where a child says what it could *not* do -- a capped parent list, the meta
+    bugs skipped as too broad, a preference whose default is a guess -- and they arrive on stderr.
+    These files are re-read weeks later, so a caveat that stayed in a terminal is a caveat nobody
+    has: bug-tree dropped 31 parents and skipped 71 metas on the cycle-155 rollup and clusters.txt
+    recorded neither.
 
     Lines already carry a `#`; anything that does not (a traceback) gets one, so the head cannot be
-    mistaken for content.
+    mistaken for content. `body` replaces the child's stdout, for a child that wrote its content to
+    a file instead.
     """
     head = [ln if ln.startswith("#") else f"# {ln}" for ln in res.stderr.splitlines()]
-    path.write_text(("\n".join(head) + "\n\n" if head else "") + res.stdout)
+    path.write_text(("\n".join(head) + "\n\n" if head else "")
+                    + (res.stdout if body is None else body))
 
 
-def window_args(args) -> list[str]:
-    out = []
-    if args.build:
-        out += ["--build", args.build]
-    if args.from_build:
-        out += ["--from-build", args.from_build]
-    if args.to_build:
-        out += ["--to-build", args.to_build]
-    if args.build_day:
-        out += ["--build-day", args.build_day]
-    if args.cycle:
-        out += ["--cycle", str(args.cycle)]
-    if args.since_last:
-        out += ["--since-last"]
-    if args.rev_range:
-        out += ["--range", args.rev_range]
-    if args.version:
-        out += ["--version", str(args.version)]
-    if args.first_parent:
-        out += ["--first-parent"]
-    if args.allow_stale:
-        out += ["--allow-stale"]
-    out += ["--repo", str(trainlib.resolve_repo(args.repo))]
-    if args.no_fetch:
-        out += ["--no-fetch"]
+# The options forwarded to scan-window.py unchanged, as (attribute, flag).
+WINDOW_FLAGS = (("build", "--build"), ("from_build", "--from-build"), ("to_build", "--to-build"),
+                ("build_day", "--build-day"), ("cycle", "--cycle"), ("since_last", "--since-last"),
+                ("rev_range", "--range"), ("version", "--version"),
+                ("first_parent", "--first-parent"), ("allow_stale", "--allow-stale"),
+                ("no_fetch", "--no-fetch"))
+
+
+def window_args(args, repo: Path) -> list[str]:
+    out = ["--repo", str(repo)]
+    for attr, flag in WINDOW_FLAGS:
+        v = getattr(args, attr)
+        if v is True:
+            out.append(flag)
+        elif v:
+            out += [flag, str(v)]
     return out
 
 
@@ -113,99 +109,45 @@ def fetch_uplift_and_relnote_flags(bug_ids: list[str]) -> dict[str, dict]:
     if not bug_ids:
         return out
 
-    for i in range(0, len(bug_ids), 120):
-        batch = bug_ids[i:i + 120]
-        qs = url_parse.urlencode({
-            "id": ",".join(batch),
-            "include_fields": ("id,cf_tracking_firefox_relnote,creator,duplicates,cc_count,"
-                               "see_also,groups,creation_time"),
-        })
-        try:
-            payload = trainlib.fetch_json(f"{BUGZILLA_REST}/bug?{qs}")
-        except RuntimeError as e:
-            print(f"# warning: relnote-flag fetch failed: {e}", file=sys.stderr)
-            break
-        for b in payload.get("bugs", []):
-            bid = str(b["id"])
-            flag = b.get("cf_tracking_firefox_relnote")
-            if flag and flag not in ("---", ""):
-                out[bid]["relnote_flag"] = flag
-            # Impact evidence. Repeatedly the deciding factor: a bug filed internally
-            # with no duplicates is weak evidence of user impact no matter how severe
-            # the summary sounds, while duplicates and outside reporters are real
-            # evidence people hit it.
-            creator = b.get("creator") or ""
-            out[bid]["reporter"] = creator
-            out[bid]["internal"] = creator.endswith("@mozilla.com")
-            out[bid]["duplicates"] = len(b.get("duplicates") or [])
-            out[bid]["see_also"] = len(b.get("see_also") or [])
-            out[bid]["public"] = not (b.get("groups") or [])
+    try:
+        bugs = trainlib.bugzilla_bugs(
+            bug_ids, "id,cf_tracking_firefox_relnote,creator,duplicates,see_also,groups")
+    except RuntimeError as e:
+        print(f"# warning: relnote-flag fetch failed: {e}", file=sys.stderr)
+        bugs = {}
+    for bid, b in bugs.items():
+        flag = b.get("cf_tracking_firefox_relnote")
+        if flag and flag not in ("---", ""):
+            out[bid]["relnote_flag"] = flag
+        # Impact evidence. Repeatedly the deciding factor: a bug filed internally
+        # with no duplicates is weak evidence of user impact no matter how severe
+        # the summary sounds, while duplicates and outside reporters are real
+        # evidence people hit it.
+        creator = b.get("creator") or ""
+        out[bid]["reporter"] = creator
+        out[bid]["internal"] = creator.endswith("@mozilla.com")
+        out[bid]["duplicates"] = len(b.get("duplicates") or [])
+        out[bid]["see_also"] = len(b.get("see_also") or [])
+        out[bid]["public"] = not (b.get("groups") or [])
 
     # Uplift approval lives on *attachment* flags, and the attachment endpoint takes one
     # bug at a time -- which was 127 requests on a busy day. Narrow first with a single
     # search on flagtypes.name, then fetch attachments only for the few bugs that have an
     # approval flag at all.
-    candidates: list[str] = []
-    for i in range(0, len(bug_ids), 120):
-        qs = url_parse.urlencode({
-            "id": ",".join(bug_ids[i:i + 120]), "include_fields": "id",
-            "f1": "flagtypes.name", "o1": "substring", "v1": "approval-mozilla",
-        })
-        try:
-            hit = trainlib.fetch_json(f"{BUGZILLA_REST}/bug?{qs}")
-        except RuntimeError as e:
-            # Do not let a failed narrowing pass masquerade as "nothing pending" --
-            # pending-uplift is used to *reject* candidates, so a silent miss changes
-            # the verdict.
-            print(f"# WARNING: uplift-flag search failed ({e}); pending-uplift results "
-                  "for this run are INCOMPLETE", file=sys.stderr)
-            candidates = list(bug_ids)
-            break
-        candidates += [str(b["id"]) for b in hit.get("bugs", [])]
+    try:
+        candidates = list(trainlib.bugzilla_bugs(bug_ids, "id", f1="flagtypes.name",
+                                                 o1="substring", v1="approval-mozilla"))
+    except RuntimeError as e:
+        # Do not let a failed narrowing pass masquerade as "nothing pending" --
+        # pending-uplift is used to *reject* candidates, so a silent miss changes
+        # the verdict.
+        print(f"# WARNING: uplift-flag search failed ({e}); pending-uplift results "
+              "for this run are INCOMPLETE", file=sys.stderr)
+        candidates = list(bug_ids)
 
     for bug in candidates:
-        try:
-            payload = trainlib.fetch_json(
-                f"{BUGZILLA_REST}/bug/{bug}/attachment?exclude_fields=data"
-            )
-        except RuntimeError as e:
-            print(f"# WARNING: could not read attachments for bug {bug} ({e}); its "
-                  "pending-uplift state is unknown", file=sys.stderr)
-            continue
-        for atts in (payload.get("bugs") or {}).values():
-            for a in atts:
-                for fl in a.get("flags", []):
-                    name = fl.get("name", "")
-                    if name.startswith("approval-mozilla-") and fl.get("status") == "?":
-                        target = name.replace("approval-mozilla-", "")
-                        if target not in out[bug]["pending_uplift"]:
-                            out[bug]["pending_uplift"].append(target)
+        out[bug]["pending_uplift"] = trainlib.pending_uplifts(bug) or []
     return out
-
-
-class Tee:
-    """Collect everything printed so the full report can be written to disk.
-
-    daily-pass output runs to tens of KB, which invites `> file` redirects -- and those
-    are file writes that prompt for approval separately from the script. Writing the
-    report ourselves removes the reason to redirect.
-    """
-
-    def __init__(self, stream, echo=True):
-        self.stream = stream
-        self.echo = echo
-        self.buf = []
-
-    def write(self, text):
-        self.buf.append(text)
-        if self.echo:
-            self.stream.write(text)
-
-    def flush(self):
-        self.stream.flush()
-
-    def text(self):
-        return "".join(self.buf)
 
 
 def print_header(version: str, window: dict, funnel: dict, census: dict | None = None) -> None:
@@ -253,14 +195,11 @@ def main() -> None:
     p.add_argument("--no-fetch", action="store_true")
     # Pass options.
     p.add_argument("--outdir", default=None, help="default: a fresh mktemp dir")
-    p.add_argument("--min-cluster", type=int, default=2)
     p.add_argument("--show-dropped", action="store_true")
     p.add_argument("--brief", action="store_true",
                    help="print only the funnel and headline signals; the full report is always "
                         "written to <outdir>/report.txt. Use this instead of redirecting output -- "
                         "a shell redirect is a file write and needs its own approval.")
-    p.add_argument("--skip-flags", action="store_true",
-                   help="skip the per-bug uplift/relnote flag pass (one request per survivor)")
     args = p.parse_args()
 
     if not any([args.build, args.build_day, args.from_build, args.cycle, args.since_last,
@@ -275,41 +214,33 @@ def main() -> None:
     print(f"# output dir: {outdir}", file=sys.stderr)
 
     scan_json = outdir / "scan.json"
-    wargs = window_args(args)
+    repo = trainlib.resolve_repo(args.repo)
+    wargs = window_args(args, repo)
 
     # --- 1. scan -------------------------------------------------------------
-    # The census goes on this run only. It costs a Bugzilla search over the whole version plus a
-    # full-history git pass, and the second scan below would repeat both; --census-out gets the
-    # readable section out of this one instead.
+    # One run writes all three views of the window -- the JSON, the readable survivor list and the
+    # drop list -- so the window's bugs are fetched from Bugzilla once. The owner of the data
+    # renders both text files, so the audit file and `--show-dropped` keep one shape.
     census_args = (["--census", "--census-out", str(outdir / "census.txt")] if args.census else [])
+    scan_txt = outdir / "scan.txt"
     r = run([sys.executable, str(HERE / "scan-window.py"), *wargs, *census_args,
-             "--format", "json", "-o", str(scan_json)])
+             "--format", "json", "-o", str(scan_json), "--text-out", str(scan_txt),
+             "--dropped-out", str(outdir / "dropped.txt"),
+             *(["--show-dropped"] if args.show_dropped else [])])
     sys.stderr.write(r.stderr)
     if r.returncode != 0 or not scan_json.exists():
         sys.exit("error: scan-window.py failed; see above")
     scan = json.loads(scan_json.read_text())
     window = scan["window"]
     rng = f"{window['start']}..{window['end']}"
+    # Fold the run's diagnostics into scan.txt, as write_artifact does for the other children.
+    write_artifact(scan_txt, r, body=scan_txt.read_text())
 
-    # Human-readable survivor list, same window. The drop list comes out of the same run via
-    # --dropped-out: the audit needs it every pass, and asking the owner of the data to render it
-    # keeps one shape rather than a second copy of the formatting here.
-    r2 = run([sys.executable, str(HERE / "scan-window.py"), *wargs,
-              "--dropped-out", str(outdir / "dropped.txt"),
-              *(["--show-dropped"] if args.show_dropped else [])])
-    write_artifact(outdir / "scan.txt", r2)
-
-    # The drop list as its own complete file, unconditionally: the audit is a required step every
-    # pass, and giving it a file removes the reason to rebuild the list through a pipe that can
-    # truncate it. Built from the scan JSON already in hand, so it costs nothing.
-    # scan-window renders and writes it, via --dropped-out on the run above: one renderer, so the
-    # audit file and `--show-dropped` cannot drift into two shapes for the same data. The count is
-    # still read from the scan JSON here, for the footer and the reconciliation warning below.
+    # The count is read from the scan JSON, for the footer and the reconciliation warning below.
     dropped = scan.get("dropped", [])
-    # Check the count in the file, not just that a file is there. scan-window writes it only on a
-    # successful run, and the survivor pass does its own Bugzilla fetch, so it can fail while the
-    # JSON pass succeeded -- leaving a previous run's dropped.txt in a reused outdir to satisfy an
-    # existence test. The header carries the count, so one comparison catches both cases.
+    # Check the count in the file, not just that a file is there: a previous run's dropped.txt in a
+    # reused outdir would satisfy an existence test. The header carries the count, so one comparison
+    # catches a stale or missing file.
     drop_file = outdir / "dropped.txt"
     header = drop_file.read_text().splitlines()[0] if drop_file.exists() else ""
     if f"({len(dropped)})" not in header:
@@ -329,23 +260,21 @@ def main() -> None:
 
     # --- 2. preference flips over the identical range ------------------------
     r3 = run([sys.executable, str(HERE / "pref-delta.py"), "--range", rng, "--no-fetch",
-              "--repo", str(trainlib.resolve_repo(args.repo))])
+              "--repo", str(repo)])
     write_artifact(outdir / "prefs.txt", r3)
 
     # --- 3. feature clusters -------------------------------------------------
     r4 = run([sys.executable, str(HERE / "bug-tree.py"), "--input", str(scan_json),
-              "--min-cluster", str(args.min_cluster),
-              "--repo", str(trainlib.resolve_repo(args.repo))])
+              "--repo", str(repo)])
     write_artifact(outdir / "clusters.txt", r4)
 
-    # Only the first scan's exit status was ever checked, and the other three children feed sections
-    # whose empty form is an assertion: an exited pref-delta printed "No preference changes." with its
-    # error text dropped, which is the one sentence meaning "checked, nothing live". Collect the
-    # failures so both channels can say so -- stderr for whoever is watching, and the report body
-    # because report.txt is what gets re-read afterwards.
+    # The scan's failure is fatal above; the other two children feed sections whose empty form is an
+    # assertion: an exited pref-delta printed "No preference changes." with its error text dropped,
+    # which is the one sentence meaning "checked, nothing live". Collect the failures so both
+    # channels can say so -- stderr for whoever is watching, and the report body because report.txt
+    # is what gets re-read afterwards.
     failures = []
-    for label, res, artifact in (("scan-window (survivor list)", r2, "scan.txt"),
-                                 ("pref-delta", r3, "prefs.txt"),
+    for label, res, artifact in (("pref-delta", r3, "prefs.txt"),
                                  ("bug-tree", r4, "clusters.txt")):
         if res.returncode != 0:
             sys.stderr.write(res.stderr)
@@ -355,17 +284,14 @@ def main() -> None:
 
     # --- 4. uplift + relnote flags for the survivors -------------------------
     survivors = [s["bug"] for s in scan["survivors"]]
-    flags = {}
-    if not args.skip_flags:
-        print(f"# fetching uplift/relnote flags for {len(survivors)} survivors...",
-              file=sys.stderr)
-        flags = fetch_uplift_and_relnote_flags(survivors)
-        (outdir / "flags.json").write_text(json.dumps(flags, indent=2))
+    print(f"# fetching uplift/relnote flags for {len(survivors)} survivors...", file=sys.stderr)
+    flags = fetch_uplift_and_relnote_flags(survivors)
+    (outdir / "flags.json").write_text(json.dumps(flags, indent=2))
 
     # --- report --------------------------------------------------------------
-    real_stdout = sys.stdout
-    tee = Tee(real_stdout, echo=not args.brief)
-    sys.stdout = tee
+    # Captured and written to report.txt here, because output this long invites a `> file`
+    # redirect, which is a file write needing its own approval.
+    real_stdout, sys.stdout = sys.stdout, io.StringIO()
 
     # The revision that produced this report. Runs get re-read weeks later -- and their transcripts
     # audited -- to work out why a pass decided what it did; with more than one person editing the
@@ -438,6 +364,22 @@ def main() -> None:
             print(f"  bug {b}: [{it.get('status','?')}] Fx{it.get('release','?')} "
                   f"{it.get('summary','')}")
         print()
+    # Survivors whose verdict a rule already settles, so the walk can confirm them rather than work
+    # them up. Still listed in scan.txt: a label is a reading-order hint, never a drop.
+    train_hop = [s["bug"] for s in scan["survivors"]
+                 if f"{s['product']} :: {s['component']}" in TRAIN_HOP_COMPONENTS
+                 and s["bug"] not in tracked]
+    member = {b: m for b, m in watchlist.members(scan["survivors"]).items()
+              if b not in tracked and b not in train_hop}
+    if train_hop or member:
+        print("PRE-LABELLED (settled by rule; confirm rather than work up):")
+        if train_hop:
+            print(f"  train-hop, ships out of band ({len(train_hop)}): {', '.join(train_hop)}")
+        for b, (key, it, via) in sorted(member.items()):
+            gates = "; ".join(f"{p} = {g['state']}" for p, g in (it.get("gates") or {}).items())
+            print(f"  bug {b}: part of watchlist {key} [{it.get('status', '?')}] via {via}"
+                  + (f" -- gate {gates}" if gates else ""))
+        print()
     standing = watchlist.standing(exclude=set(tracked))
     moved = set()
     rep = None
@@ -445,8 +387,7 @@ def main() -> None:
            for it in {**standing, **tracked}.values()):
         # The scan above already fetched the clone, so resolving again without a fetch reads the
         # same upstream state the window's pref delta did.
-        rep = watchlist.check_gates(watchlist.load(), fetch=False,
-                                    repo=trainlib.resolve_repo(args.repo))
+        rep = watchlist.check_gates(watchlist.load(), fetch=False, repo=repo)
         moved = {r["key"] for k in ("changed", "gone", "unresolvable") for r in rep[k]}
         print("RECORDED GATES ON YOUR WATCHLIST (re-resolved now; a change repeats every pass "
               "until acted on):")
@@ -459,8 +400,7 @@ def main() -> None:
               "`watchlist.py list -v` has the full notes):")
         for k, it in sorted(standing.items()):
             flag = "  <-- GATE MOVED, see above" if k in moved else ""
-            s = " ".join(it.get("summary", "").split())
-            s = s if len(s) <= 110 else s[:110] + " [...]"
+            s = textwrap.shorten(it.get("summary", ""), 116, placeholder=" [...]")
             print(f"  {k}: [{it.get('status','?')}] Fx{it.get('release','?')} {s}{flag}")
         print()
 
@@ -495,8 +435,8 @@ def main() -> None:
     if drop_mismatch:
         print(f"WARNING: {drop_mismatch}")
 
-    sys.stdout = real_stdout
-    (outdir / "report.txt").write_text(tee.text())
+    report, sys.stdout = sys.stdout.getvalue(), real_stdout
+    (outdir / "report.txt").write_text(report)
     if args.brief:
         print_header(version, window, scan["funnel"], scan.get("census"))
         prefs = (outdir / "prefs.txt").read_text()
@@ -509,10 +449,14 @@ def main() -> None:
                                 f"{len(rep['changed'])} changed, {len(rep['gone'])} gone, "
                                 f"{len(rep['unresolvable'])} unknown, {len(rep['same'])} unchanged"
                                 + (" -- see RECORDED GATES in the report" if moved else "")))
+        if train_hop or member:
+            print(f"LABELS  {len(train_hop)} train-hop, {len(member)} part of a watchlist entry "
+                  "-- see PRE-LABELLED in the report")
         print(f"\nFull report: {outdir}/report.txt")
         print(f"Survivors:   {outdir}/scan.txt")
         print(f"Drops:       {outdir}/dropped.txt  ({len(dropped)} to audit)")
     else:
+        print(report, end="")
         print(f"\n(full report also written to {outdir}/report.txt)")
 
     if args.save_state:
@@ -521,11 +465,8 @@ def main() -> None:
         # minutes of duplicated work and hundreds of duplicate requests on a large window.
         # The window end is already known from the scan we just did.
         try:
-            repo_path = trainlib.resolve_repo(args.repo)
-            resolved_end = trainlib.git(repo_path, "rev-parse",
-                                        window["end"]).strip()
-            path = trainlib.write_watermark(resolved_end, note=window.get("basis", ""),
-                                            repo=repo_path)
+            resolved_end = trainlib.git(repo, "rev-parse", window["end"]).strip()
+            path = trainlib.write_watermark(repo, resolved_end, note=window.get("basis", ""))
             print(f"# watermark saved: {resolved_end[:12]} -> {path}", file=sys.stderr)
         except RuntimeError as e:
             print(f"# WARNING: could not save the watermark ({e}); the next --since-last run "

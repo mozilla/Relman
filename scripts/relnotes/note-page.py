@@ -148,7 +148,7 @@ def parse(page: str) -> list[dict]:
         # Falling back to the whole <li> keeps it readable instead of printing an empty line; the
         # bug-id span comes out first so the fallback text does not end in "Bug NNNN".
         markup = (para.group(1) if para
-                  else re.sub(r'<span class="bug-id">.*?</span>', "", body, flags=re.S)).strip()
+                  else BUGSPAN_RE.sub("", body)).strip()
         span = BUGSPAN_RE.search(body)
         bug = BUG_RE.search(span.group(0)) if span else BUG_RE.search(markup)
         notes.append({
@@ -297,8 +297,8 @@ def main() -> None:
     args = p.parse_args()
     if not args.source and not args.check_url:
         p.error("give a release-notes source, or --check-url with the URLs to resolve")
-    # Reject rather than ignore, as bug-detail.py does for --full: a flag that silently does nothing
-    # is a question the user asked and never got an answer to.
+    # Reject rather than ignore, as bug-detail.py does for --landings: a flag that silently does
+    # nothing is a question the user asked and never got an answer to.
     report_only = args.audit or args.check_links
     if args.markup and (report_only or not args.source):
         p.error("--markup applies to the note listing, which --audit, --check-links and --check-url "
@@ -315,10 +315,7 @@ def main() -> None:
         sys.exit("error: no release notes found on that page -- is it a release-notes URL, and did "
                  "the page markup change? Expected <li class=\"release-note\" id=\"note-...\">.")
 
-    sections = []
-    for n in notes:
-        if n["section"] not in sections:
-            sections.append(n["section"])
+    sections = list(dict.fromkeys(n["section"] for n in notes))
     # Notes parsed but no heading matched: say so and carry on. Section labels appear beside every
     # audit and link finding, and the audit's premise is that a note is inconsistent with its section
     # siblings -- both quietly lose their meaning if every note lands in one bucket. Warning rather

@@ -175,6 +175,10 @@ the survivors, and real candidates live in it: bugs 2042999 (CSS `line-clamp`) a
 management page) were both missed there, both internally reported with no duplicates. Low prior, not
 zero.
 
+**The report's `PRE-LABELLED` section is the one place a rule settles a survivor**: train-hop
+components, and bugs that block a bug a watchlist entry names. Confirm those in a line rather than
+working them up; they still count toward "every survivor was looked at".
+
 ### How each mode is executed
 
 - **Daily:** one `daily-pass.py` run, then deep-dive the survivors inline. Small enough to be
@@ -206,9 +210,12 @@ Use one of these instead:
 
 ### The daily pass — show state, then ask
 
-**Always run `--show-state` first and let the user choose.** It prints the stored watermark, how far
-behind it is, whether it belongs to an older train, and the most recent nightly builds with their git
-commits.
+**Run `--show-state` first and let the user choose**, unless the choice is already made: when the
+user named the window ("since the last check") and `resume`'s `SCAN POSITION` line carries no
+`STALE` marker, go straight to `daily-pass.py --since-last`. `resume` already printed the watermark
+and the command, and a second fetch alongside the pass's own only adds minutes. Otherwise
+`--show-state` prints the stored watermark, how far behind it is, whether it belongs to an older
+train, and the most recent nightly builds with their git commits.
 
 ```
 python3 scripts/relnotes/scan-window.py --show-state
@@ -306,7 +313,9 @@ python3 scripts/relnotes/daily-pass.py --build-day 20260801 --outdir /tmp/day01 
   which is a file write needing its own approval.
 - Everything lands in `<outdir>/`: `report.txt`, `scan.txt` (survivors with their landings),
   `dropped.txt` (the complete drop list to audit), `prefs.txt`, `clusters.txt`, `flags.json`,
-  `scan.json`.
+  `scan.json`. `scan.json`, `scan.txt` and `dropped.txt` come from one `scan-window.py` run
+  (`--text-out` and `--dropped-out` beside the JSON), so the window's bugs are fetched from
+  Bugzilla once.
 - Window flags are the same as `scan-window.py` (`--build`, `--build-day`, `--from-build`, `--cycle`,
   `--since-last`). **Pass `--save-state` to this call rather than re-running `scan-window.py`
   afterwards to save it:** `daily-pass.py` writes the watermark from the scan it already did, while a
@@ -441,7 +450,9 @@ alone and append the reason to the log, which is why they are not interchangeabl
 what a candidate actually changed, which is the usual reason to reach for the clone at all. Prefer it
 over composing `git show --stat $(git log --grep=…)` by hand: a `$(…)` subshell defeats the permission
 allowlist and prompts every time. It lists only commits whose *subject* names the bug and counts
-cross-references separately, so another bug's commit is never reported as this one's landing.
+cross-references separately, so another bug's commit is never reported as this one's landing. Test
+and metadata files are grouped into one line per directory with a file count, since they rarely
+bear on the decision; code files are listed one by one.
 
 `bug-detail.py <ids> [--comments]` gives the judgment fields for a candidate — version flags, relnote
 flag, **open needinfo requests** (printed as `none` when there are none, so a clear bug is
@@ -475,7 +486,6 @@ maintained enterprise release notes rather than a copy, so there is nothing to d
 
 `https://whattrainisitnow.com/nightly/` is how Release Management currently hunts notes by hand, so
 it's the reference for checking this skill's coverage — **not** an input the skill depends on.
-`scripts/relnotes/nightly-buglist.py` pulls a build's or a day's list from it.
 
 Two things about that list:
 

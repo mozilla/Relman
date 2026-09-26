@@ -27,6 +27,7 @@ import sys
 import textwrap
 import time
 import urllib.error as url_error
+import urllib.parse as url_parse
 import urllib.request as url_request
 from pathlib import Path
 
@@ -40,6 +41,9 @@ if sys.version_info < (3, 10):
 PRODUCT_DETAILS = "https://product-details.mozilla.org/1.0/firefox_versions.json"
 HG_BASE = "https://hg-edge.mozilla.org/mozilla-central"
 FIREFOX_RELEASES = f"{HG_BASE}/json-firefoxreleases"
+BUGZILLA_REST = "https://bugzilla.mozilla.org/rest"
+NUCLEUS_NOTES = "https://nucleus.mozilla.org/rna/notes/?format=json"
+NUCLEUS_RELEASES = "https://nucleus.mozilla.org/rna/releases/?format=json"
 USER_AGENT = "Relman-relnotes/1.0"
 
 # Per-user, outside the repo: this is used by several people on the team and a scan
@@ -86,7 +90,7 @@ def preview(text: str, limit: int = 1200) -> str:
             "bug-detail.py <bug> --comment N for the whole comment]")
 
 
-def fetch_text(url: str, timeout: int = 120, attempts: int = 3, errors: str = "strict") -> str:
+def fetch_text(url: str, errors: str = "strict") -> str:
     """GET a URL as text, retrying transient failures.
 
     Nucleus in particular returns a 502 or times out fairly often and then serves the same
@@ -98,11 +102,11 @@ def fetch_text(url: str, timeout: int = 120, attempts: int = 3, errors: str = "s
     does not suit data, where a substituted character silently becomes a bug summary that reads as
     fact.
     """
-    last = None
+    last, attempts = None, 3
     for attempt in range(1, attempts + 1):
         req = url_request.Request(url, headers={"User-Agent": USER_AGENT})
         try:
-            with url_request.urlopen(req, timeout=timeout) as r:
+            with url_request.urlopen(req, timeout=120) as r:
                 charset = r.headers.get_content_charset() or "utf-8"
                 return r.read().decode(charset, errors=errors)
         except url_error.HTTPError as e:
@@ -119,9 +123,80 @@ def fetch_text(url: str, timeout: int = 120, attempts: int = 3, errors: str = "s
     raise last
 
 
-def fetch_json(url: str, timeout: int = 120, attempts: int = 3):
+def fetch_json(url: str):
     """GET and parse JSON. Retry behaviour is fetch_text's."""
-    return json.loads(fetch_text(url, timeout, attempts))
+    return json.loads(fetch_text(url))
+
+
+def cached_json(url: str, path: Path, ttl: int, stale_ok: bool = False):
+    """fetch_json, reusing `path` while it is younger than `ttl` seconds (0: always fetch).
+
+    `stale_ok` answers from the cached copy, whatever its age, when the fetch fails; otherwise the
+    failure raises.
+    """
+    if ttl and path.exists() and (time.time() - path.stat().st_mtime) < ttl:
+        try:
+            return json.loads(path.read_text())
+        except ValueError as e:
+            # Refetching repairs it, so this is not fatal -- but say so, or a write that keeps
+            # failing (a full disk) refetches megabytes on every run in silence.
+            print(f"# warning: rewriting unreadable cache {path} ({e})", file=sys.stderr)
+    try:
+        data = fetch_json(url)
+    except RuntimeError as e:
+        if not (stale_ok and path.exists()):
+            raise
+        age = (time.time() - path.stat().st_mtime) / 3600
+        print(f"# WARNING: {e}\n#          falling back to the cached copy, {age:.1f}h old",
+              file=sys.stderr)
+        try:
+            return json.loads(path.read_text())
+        except ValueError:
+            raise e from None  # the cache is unusable too; the outage is the real story
+    write_json_atomic(path, data, pretty=False)
+    return data
+
+
+def bugzilla_bugs(ids, fields: str, label: str | None = None, **params) -> dict[str, dict]:
+    """Bugs by id, keyed by string id, fetched 120 at a time. Raises RuntimeError on a failed batch.
+
+    Security-restricted bugs are simply absent from the result. `label` prints progress per batch;
+    `params` are extra query terms, e.g. a search that narrows the ids.
+    """
+    ids = [str(i) for i in ids]
+    out: dict[str, dict] = {}
+    for i in range(0, len(ids), 120):
+        qs = url_parse.urlencode({"id": ",".join(ids[i:i + 120]), "include_fields": fields,
+                                  **params})
+        for bug in fetch_json(f"{BUGZILLA_REST}/bug?{qs}").get("bugs", []):
+            out[str(bug["id"])] = bug
+        if label:
+            print(f"# fetched {min(i + 120, len(ids))}/{len(ids)} {label}", file=sys.stderr)
+    return out
+
+
+def pending_uplifts(bug_id: str) -> list[str] | None:
+    """Targets with a pending `approval-mozilla-*` request, or None if the fetch failed.
+
+    None rather than an empty list, because pending-uplift is used to *reject* candidates and to
+    decide which version a note belongs to: reporting a failed fetch as "nothing pending" changes
+    the verdict silently.
+    """
+    try:
+        payload = fetch_json(f"{BUGZILLA_REST}/bug/{bug_id}/attachment?exclude_fields=data")
+    except RuntimeError as e:
+        print(f"# WARNING: could not read attachments for bug {bug_id} ({e}); its pending-uplift "
+              "state is unknown", file=sys.stderr)
+        return None
+    out = []
+    for atts in (payload.get("bugs") or {}).values():
+        for a in atts:
+            for fl in a.get("flags", []):
+                if fl.get("name", "").startswith("approval-mozilla-") and fl.get("status") == "?":
+                    t = fl["name"].removeprefix("approval-mozilla-")
+                    if t not in out:
+                        out.append(t)
+    return out
 
 
 def write_json_atomic(path: Path, data, pretty: bool = True) -> Path:
@@ -398,6 +473,8 @@ TOOLING_PATHS = TOOLING_RECLEAR + TOOLING_LIVE
 
 
 RELMAN_ROOT = Path(__file__).resolve().parents[2]
+# The docs the two doc audits check commands and flags against.
+DOC_GLOBS = (".claude/skills/*/SKILL.md", "reference/release-notes/*.md", "README.md")
 
 
 def relman_root() -> Path | None:
@@ -446,7 +523,7 @@ def tooling_stamp() -> dict:
             "version": commit + suffix}
 
 
-def tooling_status(fetch: bool = True, upstream: str = "origin/main") -> dict:
+def tooling_status(fetch: bool = True) -> dict:
     """Which revision of the release-note tooling is running, and whether it is behind origin.
 
     `fetch=False` skips the network but still compares against the mirror, which is what an offline
@@ -459,6 +536,7 @@ def tooling_status(fetch: bool = True, upstream: str = "origin/main") -> dict:
                 "reason": f"{RELMAN_ROOT} is not a git checkout, so the running tooling cannot "
                           "be identified"}
 
+    upstream = "origin/main"
     st: dict = {"available": True, "repo": str(root), "upstream": upstream, "fetched": None}
     if fetch:
         st["fetched"] = fetch_origin(
@@ -569,10 +647,7 @@ def pull_blocker(st: dict) -> str:
     human's call, because the cost of guessing wrong is a broken checkout in the middle of a pass.
     """
     root = Path(st["repo"])
-    # Derived from the upstream this status was built against, not hardcoded: a blocker judged
-    # against origin/main while the counts came from somewhere else is worse than no check.
-    upstream = st.get("upstream", "origin/main")
-    want = upstream.split("/", 1)[1] if "/" in upstream else upstream
+    upstream, want = st["upstream"], "main"
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False).strip()
     if branch != want:
         where = f"on {branch}" if branch and branch != "HEAD" else "on a detached HEAD"
@@ -704,9 +779,7 @@ def train_versions() -> dict:
         "nightly": major("FIREFOX_NIGHTLY"),
         "beta": major("LATEST_FIREFOX_DEVEL_VERSION"),
         "release": major("LATEST_FIREFOX_VERSION"),
-        "esr": [v for v in (major("FIREFOX_ESR"), major("FIREFOX_ESR_NEXT")) if v],
-        "next_merge": d.get("NEXT_MERGE_DATE"),
-        "last_merge": d.get("LAST_MERGE_DATE"),
+        "esr": sorted({v for v in (major("FIREFOX_ESR"), major("FIREFOX_ESR_NEXT")) if v}),
     }
 
 
@@ -734,35 +807,18 @@ def cycle_range(repo: Path, version: int, head: str | None = None) -> tuple | No
 # ------------------------------------------------------------------- builds -> commits
 
 
-def load_builds(refresh: bool = False) -> list[dict]:
+def load_builds() -> list[dict]:
     """All Firefox builds from hg, cached on disk (the payload is ~12 MB)."""
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    fresh = (
-        BUILDS_CACHE.exists()
-        and not refresh
-        and (time.time() - BUILDS_CACHE.stat().st_mtime) < BUILDS_CACHE_TTL
-    )
-    if fresh:
-        try:
-            return json.loads(BUILDS_CACHE.read_text())["builds"]
-        except (ValueError, KeyError) as e:
-            # Refetching repairs it, so this is not fatal -- but say so, because a write that keeps
-            # failing (a full disk) would otherwise refetch 12 MB on every run in silence.
-            print(f"# warning: rewriting unreadable builds cache {BUILDS_CACHE} ({e})",
-                  file=sys.stderr)
-    payload = fetch_json(FIREFOX_RELEASES)
-    # Atomic, and unindented: this is the bulk cache write_json_atomic's `pretty=False` exists for.
-    write_json_atomic(BUILDS_CACHE, payload, pretty=False)
-    return payload["builds"]
+    return cached_json(FIREFOX_RELEASES, BUILDS_CACHE, BUILDS_CACHE_TTL)["builds"]
 
 
-def nightly_builds(limit: int = 12, refresh: bool = False) -> list[dict]:
+def nightly_builds(limit: int = 12) -> list[dict]:
     """Most recent nightly builds, newest first, deduped by build id.
 
     The same build id appears once per platform with the same changeset, so dedupe.
     """
     seen: dict[str, dict] = {}
-    for b in load_builds(refresh=refresh):
+    for b in load_builds():
         if b.get("channel") != "nightly":
             continue
         bid = b.get("buildid")
@@ -772,31 +828,20 @@ def nightly_builds(limit: int = 12, refresh: bool = False) -> list[dict]:
     return [seen[k] for k in sorted(seen, reverse=True)[:limit]]
 
 
-def builds_on_day(date: str, refresh: bool = False) -> list[dict]:
-    """Every nightly build whose id starts with YYYYMMDD, oldest first."""
-    return sorted(
-        (b for b in nightly_builds(limit=100000, refresh=refresh)
-         if b["buildid"].startswith(date)),
-        key=lambda b: b["buildid"],
-    )
+def day_boundaries(prefix: str) -> tuple[str, str, int] | None:
+    """(previous build id, last matching build id, matching build count) for a build-id prefix.
 
-
-def day_boundaries(date: str, refresh: bool = False) -> tuple[str, str] | None:
-    """(previous build id, last build id of the day) -- the day's full landing span.
-
-    Nightly ships 2-3 times a day at irregular times, and Release Management reviews a
-    whole day at once. A day's landings run from the *previous day's last build* up to
-    this day's last build, since the first build of the day covers everything since the
-    one before it.
+    A YYYYMMDD prefix is a day's full landing span. Nightly ships 2-3 times a day at irregular
+    times, and Release Management reviews a whole day at once. A day's landings run from the
+    *previous day's last build* up to this day's last build, since the first build of the day
+    covers everything since the one before it. A whole build id matches only itself, giving that
+    one build's span. None when nothing matches or the first match is the oldest known build.
     """
-    all_ids = sorted(b["buildid"] for b in nightly_builds(limit=100000, refresh=refresh))
-    day = [i for i in all_ids if i.startswith(date)]
-    if not day:
+    all_ids = sorted(b["buildid"] for b in nightly_builds(limit=100000))
+    hits = [i for i in all_ids if i.startswith(prefix)]
+    if not hits or all_ids.index(hits[0]) == 0:
         return None
-    first_idx = all_ids.index(day[0])
-    if first_idx == 0:
-        return None
-    return all_ids[first_idx - 1], day[-1]
+    return all_ids[all_ids.index(hits[0]) - 1], hits[-1], len(hits)
 
 
 def hg_to_git(node: str) -> str | None:
@@ -811,9 +856,9 @@ def hg_to_git(node: str) -> str | None:
     return rev.get("git_commit")
 
 
-def resolve_build(build_id: str, refresh: bool = False) -> dict | None:
+def resolve_build(build_id: str) -> dict | None:
     """{buildid, node, git} for a nightly build id."""
-    for b in nightly_builds(limit=100000, refresh=refresh):
+    for b in nightly_builds(limit=100000):
         if b["buildid"] == build_id:
             g = hg_to_git(b["node"])
             return {**b, "git": g}
@@ -853,30 +898,24 @@ def read_watermark() -> dict | None:
         return None
 
 
-def write_watermark(commit: str, note: str = "", repo: Path | None = None,
-                    allow_regress: bool = False) -> Path:
-    """Record the scan position, refusing to move it backwards by default.
+def write_watermark(repo: Path, commit: str, note: str = "") -> Path:
+    """Record the scan position, refusing to move it backwards.
 
     --save-state writes the window end, which silently regresses the watermark if someone
     re-scans an older window -- and the next --since-last then re-reports every day in
-    between. Only advance unless explicitly told otherwise.
+    between.
     """
-    if repo is not None and not allow_regress:
-        prev = (read_watermark() or {}).get("commit")
-        if prev and git(repo, "rev-parse", "--verify", "--quiet", prev, check=False).strip():
-            # New position already an ancestor of the stored one => this is a rescan of
-            # older history, not progress.
-            r = subprocess.run(
-                ["git", "-C", str(repo), "merge-base", "--is-ancestor", commit, prev],
-                capture_output=True, check=False,
+    prev = (read_watermark() or {}).get("commit")
+    if prev and git(repo, "rev-parse", "--verify", "--quiet", prev, check=False).strip():
+        # New position already an ancestor of the stored one => this is a rescan of
+        # older history, not progress.
+        if git_rc(repo, "merge-base", "--is-ancestor", commit, prev)[0] == 0 and commit != prev:
+            raise RuntimeError(
+                f"refusing to move the watermark backwards: {commit[:12]} is an ancestor "
+                f"of the stored {prev[:12]}. This looks like a rescan of older history; "
+                "the watermark was left alone so the next --since-last does not re-report "
+                "days already reviewed."
             )
-            if r.returncode == 0 and commit != prev:
-                raise RuntimeError(
-                    f"refusing to move the watermark backwards: {commit[:12]} is an ancestor "
-                    f"of the stored {prev[:12]}. This looks like a rescan of older history; "
-                    "the watermark was left alone so the next --since-last does not re-report "
-                    "days already reviewed."
-                )
     return write_json_atomic(WATERMARK_FILE, {
         "commit": commit,
         "saved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -903,11 +942,7 @@ def watermark_status(repo: Path, wm: dict | None, nightly: int) -> dict:
     stale_train = False
     if git(repo, "rev-parse", "--verify", "--quiet", prev_cycle_end, check=False).strip():
         # If the watermark predates the current cycle's start, it's from an older train.
-        r = subprocess.run(
-            ["git", "-C", str(repo), "merge-base", "--is-ancestor", commit, prev_cycle_end],
-            capture_output=True, check=False,
-        )
-        stale_train = r.returncode == 0
+        stale_train = git_rc(repo, "merge-base", "--is-ancestor", commit, prev_cycle_end)[0] == 0
     return {
         "present": True,
         "known": True,

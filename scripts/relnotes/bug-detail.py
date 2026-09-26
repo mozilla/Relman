@@ -24,27 +24,15 @@ Usage:
   bug-detail.py 2046143 --comment 16      # one comment in full, untruncated (also 15,16,17)
   bug-detail.py 2046143 --comment last:5  # the five most recent, for "what has been said lately"
   bug-detail.py 2046143 --comment all     # the whole discussion
-  bug-detail.py 2046143 --full            # every field, as JSON
 """
 
 import argparse
-import json
 import re
 import sys
-import urllib.parse as url_parse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import trainlib  # noqa: E402
-
-REST = "https://bugzilla.mozilla.org/rest"
-
-# How much of comment 0 and the newest comment `--comments` shows. A cap keeps a multi-bug batch
-# scannable, but a *silent* cap loses evidence: at 400 this cut bug 2053681's comment 0 twelve
-# characters before "On Firefox Nightly Ubuntu, playback stops...", and the note went out scoped to
-# Android alone. trainlib.preview marks every cut, so this number is a display choice, not a limit
-# on what can be found.
-COMMENT_PREVIEW = 1200
 
 
 def version_fields(trains: dict) -> list[str]:
@@ -64,32 +52,7 @@ def fetch(bug_ids: list[str], trains: dict) -> list[dict]:
         "duplicates", "see_also", "blocks", "depends_on", "regressed_by",
         "cf_tracking_firefox_relnote", "assigned_to", "flags",
     ] + version_fields(trains)
-    qs = url_parse.urlencode({"id": ",".join(bug_ids), "include_fields": ",".join(fields)})
-    return trainlib.fetch_json(f"{REST}/bug?{qs}").get("bugs", [])
-
-
-def pending_uplifts(bug_id: str) -> list[str] | None:
-    """Targets with a pending `approval-mozilla-*` request, or None if the fetch failed.
-
-    None rather than an empty list, because pending-uplift is used to *reject* candidates and to
-    decide which version a note belongs to: reporting a failed fetch as "nothing pending" changes
-    the verdict silently. `daily-pass.py` takes the same position for the same reason.
-    """
-    try:
-        payload = trainlib.fetch_json(f"{REST}/bug/{bug_id}/attachment?exclude_fields=data")
-    except RuntimeError as e:
-        print(f"# WARNING: could not read attachments for bug {bug_id} ({e}); its pending-uplift "
-              "state is unknown", file=sys.stderr)
-        return None
-    out = []
-    for atts in (payload.get("bugs") or {}).values():
-        for a in atts:
-            for fl in a.get("flags", []):
-                if fl.get("name", "").startswith("approval-mozilla-") and fl.get("status") == "?":
-                    t = fl["name"].replace("approval-mozilla-", "")
-                    if t not in out:
-                        out.append(t)
-    return out
+    return list(trainlib.bugzilla_bugs(bug_ids, ",".join(fields)).values())
 
 
 def open_needinfos(bug: dict) -> list[str]:
@@ -104,7 +67,12 @@ def open_needinfos(bug: dict) -> list[str]:
         if f.get("name") == "needinfo" and f.get("status") == "?":
             who = f.get("requestee") or "unspecified"
             set_on = (f.get("creation_date") or "")[:10]
-            out.append(f"{who}" + (f" (set {set_on})" if set_on else ""))
+            # Who asked is what tells a relnote ask from a sheriff's backout question; without it
+            # the comments have to be read to find out.
+            by = f.get("setter")
+            detail = ", ".join(x for x in (f"set {set_on}" if set_on else "",
+                                           f"by {by}" if by else "") if x)
+            out.append(f"{who}" + (f" ({detail})" if detail else ""))
     return out
 
 
@@ -115,13 +83,44 @@ def comments(bug_id: str) -> list[dict] | None:
     which asserts something about the bug's contents on the strength of a 503.
     """
     try:
-        payload = trainlib.fetch_json(f"{REST}/bug/{bug_id}/comment")
+        payload = trainlib.fetch_json(f"{trainlib.BUGZILLA_REST}/bug/{bug_id}/comment")
     except RuntimeError as e:
         print(f"# WARNING: could not read comments for bug {bug_id} ({e})", file=sys.stderr)
         return None
     for v in (payload.get("bugs") or {}).values():
         return v.get("comments", [])
     return []
+
+
+# Test and metadata paths, which say nothing about whether a change is user-facing. One grid-lanes
+# commit listed 437 files, nearly all web-platform-test expectations, and the diffstat alone cost
+# ~25k tokens to read. These are grouped per directory; everything else is listed file by file.
+TEST_PATH = re.compile(
+    r"(^|/)(tests?|testing|crashtests?|reftests?|gtest|mochitests?|jsapi-tests|androidTest)/"
+    r"|(^|/)test_[^/]*$|(^|/)browser_[^/]*\.js$|Tests?\.(kt|java)$")
+
+
+def print_diffstat(repo, sha: str) -> None:
+    """One line per non-test file, one line per directory of test/metadata files, then totals."""
+    rows = trainlib.git(repo, "show", "--numstat", "--format=", sha, check=True).strip()
+    code, groups = [], {}
+    adds = dels = files = 0
+    for ln in rows.splitlines():
+        a, d, path = ln.split("\t", 2)
+        # Binary files report "-" for both counts.
+        a, d = (int(a), int(d)) if a != "-" else (0, 0)
+        adds, dels, files = adds + a, dels + d, files + 1
+        if TEST_PATH.search(path):
+            key = "/".join(path.split("/")[:-1][:4]) + "/"
+            n, ga, gd = groups.get(key, (0, 0, 0))
+            groups[key] = (n + 1, ga + a, gd + d)
+        else:
+            code.append((path, a, d))
+    for path, a, d in code:
+        print(f"      {path}  +{a} -{d}")
+    for key, (n, a, d) in sorted(groups.items()):
+        print(f"      [tests/metadata] {key}  {n} file(s)  +{a} -{d}")
+    print(f"      {files} files changed, +{adds} -{dels}")
 
 
 def landings(repo, bug_ids: list[str], rev_range: str) -> None:
@@ -167,10 +166,7 @@ def landings(repo, bug_ids: list[str], rev_range: str) -> None:
               + (f"  (+{refs} commit(s) only referencing it)" if refs else ""))
         for full, short, date, subject in rows:
             print(f"  {short}  {date}  {subject}")
-            stat = trainlib.git(repo, "show", "--stat=140", "--format=", full,
-                                check=True).strip()
-            for line in stat.splitlines():
-                print(f"      {line}")
+            print_diffstat(repo, full)
         print()
 
 
@@ -186,8 +182,6 @@ def main() -> None:
                         "are only comparable across a batch for --comment 0, every bug's "
                         "description; `all` is a single-bug tool -- across a batch it prints every "
                         "comment of every bug")
-    p.add_argument("--full", action="store_true", help="dump raw JSON")
-    p.add_argument("--width", type=int, default=110)
     p.add_argument("--landings", metavar="A..B",
                    help="instead of the judgment fields, show each bug's landings in this git "
                         "range with their diffstat")
@@ -225,31 +219,20 @@ def main() -> None:
                     f"{', '.join(nonnumeric)}")
         # These belong to the judgment-fields output. Accepting and ignoring them would answer a
         # different question than the one asked.
-        ignored = [f"--{n}" for n in ("full", "comments", "comment") if getattr(args, n)]
+        ignored = [f"--{n}" for n in ("comments", "comment") if getattr(args, n)]
         if ignored:
             p.error(f"{', '.join(ignored)} does not apply to --landings")
         landings(trainlib.resolve_repo(args.repo), ids, args.landings)
         return
-    # Comments live on their own Bugzilla endpoint and are not part of the bug JSON, so --full
-    # cannot answer them. Rejecting the combination rather than dropping it keeps this consistent
-    # with --landings above: a flag that would be silently ignored is a question left unanswered.
-    if args.full:
-        ignored = [f"--{n}" for n in ("comments", "comment") if getattr(args, n)]
-        if ignored:
-            p.error(f"{', '.join(ignored)} does not apply to --full; comments come from a "
-                    f"separate endpoint and are not part of the bug JSON")
     trains = trainlib.train_versions()
     bugs = fetch(ids, trains)
-    if args.full:
-        print(json.dumps(bugs, indent=2))
-        return
     found = {str(b["id"]) for b in bugs}
     missing = [b for b in args.bugs if str(b) not in found]
 
     for b in sorted(bugs, key=lambda x: str(x["id"])):
         bid = str(b["id"])
         print(f"=== {bid}  {b['product']} :: {b['component']}")
-        print(f"    {b['summary'][:args.width]}")
+        print(f"    {b['summary'][:110]}")
         flags = []
         for f in version_fields(trains):
             val = b.get(f)
@@ -274,12 +257,10 @@ def main() -> None:
             if not rel_ids:
                 continue
             try:
-                qs2 = url_parse.urlencode({"id": ",".join(str(i) for i in rel_ids[:8]),
-                                           "include_fields": "id,summary,status,resolution"})
-                rel_bugs = trainlib.fetch_json(f"{REST}/bug?{qs2}").get("bugs", [])
+                rel_bugs = trainlib.bugzilla_bugs(rel_ids[:8], "id,summary,status,resolution")
             except RuntimeError:
                 continue
-            for rb in rel_bugs:
+            for rb in rel_bugs.values():
                 print(f"    {label}: {rb['id']} [{rb['status']}] {rb['summary'][:78]}")
         # The URLs, not just the count: see_also is where the same symptom on another platform or
         # in another tracker shows up, which is evidence about a note's scope. A count cannot be
@@ -300,10 +281,9 @@ def main() -> None:
             # landed years ago has, by evidence, gone largely unnoticed -- that is a
             # strong argument against a note however bad the symptom sounds.
             try:
-                qs3 = url_parse.urlencode({
-                    "id": ",".join(str(i) for i in b["regressed_by"][:5]),
-                    "include_fields": "id,summary,creation_time,cf_last_resolved"})
-                for rb in trainlib.fetch_json(f"{REST}/bug?{qs3}").get("bugs", []):
+                for rb in trainlib.bugzilla_bugs(
+                        b["regressed_by"][:5],
+                        "id,summary,creation_time,cf_last_resolved").values():
                     landed = (rb.get("cf_last_resolved") or rb.get("creation_time") or "")[:10]
                     age = ""
                     if landed and b.get("creation_time"):
@@ -320,10 +300,10 @@ def main() -> None:
             except RuntimeError:
                 print(f"    regressed_by: {b['regressed_by']}")
         if b.get("whiteboard"):
-            print(f"    whiteboard: {b['whiteboard'][:args.width]}")
+            print(f"    whiteboard: {b['whiteboard'][:110]}")
         if b.get("op_sys") and b["op_sys"] not in ("Unspecified", "All"):
             print(f"    os: {b['op_sys']}")
-        up = pending_uplifts(bid)
+        up = trainlib.pending_uplifts(bid)
         if up is None:
             print("    PENDING UPLIFT REQUESTS: UNKNOWN -- the attachment fetch failed")
         elif up:
@@ -357,10 +337,10 @@ def main() -> None:
         if args.comments and cs:
             if cs[0]["count"] not in selected:
                 print(f"    comment 0 ({cs[0]['creator']}): "
-                      f"{trainlib.preview(cs[0]['text'], COMMENT_PREVIEW)}")
+                      f"{trainlib.preview(cs[0]['text'])}")
             if len(cs) > 1 and cs[-1]["count"] not in selected:
                 print(f"    newest #{cs[-1]['count']} ({cs[-1]['creator']}): "
-                      f"{trainlib.preview(cs[-1]['text'], COMMENT_PREVIEW)}")
+                      f"{trainlib.preview(cs[-1]['text'])}")
         for n in sorted(selected):
             c = selected[n]
             print(f"    comment #{n} ({c['creator']}, {(c.get('creation_time') or '')[:10]}):")

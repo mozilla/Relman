@@ -13,9 +13,6 @@ imply consensus that isn't there.
 Schema (v2):
     {"version": 2, "releases": {"155": {"items": {...}, "days_reviewed": [...]}}}
 
-v1 state (a flat "items" map) is migrated automatically, filing each item under its `target` or
-under the current Nightly.
-
 Usage:
   watchlist.py list                       # current Nightly's release
   watchlist.py list --release 156
@@ -34,6 +31,7 @@ Usage:
 """
 
 import argparse
+import collections
 import json
 import re
 import subprocess
@@ -88,26 +86,8 @@ def load() -> dict:
         data = json.loads(WATCHLIST_FILE.read_text())
     except ValueError:
         sys.exit(f"error: {WATCHLIST_FILE} is not valid JSON")
-    if data.get("version") == 2:
-        data.setdefault("releases", {})
-        return data
-    # Migrate v1: a flat {"items": {...}} map with no release dimension.
-    rel_default = current_release()
-    out: dict = {"version": 2, "releases": {}}
-    for key, item in (data.get("items") or {}).items():
-        rel = str(item.get("target") or rel_default)
-        bucket = out["releases"].setdefault(rel, {"items": {}, "days_reviewed": []})
-        bucket["items"][key] = item
-    # The old fake "days-reviewed" item becomes real per-release state.
-    for rel, bucket in out["releases"].items():
-        marker = bucket["items"].pop("days-reviewed", None)
-        if marker:
-            import re
-            bucket["days_reviewed"] = sorted(set(re.findall(r"\b20\d{6}\b",
-                                                            marker.get("summary", ""))))
-    print(f"# migrated watchlist to v2 ({sum(len(b['items']) for b in out['releases'].values())} "
-          f"items across {len(out['releases'])} release(s))", file=sys.stderr)
-    return out
+    data.setdefault("releases", {})
+    return data
 
 
 def save(data: dict) -> None:
@@ -385,8 +365,6 @@ def cmd_carry(args) -> None:
     gated = 0
     for k in args.keys:
         item = have.pop(k)
-        if "target" in item:
-            item["target"] = dst
         item["updated"] = now()
         item.setdefault("log", []).append(
             {"date": now(), "text": f"carried from Fx{src}" + (f": {args.note}" if args.note else "")})
@@ -484,10 +462,8 @@ def cmd_resume(args) -> None:  # noqa: C901
           + (f"  ({days[0]} .. {days[-1]})" if days else ""))
     print()
 
-    by_status: dict[str, list[str]] = {}
-    for k, v in items.items():
-        by_status.setdefault(v.get("status", "?"), []).append(k)
-    print("STATUS         " + ("; ".join(f"{len(v)} {k}" for k, v in sorted(by_status.items()))
+    by_status = collections.Counter(v.get("status", "?") for v in items.values())
+    print("STATUS         " + ("; ".join(f"{n} {k}" for k, n in sorted(by_status.items()))
                                or "nothing tracked"))
     print()
 
@@ -537,7 +513,7 @@ def _allow_entries(repo: Path) -> list[str]:
     return [f"Bash(git -C {form} {sub}:*)" for form in forms for sub in GECKO_GIT_SUBCOMMANDS]
 
 
-def print_tooling(st: dict, label: str = "TOOLING", pad: int = 15,
+def print_tooling(st: dict, pad: int = 15,
                   stale: list[str] | None = None, pulled: bool = False,
                   pull_attempted: bool = False) -> None:
     """The tooling verdict as a labelled block, continuation lines aligned under the first.
@@ -549,7 +525,7 @@ def print_tooling(st: dict, label: str = "TOOLING", pad: int = 15,
     # path, which is a coincidence an edit could break.
     failed_pull = pull_attempted and not pulled
     lines = trainlib.tooling_summary(st, pull_attempted=failed_pull)
-    print(f"{label.ljust(pad)}{lines[0]}")
+    print(f"{'TOOLING'.ljust(pad)}{lines[0]}")
     for extra in lines[1:]:
         print(f"{''.ljust(pad)}{extra}")
     banner = trainlib.tooling_banner(st, stale=stale, pulled=pulled,
@@ -649,12 +625,7 @@ def cmd_check_setup(args) -> None:
     upstream ref, which is per-machine for the same reason. See save_upstream.
     """
     if args.repo:
-        candidate = Path(args.repo).expanduser()
-        if not trainlib.is_gecko_checkout(candidate):
-            why = ("no Gecko source in it" if (candidate / ".git").exists()
-                   else "not a git checkout")
-            sys.exit(f"error: {candidate} is {why}; expected to find {trainlib.GECKO_MARKER}")
-        repo = candidate.resolve()
+        repo = trainlib.resolve_repo(args.repo).resolve()  # exits unless it is a Gecko checkout
         path = trainlib.write_config(gecko_repo=str(repo))
         print(f"GECKO CHECKOUT  {repo}\n                saved to {path}")
     else:
@@ -804,9 +775,7 @@ def cmd_summary(args) -> None:
     print(f"{WATCHLIST_FILE}\n")
     for rel in sorted(data["releases"], key=lambda r: (not r.isdigit(), r)):
         b = data["releases"][rel]
-        counts: dict[str, int] = {}
-        for it in b["items"].values():
-            counts[it.get("status", "?")] = counts.get(it.get("status", "?"), 0) + 1
+        counts = collections.Counter(it.get("status", "?") for it in b["items"].values())
         bits = ", ".join(f"{v} {k}" for k, v in sorted(counts.items()))
         print(f"  Firefox {rel}: {len(b['items'])} tracked ({bits}); "
               f"{len(b.get('days_reviewed', []))} day(s) reviewed")
@@ -823,6 +792,34 @@ def annotate(bug_ids: list[str]) -> dict[str, dict]:
     return out
 
 
+def members(survivors: list[dict]) -> dict[str, tuple[str, dict, str]]:
+    """For daily-pass: survivors that block a bug a tracked entry names, per survivor.
+
+    An entry names a bug by its key or by a bug number in its summary or notes ("meta 2060554"),
+    so a new piece of a feature already judged is recognised without a workup. Only a direct
+    `blocks` edge counts: bugs tied to their feature by summary prefix alone are not found.
+    """
+    data = load()
+    named: dict[str, tuple[str, dict]] = {}
+    for rel, b in data["releases"].items():
+        for key, it in b["items"].items():
+            texts = [it.get("summary", "")] + [e.get("text", "") for e in it.get("log", [])]
+            nums = set(re.findall(r"\b\d{6,8}\b", " ".join(texts)))
+            for n in nums:
+                named.setdefault(n, (key, {**it, "release": rel}))
+            # The entry keyed by a bug outranks one that only mentions it.
+            if key.isdigit():
+                named[key] = (key, {**it, "release": rel})
+    out = {}
+    for s in survivors:
+        for blocked in s.get("blocks") or []:
+            hit = named.get(str(blocked))
+            if hit and hit[0] != s["bug"]:
+                out[s["bug"]] = (hit[0], hit[1], f"blocks {blocked}")
+                break
+    return out
+
+
 def standing(exclude: set[str]) -> dict[str, dict]:
     """Open tracked items not in the current window, across all releases."""
     data = load()
@@ -832,6 +829,13 @@ def standing(exclude: set[str]) -> dict[str, dict]:
             if k not in exclude and v.get("status") not in CLOSED:
                 out[k] = {**v, "release": rel}
     return out
+
+
+def bugs_in(data: dict, args, statuses: tuple) -> list[tuple[str, str, dict]]:
+    """(release, bug, item) for tracked bugs in one of `statuses`, in --release or every release."""
+    rel = args.release or current_release()
+    return [(r, k, v) for r, b in data["releases"].items() if args.all_releases or r == rel
+            for k, v in b["items"].items() if k.isdigit() and v.get("status") in statuses]
 
 
 def cmd_followup(args) -> None:
@@ -845,13 +849,7 @@ def cmd_followup(args) -> None:
     """
     import urllib.parse as up
     data = load()
-    rel = args.release or current_release()
-    pending = []
-    for r, b in data["releases"].items():
-        if args.all_releases or r == rel:
-            for k, v in b["items"].items():
-                if k.isdigit() and v.get("status") in ("asked", "replied"):
-                    pending.append((r, k, v))
+    pending = bugs_in(data, args, ("asked", "replied"))
     if not pending:
         print("Nothing awaiting follow-up.")
         return
@@ -931,13 +929,7 @@ def cmd_replies(args) -> None:
     -- over-inclusion, which is the safe direction for a check meant to catch things.
     """
     data = load()
-    rel = args.release or current_release()
-    targets = []
-    for r, b in data["releases"].items():
-        if args.all_releases or r == rel:
-            for k, v in b["items"].items():
-                if k.isdigit() and v.get("status") in ("asked", "replied", "watching"):
-                    targets.append((r, k, v))
+    targets = bugs_in(data, args, ("asked", "replied", "watching"))
     if not targets:
         print("Nothing to check.")
         return

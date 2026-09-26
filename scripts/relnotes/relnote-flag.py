@@ -44,60 +44,29 @@ import argparse
 import json
 import re
 import sys
-import time
 import urllib.parse as url_parse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import trainlib  # noqa: E402
 
-BUGZILLA_REST = "https://bugzilla.mozilla.org/rest/bug"
-NUCLEUS_NOTES = "https://nucleus.mozilla.org/rna/notes/?format=json"
-NUCLEUS_RELEASES = "https://nucleus.mozilla.org/rna/releases/?format=json"
-# Every Nucleus read in this script feeds `--coverage`, and coverage is run while someone is editing
-# the very notes it reads, so there is no useful window here at all. Stale input to a *coverage*
-# answer does not merely look old -- it manufactures findings, reporting a note added ten minutes ago
-# as missing and a flag just set as unset, indistinguishable from a real gap. Sized by what the data
-# is for rather than by payload size: this script's settled-history queries (--nominated, --approved,
-# --declined, --value) hit Bugzilla, not Nucleus. An unreachable Nucleus still degrades to the cached
-# copy in cached_json, with its age stated.
-NUCLEUS_TTL = 0
-
 FIELDS = ("id,summary,product,component,status,resolution,"
           "cf_tracking_firefox_relnote,last_change_time")
 FIXED_STATUS = {"RESOLVED", "VERIFIED"}
 
 
-def cached_json(url: str, name: str, refresh: bool = False):
-    """Fetch a Nucleus payload, falling back to the cached copy only when Nucleus is unreachable.
+def nucleus(url: str, name: str):
+    """A Nucleus payload, always fetched fresh; the cached copy answers only an outage.
 
-    `ttl` is 0 by default here -- see NUCLEUS_TTL. The cache is kept for the outage path, not to
-    spare a refetch.
+    Every Nucleus read in this script feeds `--coverage`, and coverage is run while someone is
+    editing the very notes it reads. Stale input to a *coverage* answer does not merely look old --
+    it manufactures findings, reporting a note added ten minutes ago as missing and a flag just set
+    as unset, indistinguishable from a real gap. But Nucleus 502s and times out often enough that
+    refusing to answer over it is worse than answering from an older copy with its age stated.
+    Same cache file as fetch-shipped-notes.py, so each script's fetch refreshes the other's.
     """
-    path = trainlib.CACHE_DIR / name
-    if not refresh and path.exists() and (time.time() - path.stat().st_mtime) < NUCLEUS_TTL:
-        try:
-            return json.loads(path.read_text())
-        except ValueError as e:
-            # Refetching repairs it, so this is not fatal -- but say so, or a write that keeps
-            # failing refetches megabytes on every run in silence.
-            print(f"# warning: rewriting unreadable cache {path} ({e})", file=sys.stderr)
-    try:
-        data = trainlib.fetch_json(url)
-    except RuntimeError as e:
-        # Nucleus 502s and times out often enough that refusing to answer over it is worse than
-        # answering from yesterday's copy. Only a cold cache is fatal.
-        if not path.exists():
-            raise
-        age = (time.time() - path.stat().st_mtime) / 3600
-        print(f"# WARNING: {e}\n#          falling back to the cached copy, {age:.1f}h old",
-              file=sys.stderr)
-        try:
-            return json.loads(path.read_text())
-        except ValueError:
-            raise e from None  # the cache is unusable too; the outage is the real story
-    trainlib.write_json_atomic(path, data, pretty=False)
-    return data
+    return trainlib.cached_json(url, trainlib.CACHE_DIR / "nucleus" / f"{name}.json", 0,
+                                stale_ok=True)
 
 
 def query(values: list[str], version: int | None = None) -> list[dict]:
@@ -110,7 +79,7 @@ def query(values: list[str], version: int | None = None) -> list[dict]:
         "include_fields": fields,
         "limit": "0",
     }
-    url = f"{BUGZILLA_REST}?{url_parse.urlencode(params, quote_via=url_parse.quote)}"
+    url = f"{trainlib.BUGZILLA_REST}/bug?{url_parse.urlencode(params, quote_via=url_parse.quote)}"
     return trainlib.fetch_json(url).get("bugs", [])
 
 
@@ -119,11 +88,7 @@ def is_fixed(bug: dict) -> bool:
 
 
 def fetch_fields(bug_ids: list[int], fields: str) -> list[dict]:
-    if not bug_ids:
-        return []
-    params = {"id": ",".join(str(i) for i in bug_ids), "include_fields": fields, "limit": "0"}
-    url = f"{BUGZILLA_REST}?{url_parse.urlencode(params, quote_via=url_parse.quote)}"
-    return trainlib.fetch_json(url).get("bugs", [])
+    return list(trainlib.bugzilla_bugs(bug_ids, fields).values())
 
 
 def related_coverage(bug_ids: list[int], covered: set[int]) -> dict[int, tuple[int, str]]:
@@ -174,15 +139,15 @@ def is_published(release: dict) -> bool:
     return str(release.get("is_public")) == "True"
 
 
-def nucleus_release(version: str, channel: str | None, refresh: bool,
-                    product: str = "Firefox", published_only: bool = False) -> dict:
+def nucleus_release(version: str, channel: str | None, product: str = "Firefox",
+                    published_only: bool = False) -> dict:
     """The Nucleus release record for one product/version/channel.
 
     `product` matters more than it looks: Nucleus carries a separate `Firefox for Android` release
     for the same version number, so defaulting to Firefox without saying so would answer an Android
     question with the desktop note set -- a wrong answer rather than an error.
     """
-    releases = cached_json(NUCLEUS_RELEASES, "nucleus-releases.json", refresh)
+    releases = nucleus(trainlib.NUCLEUS_RELEASES, "nucleus-releases")
     hits = [r for r in releases
             if r.get("product") == product and str(r.get("version")) == version
             and (channel is None or r.get("channel") == channel)]
@@ -209,7 +174,7 @@ def nucleus_release(version: str, channel: str | None, refresh: bool,
     return hits[0]
 
 
-def scope_releases(release: dict, scope: str, refresh: bool,
+def scope_releases(release: dict, scope: str,
                    published_only: bool = False) -> tuple[list[dict], list[dict]]:
     """The releases whose notes count as covering this flag value.
 
@@ -227,7 +192,7 @@ def scope_releases(release: dict, scope: str, refresh: bool,
         return [release], []
     major = str(release["version"]).split(".")[0]
     channel, product = release.get("channel"), release.get("product")
-    all_rel = cached_json(NUCLEUS_RELEASES, "nucleus-releases.json", refresh)
+    all_rel = nucleus(trainlib.NUCLEUS_RELEASES, "nucleus-releases")
     siblings = [r for r in all_rel
                 if r.get("product") == product and r.get("channel") == channel
                 and str(r.get("version", "")).split(".")[0] == major]
@@ -242,8 +207,8 @@ def scope_releases(release: dict, scope: str, refresh: bool,
     return siblings, drafts
 
 
-def notes_for(releases: list[dict], refresh: bool) -> list[dict]:
-    notes = cached_json(NUCLEUS_NOTES, "nucleus-notes.json", refresh)
+def notes_for(releases: list[dict]) -> list[dict]:
+    notes = nucleus(trainlib.NUCLEUS_NOTES, "nucleus-notes")
     targets = {f"https://nucleus.mozilla.org/rna/releases/{r['id']}/?format=json"
                for r in releases}
     return [n for n in notes
@@ -269,17 +234,15 @@ def print_bugs(bugs: list[dict], version: int | None, limit: int) -> None:
 
 
 def cmd_coverage(args) -> None:
-    release = nucleus_release(args.coverage, args.channel, args.refresh, args.product,
-                             args.published_only)
+    release = nucleus_release(args.coverage, args.channel, args.product, args.published_only)
     major = str(release["version"]).split(".")[0]
     nightly = str(release.get("channel")) == "Nightly"
-    values = ([v.strip() for v in args.flags.split(",") if v.strip()] if args.flags
-              else ([f"{major}+", "nightly+"] if nightly else [f"{major}+"]))
+    values = [f"{major}+", "nightly+"] if nightly else [f"{major}+"]
 
     scope = args.scope or ("release" if nightly else "major")
     flag_scoped = release.get("product") == "Firefox"
-    releases, drafts = scope_releases(release, scope, args.refresh, args.published_only)
-    notes = notes_for(releases, args.refresh)
+    releases, drafts = scope_releases(release, scope, args.published_only)
+    notes = notes_for(releases)
     bugs = query(values, int(major) if major.isdigit() else None)
     by_id = {b["id"]: b for b in bugs}
 
@@ -317,8 +280,7 @@ def cmd_coverage(args) -> None:
     unflagged_note = sorted(set(primary) - flagged)
     cited_only = sorted((covered - set(primary)) & flagged)
 
-    related = ({} if (args.no_related or not flag_scoped)
-               else related_coverage(missing_note, covered))
+    related = related_coverage(missing_note, covered) if flag_scoped else {}
     unexplained = [i for i in missing_note if i not in related] if flag_scoped else []
 
     if args.format == "json":
@@ -396,8 +358,7 @@ def cmd_coverage(args) -> None:
     # Third class, and its cause is a Release Management convention rather than anything about the
     # note: a note covering a multi-bug rollup is associated with the **meta** bug and the flag is
     # deliberately left unset, because a meta with ongoing work would otherwise carry a flag
-    # asserting a finished decision. Classified here rather than left to the reader, and unaffected
-    # by --no-related, because whether a report is correct should not depend on a request-saving flag.
+    # asserting a finished decision. Classified here rather than left to the reader.
     metas = {b["id"]: b for b in fetch_fields(unflagged_note, "id,summary,keywords,depends_on")
              if trainlib.is_meta(b)}
     expected, rollup, real = [], [], []
@@ -462,18 +423,12 @@ def main() -> None:
     p.add_argument("--product", default="Firefox",
                    help="Nucleus product for --coverage: 'Firefox', 'Firefox for Android', "
                         "'Firefox for iOS' (default: Firefox)")
-    p.add_argument("--flags", help="override the flag values --coverage compares")
     p.add_argument("--scope", choices=["release", "major"], default=None,
                    help="notes counted as coverage: this release only, or every release of the "
                         "same major (default: major on Release/Beta, release on Nightly)")
     p.add_argument("--version", type=int, default=None,
                    help="also show cf_status_firefoxN (default: current Nightly)")
     p.add_argument("--limit", type=int, default=60, help="rows to print; 0 for all")
-    p.add_argument("--refresh", action="store_true", help="bypass the Nucleus cache")
-    p.add_argument("--no-related", action="store_true",
-                   help="skip the blocks/depends_on hop that explains a flagged bug with no note of "
-                        "its own. Rollup notes on a meta are still classified, since that decides "
-                        "whether a line is a finding")
     p.add_argument("--format", choices=["text", "json"], default="text")
     args = p.parse_args()
 
@@ -487,8 +442,8 @@ def main() -> None:
     # These only mean something to --coverage. Accepting and ignoring them would quietly answer a
     # different question than the one asked -- `--nominated --product "Firefox for Android"` reads
     # like a scoped nomination list and would silently return the unscoped one.
-    coverage_only = {"product": "Firefox", "channel": None, "scope": None, "flags": None,
-                     "no_related": False, "refresh": False, "published_only": False}
+    coverage_only = {"product": "Firefox", "channel": None, "scope": None,
+                     "published_only": False}
     misused = [f"--{k.replace('_', '-')}" for k, default in coverage_only.items()
                if getattr(args, k) != default]
     if misused:

@@ -41,9 +41,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import trainlib  # noqa: E402
+
+REPO = trainlib.RELMAN_ROOT
 SCRIPT_DIR = REPO / "scripts" / "relnotes"
-DOC_GLOBS = (".claude/skills/*/SKILL.md", "reference/release-notes/*.md", "README.md")
+DOC_GLOBS = trainlib.DOC_GLOBS
 
 FLAG_RE = re.compile(r"--[a-z][\w-]*")
 # Only a literal version number; `--cycle N` and `--cycle {nightly}` are placeholders, not examples.
@@ -59,10 +62,9 @@ OTHER_TOOLS = ("git", "curl", "grep", "sed", "awk", "head", "tail", "jq", "chmod
 MIN_FLAG_LEN = 5
 # Mechanical options: real, but documenting them adds noise rather than capability.
 PLUMBING = {
-    "--help", "--no-fetch", "--output", "--workdir", "--refresh", "--limit", "--width",
+    "--help", "--no-fetch", "--output", "--refresh", "--limit",
     "--verbose", "--all-releases", "--repo", "--format", "--outdir", "--min-cluster",
-    "--max-meta-deps", "--max-parents", "--max-path-cluster", "--months", "--date",
-    "--per-build", "--channels", "--platforms", "--skip-flags", "--include-dropped",
+    "--max-meta-deps", "--months", "--platforms",
     # Passed by daily-pass to scan-window, never by a person: the drop file it produces is what
     # the skill documents, not the flag that puts it there.
     "--dropped-out",
