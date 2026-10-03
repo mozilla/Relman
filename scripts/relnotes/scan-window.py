@@ -24,6 +24,7 @@ reference/release-notes/shipped-notes-survey.md, where components like Testing :
 carry hundreds of fixed bugs across four releases and produce no notes at all.
 
 Usage:
+  scan-window.py --next-day
   scan-window.py --since-last
   scan-window.py --range FIREFOX_152_0_RELEASE..FIREFOX_153_0_RELEASE --format json -o /tmp/w.json
   scan-window.py --build 20260803160643 --show-dropped
@@ -610,6 +611,7 @@ def show_state(repo: Path, nightly: int) -> None:
               f"{b['git_date']}{mark}")
     print()
     print("Choose one:")
+    print("  --next-day                      the next whole build-day after the watermark")
     print("  --since-last                    resume from the watermark")
     print("  --from-build <id>               start from a specific nightly build")
     print("  --build <id>                    exactly one build (previous build -> this one)")
@@ -665,7 +667,7 @@ def resolve_window(repo: Path, args, nightly_now: int) -> tuple[str, str, str]:
                   file=sys.stderr)
         return start, cend, f"nightly cycle {args.cycle}{note} ({start}..{cend})"
 
-    if args.since_last:
+    if args.since_last or args.next_day:
         st = trainlib.watermark_status(repo, trainlib.read_watermark(), nightly_now)
         if not st.get("present"):
             sys.exit("error: no stored watermark. Run --show-state and pick a start point.")
@@ -679,7 +681,20 @@ def resolve_window(repo: Path, args, nightly_now: int) -> tuple[str, str, str]:
                 f"would pull in {st['commits_behind']} commits. Pick a newer start "
                 "(--from-build / --build / --cycle), or pass --allow-stale to override."
             )
-        return st["commit"], end, f"stored watermark {st['commit'][:12]} ({st['date']})"
+        basis = f"stored watermark {st['commit'][:12]} ({st['date']})"
+        if not args.next_day:
+            return st["commit"], end, basis
+        try:
+            nd = trainlib.next_build_day(repo, st["commit"])
+        except RuntimeError as e:
+            sys.exit(f"error: --next-day: {e}")
+        if not nd["complete"]:
+            sys.exit(f"error: --next-day: build-day {nd['day']} is not over yet (its last build so "
+                     f"far is {nd['last_build']}, and no later day has a build). Wait for the "
+                     f"next day's first build, or pass --since-last --to-build "
+                     f"{nd['last_build']} to scan it as it stands.")
+        return st["commit"], nd["git"], (f"{basis} to the last of {nd['builds']} unscanned "
+                                         f"build(s) on {nd['day']} ({nd['last_build']})")
 
 
     sys.exit(
@@ -773,6 +788,10 @@ def main() -> None:
                         "FIRST on a daily run so the user can choose where to resume from.")
     p.add_argument("--since-last", action="store_true",
                    help="start from the stored watermark (see --show-state)")
+    p.add_argument("--next-day", action="store_true",
+                   help="from the stored watermark to the last nightly build of the next "
+                        "build-day; refuses while that day is still producing builds. The "
+                        "one-day-at-a-time resume, without reading build ids off --show-state")
     p.add_argument("--from-build", default=None,
                    help="start from a nightly build id, e.g. 20260730214347")
     p.add_argument("--to-build", default=None, help="end at a nightly build id")
@@ -809,6 +828,13 @@ def main() -> None:
     p.add_argument("--format", choices=["text", "json"], default="text")
     p.add_argument("-o", "--output", default=None)
     args = p.parse_args()
+    if args.next_day:
+        clash = [f for f, v in (("--since-last", args.since_last), ("--to-build", args.to_build),
+                                ("--from-build", args.from_build), ("--build", args.build),
+                                ("--build-day", args.build_day), ("--cycle", args.cycle),
+                                ("--range", args.rev_range)) if v]
+        if clash:
+            p.error(f"--next-day chooses both ends of the window itself; drop {', '.join(clash)}")
 
     repo = trainlib.resolve_repo(args.repo)
 

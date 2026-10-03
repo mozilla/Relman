@@ -24,6 +24,7 @@ Read-only. Writes only to the output directory (a mktemp dir unless --outdir is 
 
 Usage:
   daily-pass.py --build 20260731085738
+  daily-pass.py --next-day --save-state
   daily-pass.py --since-last --save-state
   daily-pass.py --cycle 155 --version 155
   daily-pass.py --build 20260731085738 --outdir /tmp/pass31
@@ -73,6 +74,7 @@ def write_artifact(path: Path, res: subprocess.CompletedProcess, body: str | Non
 # The options forwarded to scan-window.py unchanged, as (attribute, flag).
 WINDOW_FLAGS = (("build", "--build"), ("from_build", "--from-build"), ("to_build", "--to-build"),
                 ("build_day", "--build-day"), ("cycle", "--cycle"), ("since_last", "--since-last"),
+                ("next_day", "--next-day"),
                 ("rev_range", "--range"), ("version", "--version"),
                 ("first_parent", "--first-parent"), ("allow_stale", "--allow-stale"),
                 ("no_fetch", "--no-fetch"))
@@ -183,6 +185,9 @@ def main() -> None:
     p.add_argument("--build-day", default=None)
     p.add_argument("--cycle", type=int, default=None)
     p.add_argument("--since-last", action="store_true")
+    p.add_argument("--next-day", action="store_true",
+                   help="from the watermark to the last build of the next build-day; refuses "
+                        "while that day is still producing builds")
     p.add_argument("--range", dest="rev_range", default=None)
     p.add_argument("--version", type=int, default=None)
     p.add_argument("--first-parent", action="store_true")
@@ -203,10 +208,11 @@ def main() -> None:
     args = p.parse_args()
 
     if not any([args.build, args.build_day, args.from_build, args.cycle, args.since_last,
-                args.rev_range]):
+                args.next_day, args.rev_range]):
         sys.exit(
             "error: no window specified. Run `scan-window.py --show-state` first, then pass one of "
-            "--since-last / --build <id> / --from-build <id> / --cycle N / --range A..B."
+            "--next-day / --since-last / --build <id> / --from-build <id> / --cycle N / "
+            "--range A..B."
         )
 
     outdir = Path(args.outdir) if args.outdir else Path(tempfile.mkdtemp(prefix="relnotes-pass-"))

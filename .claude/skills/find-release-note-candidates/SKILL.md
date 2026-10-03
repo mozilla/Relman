@@ -202,7 +202,8 @@ Use one of these instead:
 
 | Purpose | Flag |
 |---|---|
-| Daily pass, resuming where you left off | `--since-last` (stored watermark) |
+| Daily pass, the next whole day after the watermark | `--next-day` (refuses while that day is still building) |
+| Everything since the watermark, however many days | `--since-last` (stored watermark) |
 | Exactly one nightly build | `--build <id>` |
 | From a chosen build up to now | `--from-build <id>` |
 | Up to a chosen build, for reproducing a past window | `--to-build <id>` |
@@ -212,7 +213,7 @@ Use one of these instead:
 
 **Run `--show-state` first and let the user choose**, unless the choice is already made: when the
 user named the window ("since the last check") and `resume`'s `SCAN POSITION` line carries no
-`STALE` marker, go straight to `daily-pass.py --since-last`. `resume` already printed the watermark
+`STALE` marker, go straight to `daily-pass.py --next-day`. `resume` already printed the watermark
 and the command, and a second fetch alongside the pass's own only adds minutes. Otherwise
 `--show-state` prints the stored watermark, how far behind it is, whether it belongs to an older
 train, and the most recent nightly builds with their git commits.
@@ -226,7 +227,9 @@ because several people on the team use this and a scan must not dirty a shared w
 
 Then ask which start point they want, and say why it matters:
 
-- **Watermark within the current train** → `--since-last` is the right resume point.
+- **Watermark within the current train** → `--next-day` is the right resume point; it picks the
+  next day's last build itself, so there is no build id to read off this list. When it refuses
+  because that day is still building, the day is not ready to review.
 - **Watermark predates the current cycle** → it belongs to an **earlier release train**; resuming
   would sweep in a whole shipped cycle's commits. The script refuses unless `--allow-stale` is
   passed. Offer a recent build instead — this is the common case for someone returning after a break.

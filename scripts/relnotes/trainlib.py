@@ -844,6 +844,42 @@ def day_boundaries(prefix: str) -> tuple[str, str, int] | None:
     return all_ids[all_ids.index(hits[0]) - 1], hits[-1], len(hits)
 
 
+def next_build_day(repo: Path, after: str, max_builds: int = 60) -> dict:
+    """The build-day that follows a scan position, for `--next-day`.
+
+    Walks nightly builds newest first until one is already contained in `after` (the watermark);
+    everything newer is unscanned. The day is the build-id date of the oldest unscanned build, and
+    the window ends at that day's last build. A day is complete once a build from a later day
+    exists; until then its last build is provisional, which is how a pass stopped scanning a day
+    that was still running (2026-10-03).
+
+    Returns {day, last_build, git, builds, complete}; raises RuntimeError when nothing is newer than
+    `after`, a build cannot be mapped to git, or the walk exceeds `max_builds` (about three weeks).
+    """
+    all_builds = nightly_builds(limit=100000)
+    newer = []
+    for b in all_builds[:max_builds]:
+        g = hg_to_git(b["node"])
+        if not g:
+            raise RuntimeError(f"could not map nightly build {b['buildid']} to a git commit")
+        # rc 1 = not an ancestor; rc 128 = commit not in this mirror, which is necessarily newer.
+        if git_rc(repo, "merge-base", "--is-ancestor", g, after)[0] == 0:
+            break
+        newer.append({**b, "git": g})
+    else:
+        raise RuntimeError(f"the scan position is more than {max_builds} nightly builds behind; "
+                           "pick a window with --from-build or --build-day instead")
+    if not newer:
+        raise RuntimeError(f"no nightly build is newer than the scan position {after[:12]}; "
+                           "nothing to scan yet")
+    newer.reverse()
+    day = newer[0]["buildid"][:8]
+    day_builds = [b for b in newer if b["buildid"].startswith(day)]
+    return {"day": day, "last_build": day_builds[-1]["buildid"], "git": day_builds[-1]["git"],
+            "builds": len(day_builds),
+            "complete": any(b["buildid"][:8] > day for b in newer)}
+
+
 def hg_to_git(node: str) -> str | None:
     """hg changeset -> git commit, via the `git_commit` field on json-rev."""
     try:

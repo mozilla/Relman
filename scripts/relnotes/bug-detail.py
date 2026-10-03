@@ -7,7 +7,7 @@ workflow never settles. A stable script under scripts/relnotes/ is allowlisted b
 interrupting.
 
 Shows, per bug: per-version status flags across the live trains, the relnote flag, open needinfo
-requests, reporter (and whether they are internal), resolved duplicates and blockers, see_also links,
+requests, reporter (and whether they are internal), assignee, resolved duplicates and blockers, see_also links,
 keywords, whether the bug is public, and any pending uplift approval requests -- i.e. the
 impact-evidence and gating signals the skill weighs.
 
@@ -250,6 +250,9 @@ def main() -> None:
         internal = creator.endswith("@mozilla.com")
         print(f"    reporter: {creator} ({'internal' if internal else 'EXTERNAL'})"
               f"   filed {(b.get('creation_time') or '')[:10]}")
+        # The ask needinfos the assignee; without this line every candidate cost a second lookup.
+        assignee = b.get("assigned_to") or ""
+        print(f"    assignee: {assignee if assignee and assignee != 'nobody@mozilla.org' else 'none'}")
         # see_also holds URLs rather than bug ids, so it is reported as a count only.
         for rel_field, label in (("duplicates", "duplicates"), ("blocks", "blocks")):
             # Not `ids`: that name holds the bug ids this run was asked about.

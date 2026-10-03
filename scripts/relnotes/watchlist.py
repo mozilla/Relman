@@ -423,7 +423,10 @@ def cmd_log(args) -> None:
     if args.text:
         b["log"].append({"date": now(), "text": args.text})
         save(data)
+        # Only the new entry: echoing the tail on every append re-printed the whole pass history
+        # a dozen times in one session. `log` with no text, or `resume`, shows the history.
         print(f"[{rel}] logged")
+        return
     for e in b["log"][-12:]:
         print(f"  {e['date']}  {e['text']}")
 
@@ -454,7 +457,7 @@ def cmd_resume(args) -> None:  # noqa: C901
         stale = "  *** STALE: predates the current train ***" if st.get("stale_train") else ""
         print(f"SCAN POSITION  watermark {st['commit'][:12]} ({st['date']}), "
               f"{st['commits_behind']} commits behind {st.get('upstream', 'upstream')}{stale}")
-        print(f"               resume with: daily-pass.py --since-last --save-state --brief")
+        print(f"               resume with: daily-pass.py --next-day --save-state --brief")
     else:
         print("SCAN POSITION  no usable watermark; run scan-window.py --show-state and pick a build")
     days = b.get("days_reviewed", [])
