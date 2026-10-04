@@ -837,7 +837,8 @@ Two things follow that the skill should respect:
 The point of a candidate is a request on the bug, so produce that text — don't make the user compose
 it from a table. **It goes inside that candidate's block, directly after its reasoning**, never in a
 section of asks after the tiers: the user asks as they review each candidate, and an ask printed
-elsewhere has to be matched back to its bug.
+elsewhere has to be matched back to its bug. **Print it inside a fenced code block.** The terminal
+renders Markdown, so an unfenced ask copies out without its `>` and backticks.
 
 **The single most important thing the ask must do is get `relnote-firefox` set to `?`.** Nomination
 happens by flag, not by comment: Release Management monitors that flag, and setting it pops up a

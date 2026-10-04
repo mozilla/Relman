@@ -341,8 +341,8 @@ whole review pasted at once scrolls away.
   terminology consistency). Keep per-note issues in the walk.
 - Questions attached to their note in the walk; optionally restated in a short list at the end.
 
-**A suggestion has to be pasteable without being edited first, which takes two specific things —
-"copy-pasteable" on its own is not an instruction and both of these have gone wrong under it.**
+**A suggestion has to be pasteable without being edited first, which takes three specific things —
+"copy-pasteable" on its own is not an instruction and all of these have gone wrong under it.**
 
 - **Markdown, not the rendered HTML.** Nucleus notes are *authored* in Markdown, so a rewrite uses
   `` `code` ``, `[text](url)` and `*emphasis*`. `--markup` shows the note's *output*: hand back
@@ -351,3 +351,5 @@ whole review pasted at once scrolls away.
 - **One unwrapped line per suggested note**, however long it runs. Wrapping at ~80 columns looks
   tidy in a terminal and bakes real newlines into what gets pasted, so the author re-joins every
   line by hand — which cancels out showing the full note in the first place.
+- **Inside a fenced code block.** The terminal renders Markdown, so an unfenced suggestion copies out
+  with its backticks, link syntax and emphasis already stripped.
