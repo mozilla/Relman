@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Only this site's own files run, and data comes only from these sources.
+       An injected script could otherwise read the API key. frame-ancestors
+       cannot be set here; a host should send it as a header (see README). -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://bugzilla.mozilla.org https://crash-stats.mozilla.org https://api.github.com https://whattrainisitnow.com https://product-details.mozilla.org; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Release Management Dashboard</title>
+  <link rel="icon" href="data:,"><!-- none; stops the browser asking for /favicon.ico -->
+  <link rel="stylesheet" href="style.css">
+  <script src="theme.js"></script>
+</head>
+<body>
+  <header>
+    <h1><a href="#dashboard">Release Management</a></h1>
+    <nav id="tabs"></nav>
+    <div id="account"></div>
+    <button id="theme-toggle" type="button"></button>
+  </header>
+  <main id="main"></main>
+
+  <dialog id="key-dialog">
+    <form method="dialog" id="key-form">
+      <h2>Bugzilla API key</h2>
+      <p>
+        The dashboard runs as you: with your key it sees exactly what your
+        Bugzilla account sees, including the security bugs. Without one,
+        security checks show <strong>needs key</strong>.
+      </p>
+      <p>
+        Create a key at
+        <a href="https://bugzilla.mozilla.org/userprefs.cgi?tab=apikey" target="_blank" rel="noopener">Bugzilla → Preferences → API Keys</a>.
+      </p>
+      <input id="key-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your API key">
+      <p class="small">
+        Saved in this browser's local storage only, and sent only to
+        bugzilla.mozilla.org. Bugzilla keys cannot be limited to reading, so
+        create one just for this dashboard: you can then revoke it on its own.
+      </p>
+      <p id="key-error" class="error" hidden></p>
+      <menu>
+        <button type="button" id="key-remove" class="secondary">Remove key</button>
+        <button type="button" id="key-cancel" class="secondary">Cancel</button>
+        <button type="submit" id="key-save">Save</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

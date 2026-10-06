@@ -1,0 +1,59 @@
+{
+ "_comment": "Example links copied verbatim from the spec (sections 5-9), and the live versions it was written against. Deliberate departure: beta.sec-resolved-missing-version also excludes MailNews Core and Thunderbird (requested 2026-10-05).",
+ "fixture": {
+  "train": {
+   "nightly": {
+    "version": 159
+   },
+   "beta": {
+    "version": 158
+   },
+   "release": {
+    "version": 157
+   },
+   "esr": {
+    "version": 153
+   },
+   "esr_previous": {
+    "version": 140
+   }
+  },
+  "details": {
+   "FIREFOX_NIGHTLY": "159.0a1",
+   "LATEST_FIREFOX_DEVEL_VERSION": "158.0b1",
+   "LATEST_FIREFOX_VERSION": "157.0",
+   "FIREFOX_ESR": "140.17.0esr",
+   "FIREFOX_ESR_NEXT": "153.4.0esr",
+   "FIREFOX_ESR115": "115.42.0esr"
+  },
+  "merge_day": "2026-09-24 16:00:00+00:00"
+ },
+ "links": {
+  "nightly.tracking-requested": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=cf_tracking_firefox159&o1=equals&v1=%3F",
+  "nightly.relnote-requests": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=cf_tracking_firefox_relnote&o1=equals&v1=%3F&f2=cf_status_firefox159&o2=anywords&v2=fixed%2Cverified&f3=cf_status_firefox158&o3=nowords&v3=fixed%2Cverified",
+  "beta.uplift-requested": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=flagtypes.name&o1=substring&v1=approval-mozilla-beta%3F",
+  "beta.sec-pending-tracking": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&resolution=FIXED&f1=cf_status_firefox159&o1=anywordssubstr&v1=verified%2Cfixed&f2=bug_group&o2=substring&v2=sec&f3=OP&j3=OR&f4=cf_tracking_firefox159&o4=equals&v4=---&f5=cf_status_firefox158&o5=equals&v5=---&f6=cf_status_firefox157&o6=equals&v6=---&f7=cf_status_firefox_esr153&o7=equals&v7=---&f8=cf_status_firefox_esr140&o8=equals&v8=---&f9=cf_status_firefox_esr115&o9=equals&v9=---&f10=OP&j10=AND&f11=cf_status_firefox158&o11=anyexact&v11=affected%2Cfix-optional&f12=cf_tracking_firefox158&o12=equals&v12=---&f13=CP&f14=OP&j14=AND&f15=cf_status_firefox157&o15=anyexact&v15=affected%2Cfix-optional&f16=cf_tracking_firefox157&o16=equals&v16=---&f17=CP&f18=OP&j18=AND&f19=cf_status_firefox_esr153&o19=anyexact&v19=affected%2Cfix-optional&f20=cf_tracking_firefox_esr153&o20=equals&v20=---&f21=CP&f22=OP&j22=AND&f23=cf_status_firefox_esr140&o23=anyexact&v23=affected%2Cfix-optional&f24=cf_tracking_firefox_esr140&o24=equals&v24=---&f25=CP&f26=OP&j26=AND&f27=cf_status_firefox_esr115&o27=anyexact&v27=affected%2Cfix-optional&f28=cf_tracking_firefox_esr115&o28=equals&v28=---&f29=CP&f30=CP",
+  "beta.sec-pending-affected": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&resolution=FIXED&f1=cf_status_firefox159&o1=anywordssubstr&v1=verified%2Cfixed&f2=bug_group&o2=substring&v2=sec&f3=OP&j3=OR&f4=cf_status_firefox158&o4=equals&v4=---&f5=cf_status_firefox157&o5=equals&v5=---&f6=cf_status_firefox_esr153&o6=equals&v6=---&f7=cf_status_firefox_esr140&o7=equals&v7=---&f8=cf_status_firefox_esr115&o8=equals&v8=---&f9=CP",
+  "nightly.new-regressions": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&keywords=regression&keywords_type=allwords&resolution=---&f1=cf_status_firefox159&o1=equals&v1=affected&f2=OP&j2=OR&f3=cf_status_firefox158&o3=equals&v3=unaffected&f4=cf_status_firefox158&o4=equals&v4=%3F&f5=cf_status_firefox158&o5=equals&v5=---&f6=CP&f7=cf_tracking_firefox159&o7=notequals&v7=-&f8=keywords&o8=nowordssubstr&v8=stalled%2Cintermittent-failure",
+  "nightly.carryover-regressions": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&keywords=regression&keywords_type=allwords&resolution=---&f1=cf_status_firefox159&o1=equals&v1=affected&f2=OP&j2=OR&f3=cf_status_firefox158&o3=equals&v3=affected&f4=cf_status_firefox158&o4=equals&v4=wontfix&f5=cf_status_firefox158&o5=equals&v5=disabled&f6=cf_status_firefox158&o6=equals&v6=fix-optional&f7=CP&f8=cf_tracking_firefox159&o8=notequals&v8=-&f9=keywords&o9=nowordssubstr&v9=stalled%2Cintermittent-failure",
+  "esr153.open-regressions": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&bug_status=UNCONFIRMED&bug_status=NEW&bug_status=ASSIGNED&bug_status=REOPENED&keywords=regression&keywords_type=allwords&f1=cf_status_firefox_esr153&o1=equals&v1=affected&f2=keywords&o2=nowords&v2=stalled%2Cintermittent-failure",
+  "nightly.tracking-not-fixed": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=cf_tracking_firefox159&o1=anywordssubstr&v1=%2B%2Cblocking&f2=cf_status_firefox159&o2=nowordssubstr&v2=fixed%2Cwontfix%2Cdisabled%2Cverified&f3=resolution&o3=nowordssubstr&v3=INVALID%2CWORKSFORME%2CDUPLICATE",
+  "esr153.tracking-not-fixed-159": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=cf_tracking_firefox_esr153&o1=anywordssubstr&v1=159%2B&f2=cf_status_firefox_esr153&o2=nowordssubstr&v2=fixed%2Cwontfix%2Cdisabled%2Cverified&f3=resolution&o3=nowordssubstr&v3=INVALID%2CWORKSFORME%2CDUPLICATE",
+  "esr153.tracking-not-fixed-158": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=cf_tracking_firefox_esr153&o1=anywordssubstr&v1=158%2B&f2=cf_status_firefox_esr153&o2=nowordssubstr&v2=fixed%2Cwontfix%2Cdisabled%2Cverified&f3=resolution&o3=nowordssubstr&v3=INVALID%2CWORKSFORME%2CDUPLICATE",
+  "esr153.tracking-not-fixed-157": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=cf_tracking_firefox_esr153&o1=anywordssubstr&v1=157%2B&f2=cf_status_firefox_esr153&o2=nowordssubstr&v2=fixed%2Cwontfix%2Cdisabled%2Cverified&f3=resolution&o3=nowordssubstr&v3=INVALID%2CWORKSFORME%2CDUPLICATE",
+  "beta.burndown": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&resolution=FIXED&f1=cf_status_firefox158&o1=equals&v1=affected&f2=flagtypes.name&o2=notsubstring&v2=approval-mozilla-beta",
+  "beta.sec-high-pending-uplift": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=keywords&o1=anywordssubstr&v1=sec-critical%20sec-high&f2=cf_status_firefox159&o2=anywordssubstr&v2=fixed%2Cverified&f3=cf_status_firefox158&o3=equals&v3=affected&f4=flagtypes.name&o4=notsubstring&v4=approval-mozilla-beta",
+  "beta.fixed-fix-optionals": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=cf_status_firefox158&o1=equals&v1=fix-optional&resolution=FIXED",
+  "nightly.tracking-unassigned": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=cf_tracking_firefox159&o1=anywordssubstr&v1=%2B%2Cblocking&f2=cf_status_firefox159&o2=nowordssubstr&v2=fixed%2Cwontfix%2Cdisabled%2Cverified&f3=resolution&o3=nowordssubstr&v3=INVALID%2CWORKSFORME%2CDUPLICATE&f4=assigned_to&o4=equals&v4=nobody%40mozilla.org",
+  "nightly.s2-regressions": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&bug_severity=S2&keywords=regression&keywords_type=allwords&f1=cf_status_firefox159&o1=equals&v1=affected&resolution=---",
+  "nightly.s2-unassigned": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&bug_severity=S2&keywords=regression&keywords_type=allwords&f1=cf_status_firefox159&o1=equals&v1=affected&resolution=---&f2=assigned_to&o2=equals&v2=nobody%40mozilla.org",
+  "beta.uplift-approved-not-fixed": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=flagtypes.name&o1=substring&v1=approval-mozilla-beta%2B&f2=cf_status_firefox158&o2=nowords&v2=fixed%2Cverified%2Cwontfix%2Cdisabled%2Cunaffected&f3=flagtypes.name&o3=changedafter&v3=2026-09-24T16%3A00%3A00%2B00%3A00&f4=product&o4=nowords&v4=Thunderbird%2CNSS",
+  "beta.approved-never-landed": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=flagtypes.name&o1=substring&v1=approval-mozilla-beta%2B&f2=cf_status_firefox158&o2=equals&v2=fixed&f3=cf_status_firefox158&o3=changedafter&v3=2026-09-24T16%3A00%3A00%2B00%3A00&f4=product&o4=nowords&v4=Thunderbird%2CNSS",
+  "beta.sec-resolved-missing-version": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&chfield=resolution&chfieldvalue=FIXED&chfieldfrom=2026-09-24T16%3A00%3A00%2B00%3A00&chfieldto=Now&f1=bug_group&o1=substring&v1=sec&f2=cf_status_firefox159&o2=equals&v2=---&f3=product&o3=notequals&v3=NSS&f4=product&o4=notequals&v4=MailNews%20Core&f5=product&o5=notequals&v5=Thunderbird",
+  "beta.high-impact-for-beta": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&resolution=FIXED&product=Core&product=DevTools&product=External%20Software%20Affecting%20Firefox&product=Fenix&product=Firefox&product=Firefox%20for%20Android&product=Geckoview&product=NSPR&product=NSS&product=Toolkit&product=WebExtensions&classification=Client%20Software&classification=Components&f1=keywords&o1=anywords&v1=crash%20regression%20leak%20topcrash%20assertion%20dataloss&f2=cf_status_firefox159&o2=anywordssubstr&v2=verified%2Cfixed&f3=cf_status_firefox158&o3=equals&v3=---&f4=keywords&o4=nowords&v4=intermittent-failure",
+  "nightly.high-impact-missing-nightly": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&chfield=resolution&chfieldvalue=FIXED&chfieldfrom=2026-09-24T16%3A00%3A00%2B00%3A00&chfieldto=Now&product=Core&product=DevTools&product=External%20Software%20Affecting%20Firefox&product=Fenix&product=Firefox&product=Firefox%20for%20Android&product=Geckoview&product=NSPR&product=NSS&product=Toolkit&product=WebExtensions&classification=Client%20Software&classification=Components&f1=keywords&o1=anywords&v1=crash%20regression%20leak%20topcrash%20assertion%20dataloss&f2=cf_status_firefox159&o2=equals&v2=---&f3=keywords&o3=nowords&v3=intermittent-failure",
+  "nightly.relnote-nightly-plus": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=cf_tracking_firefox_relnote&o1=equals&v1=nightly%2B",
+  "nightly.relnote-plus": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&f1=cf_tracking_firefox_relnote&o1=equals&v1=159%2B&f2=cf_status_firefox159&o2=anywords&v2=affected%2Cfixed%2Cverified%2Cfix-optional&f3=cf_status_firefox159&o3=notsubstring&v3=disabled",
+  "misc.filed-today": "https://bugzilla.mozilla.org/buglist.cgi?query_format=advanced&order=changeddate&chfield=%5BBug%20creation%5D&chfieldfrom=-24h&chfieldto=Now&resolution=---&product=Core&product=DevTools&product=External%20Software%20Affecting%20Firefox&product=Fenix&product=Firefox&product=Firefox%20Build%20System&product=Firefox%20for%20Android&product=Firefox%20for%20Echo%20Show&product=Firefox%20for%20FireTV&product=Firefox%20for%20iOS&product=Focus&product=Focus-iOS&product=Geckoview&product=NSPR&product=NSS&product=Toolkit&product=WebExtensions&classification=Client%20Software&classification=Developer%20Infrastructure&classification=Components&f1=reporter&o1=notequals&v1=intermittent-bug-filer%40mozilla.bugs&f2=reporter&o2=notequals&v2=%25group.editbugs%25&f3=reporter&o3=notequals&v3=%25group.mozilla-corporation%25"
+ }
+}
