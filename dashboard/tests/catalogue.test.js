@@ -109,7 +109,7 @@ test("Tier 3 and Misc do not run on load", () => {
 test("gap detectors", () => {
   const flagged = [...checks.values()].filter((c) => c.shouldBeZero).map((c) => c.id).sort();
   const want = ["beta.sec-high-pending-uplift", ...["beta", "release", "esr153", "esr140", "esr115"]
-    .flatMap((ch) => [`${ch}.uplift-approved-not-fixed`, `${ch}.approved-never-landed`]),
+    .flatMap((ch) => [`${ch}.uplift-approved-not-fixed`, `${ch}.approved-never-landed`, `${ch}.uplift-revisions`]),
   ...["esr153", "esr140", "esr115"].map((ch) => `${ch}.sec-high-no-uplift-request`)].sort();
   assert.deepEqual(flagged, want);
 });

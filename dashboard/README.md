@@ -5,7 +5,7 @@ shows the counts, with each table opening in place, so you don't have to open se
 
 It is a static site, like [BugDash](https://github.com/mozilla/bugdash): plain
 HTML and ES modules, no build step, no backend, no dependencies. Your browser
-queries Bugzilla, crash-stats, GitHub, whattrainisitnow and product-details
+queries Bugzilla, Phabricator, crash-stats, GitHub, whattrainisitnow and product-details
 directly.
 
 ## Run
@@ -24,19 +24,26 @@ On macOS and Linux `./dashboard/run.py` works too. Stop it with Ctrl+C.
 `run.py` is Python's built-in file server on 127.0.0.1, serving `site/`. Any
 static host works too: publish `site/` as it is.
 
-## API key
+## API keys
 
-Click **add** in the header and paste a Bugzilla API key
-([create one](https://bugzilla.mozilla.org/userprefs.cgi?tab=apikey)).
+The header has two, both optional. Click **add** beside each:
 
-The key is saved in this browser's local storage and sent only to
-bugzilla.mozilla.org, never to anything else. Bugzilla requests refuse to
-follow redirects, so the key cannot be carried to another site. A
-Content-Security-Policy lets only this site's own scripts run and only the five
-data sources above be contacted.
+- **Bugzilla** API key ([create one](https://bugzilla.mozilla.org/userprefs.cgi?tab=apikey)).
+  The dashboard runs as you and sees what your Bugzilla account sees. Without
+  a key, the security checks show **needs key** rather than a reassuring zero.
+- **Phabricator** API token ([create one](https://phabricator.services.mozilla.com/settings/panel/apitokens/),
+  under Settings → Conduit API Tokens). Only the "Open revisions for this
+  branch" checks use it: Phabricator is the only place that says which branch a
+  revision targets, and its API has no anonymous access, even to public
+  revisions. Without a token those checks show **needs Phabricator token**.
 
-The dashboard runs as you and sees what your Bugzilla account sees. Without a
-key, the security checks show **needs key** rather than a reassuring zero.
+Each is saved in this browser's local storage and sent only to its own site,
+bugzilla.mozilla.org or phabricator.services.mozilla.com, never to anything
+else. Requests to both refuse to follow redirects, so a key cannot be carried
+to another site. A Content-Security-Policy lets only this site's own scripts
+run and only the six data sources above be contacted. Neither kind of key can
+be limited to reading, so create ones just for this dashboard that you can
+revoke on their own.
 
 ## Hosting
 
@@ -59,7 +66,7 @@ The key never passes through the host, so hosting adds no one who can see it.
 
 Row states: a count (red for checks that should read zero); **Nothing waiting**
 (an empty Tier 1 row); **Clear** (an empty row in any other tier); **–** (not
-run yet); **needs key**;
+run yet); **needs key** or **needs Phabricator token**;
 **unavailable** (a cross-check source failed, so there is no count).
 In the bug tables, a red padlock beside a bug number marks a bug hidden in a
 security group.
@@ -224,7 +231,8 @@ node dashboard/bin/check.js nightly.relnote-nightly-plus --json
 
 `bin/check.js` runs a check (a dashboard row: its query and any "then:" steps)
 with the same code the page runs, so it returns exactly the bugs that row
-shows, and the query in `catalogue.js` is the only definition. It uses `$BUGZILLA_API_KEY`, or else `~/.config/bugzilla/api-key`.
+shows, and the query in `catalogue.js` is the only definition. It uses `$BUGZILLA_API_KEY`, or else
+`~/.config/bugzilla/api-key`, and `$PHABRICATOR_API_TOKEN` for the checks that read Phabricator.
 
 To add a skill to a check, give the check `skills: [{ name, summary }]` in
 `catalogue.js` and write `.claude/skills/<name>/SKILL.md` naming the check id
@@ -247,6 +255,8 @@ site/
     postfilters.js  the "then:" steps: approval dates, landed on branch, staff reporters
     commits.js    GitHub commit history; which bugs a commit lands or backs out
     sec_open_on_main.js  "Security fixes on main, bug still open" (Beta, Tier 3)
+    uplift_revisions.js  "Open revisions for this branch: uplift not requested or denied" (Beta, Release, ESR; Tier 3)
+    phabricator.js  Phabricator API client: the reader's token, open revisions per repository
     runner.js     runs a check, shapes the result, computes headlines
     crashstats.js Socorro counts and top signatures
     bugzilla.js, http.js  clients and a cache that never stores errors

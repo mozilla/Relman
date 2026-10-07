@@ -9,7 +9,9 @@
 //
 // Uses $BUGZILLA_API_KEY, or else ~/.config/bugzilla/api-key (the Relman
 // convention); without either, hidden bugs are not returned
-// and checks that need a key report needs_key. Exits 1 unless the check ran.
+// and checks that need a key report needs_key. Checks that read Phabricator
+// use $PHABRICATOR_API_TOKEN, and report needs_phab without it. Exits 1
+// unless the check ran.
 
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -47,7 +49,8 @@ const keyFile = () => {
   try { return readFileSync(`${homedir()}/.config/bugzilla/api-key`, "utf8").trim(); } catch { return ""; }
 };
 const key = process.env.BUGZILLA_API_KEY?.trim() || keyFile();
-const result = await runner.run(check, key, opts);
+const phabToken = process.env.PHABRICATOR_API_TOKEN || "";
+const result = await runner.run(check, key, opts, { phabToken });
 const out = {
   id: check.id,
   title: check.title,

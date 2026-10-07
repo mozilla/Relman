@@ -3,6 +3,7 @@
 // A result's `state` is one of:
 //   ok           count is real (it may be zero)
 //   needs_key    the check is meaningless without an API key, so it did not run
+//   needs_phab   the check reads Phabricator and there is no Phabricator token
 //   unavailable  a cross-check source failed; there is deliberately no count
 //   error        the query itself failed
 
@@ -41,7 +42,7 @@ const fieldsFor = ({ columns, filters }) =>
 function shape(bug, { columns, filters }) {
   const who = bug.assigned_to_detail ?? {}; // Bugzilla sends it with assigned_to
   return {
-    id: bug.id,
+    id: bug.id ?? null, // null for a row about a revision with no bug
     summary: bug.summary ?? "",
     status: bug.status ?? "",
     resolution: bug.resolution ?? "",
@@ -66,13 +67,13 @@ function shape(bug, { columns, filters }) {
   };
 }
 
-async function execute(check, key, opts, fresh) {
+async function execute(check, key, opts, fresh, phabToken) {
   const full = [...bugzilla.BASE_FIELDS, ...fieldsFor(check)];
   let bugs;
   let candidates;
   let extra = {};
   if (check.source) {
-    [bugs, extra] = await check.source.fetch(full, key, opts, fresh);
+    [bugs, extra] = await check.source.fetch(full, key, opts, fresh, phabToken);
     candidates = extra.candidates;
   } else {
     // With post-filters the rows are candidates, not answers: ask only for
@@ -91,25 +92,28 @@ async function execute(check, key, opts, fresh) {
   }
   bugs = [...bugs].sort((a, b) =>
     (a.last_change_time ?? "").localeCompare(b.last_change_time ?? "") || a.id - b.id);
+  const ids = [...new Set(bugs.map((b) => b.id).filter(Boolean))];
   return {
     state: "ok",
     count: bugs.length,
     candidates,
     capped: candidates >= BUGZILLA_ROW_CAP,
     bugs: bugs.map((b) => shape(b, check)),
-    ids_url: idsLink(bugs),
+    ids_url: ids.length > 0 && ids.length <= IDS_URL_MAX ? idsUrl(ids) : null,
     ran_at: now(),
     ...extra,
   };
 }
 
 // `fresh` skips every cached result this check depends on, not just its own.
-export async function run(check, key, opts = {}, { fresh = false } = {}) {
+export async function run(check, key, opts = {}, { fresh = false, phabToken = "" } = {}) {
   opts = check.source ? check.source.parse(opts) : {};
   if (check.needsKey && !key) return { state: "needs_key", count: null };
-  const cacheKey = ["check", key ?? "", check.id, check.query.buglistUrl(), opts];
+  if (check.needsPhabricator && !phabToken) return { state: "needs_phab", count: null };
+  if (!check.needsPhabricator) phabToken = ""; // so it never splits the cache of checks that don't use it
+  const cacheKey = ["check", key ?? "", phabToken, check.id, check.query.buglistUrl(), opts];
   try {
-    return await cache.getOrRun(cacheKey, () => execute(check, key, opts, fresh), undefined, fresh);
+    return await cache.getOrRun(cacheKey, () => execute(check, key, opts, fresh, phabToken), undefined, fresh);
   } catch (e) {
     if (e instanceof Unavailable) return { state: "unavailable", count: null, message: e.message };
     if (e instanceof SourceError) return { state: "error", count: null, message: e.message };

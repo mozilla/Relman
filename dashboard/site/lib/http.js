@@ -53,10 +53,12 @@ function withParams(url, params) {
   return params && params.length ? `${url}?${new URLSearchParams(params)}` : url;
 }
 
-export async function get(url, { params, headers, redirect = "follow" } = {}) {
+// `form` makes it a POST of those fields, as Phabricator's API expects.
+export async function get(url, { params, headers, redirect = "follow", form } = {}) {
   try {
     return await fetch(withParams(url, params), {
       headers, redirect, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+      ...(form ? { method: "POST", body: new URLSearchParams(form) } : {}),
     });
   } catch (e) {
     throw new SourceError(`${new URL(url).host}: ${e.name} ${e.message}`.trim());

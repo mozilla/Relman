@@ -80,7 +80,7 @@ export async function attachments(ids, key) {
   const out = new Map();
   for (let i = 0; i < ids.length; i += 100) {
     const chunk = ids.slice(i, i + 100);
-    const p = [...chunk.slice(1).map((b) => ["ids", String(b)]), ["include_fields", "id,bug_id,is_obsolete,flags"]];
+    const p = [...chunk.slice(1).map((b) => ["ids", String(b)]), ["include_fields", "id,bug_id,file_name,is_obsolete,flags"]];
     const body = await call(`bug/${chunk[0]}/attachment`, p, key);
     for (const [bugId, atts] of Object.entries(body.bugs ?? {})) out.set(Number(bugId), atts);
   }

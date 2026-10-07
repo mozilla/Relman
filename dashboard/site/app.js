@@ -2,6 +2,7 @@ import * as bugzilla from "./lib/bugzilla.js";
 import { CACHE_MS } from "./lib/config.js";
 import * as catalogue from "./lib/catalogue.js";
 import * as crashstats from "./lib/crashstats.js";
+import * as phabricator from "./lib/phabricator.js";
 import * as runner from "./lib/runner.js";
 import * as versions from "./lib/versions.js";
 
@@ -36,9 +37,8 @@ function h(tag, attrs = {}, ...children) {
   return el;
 }
 
-function apiKey() {
-  return localStorage.getItem(KEY_STORAGE) || "";
-}
+const apiKey = () => credential("bugzilla");
+const phabToken = () => credential("phabricator");
 
 function age(iso) {
   if (!iso) return "";
@@ -75,57 +75,98 @@ function openTabsButton(bugs) {
 
 // --- account ---------------------------------------------------------------
 
+// The credentials the page can hold. Each stays in this browser and is sent
+// only to its own site, straight from this page.
+const CREDENTIALS = {
+  bugzilla: {
+    storage: KEY_STORAGE,
+    label: "Bugzilla",
+    title: "Bugzilla API key",
+    why: "The dashboard runs as you: with your key it sees exactly what your Bugzilla account sees, " +
+      "including the security bugs. Without one, security checks show needs key.",
+    create: ["https://bugzilla.mozilla.org/userprefs.cgi?tab=apikey", "Bugzilla → Preferences → API Keys"],
+    host: "bugzilla.mozilla.org",
+    name: async (key) => { const w = await bugzilla.whoami(key); return w.real_name || w.name; },
+    // Only Bugzilla's "invalid API key" (306) means the key was refused; an
+    // outage or any other error is not the key's fault.
+    rejected: (e) => e.code === 306,
+  },
+  phabricator: {
+    storage: "phabricatorToken",
+    label: "Phabricator",
+    title: "Phabricator API token",
+    why: "Only the checks for open uplift revisions use it: Phabricator is the only place that says which " +
+      "branch a revision targets. Without one, those checks show needs Phabricator token.",
+    create: ["https://phabricator.services.mozilla.com/settings/panel/apitokens/", "Phabricator → Settings → Conduit API Tokens"],
+    host: "phabricator.services.mozilla.com",
+    name: async (token) => { const w = await phabricator.whoami(token); return w.realName || w.userName; },
+    rejected: phabricator.rejected,
+  },
+};
+
+const credential = (kind) => localStorage.getItem(CREDENTIALS[kind].storage) || "";
+
 async function renderAccount() {
   const box = document.getElementById("account");
-  box.replaceChildren();
-  const key = apiKey();
-  if (!key) {
-    box.append(h("span", { class: "muted" }, "No API key "), h("button", { class: "link", onclick: openKeyDialog }, "add"));
-    return;
-  }
-  box.append(h("span", { class: "muted" }, "Checking key…"));
-  try {
-    const who = await bugzilla.whoami(key);
-    box.replaceChildren(h("span", {}, who.real_name || who.name, " "), h("button", { class: "link", onclick: openKeyDialog }, "change"));
-  } catch (e) {
-    const text = rejected(e) ? "API key rejected " : `Could not check key: ${e.message} `;
-    box.replaceChildren(h("span", { class: "error", title: e.message }, text), h("button", { class: "link", onclick: openKeyDialog }, "fix"));
-  }
+  const parts = Object.keys(CREDENTIALS).map((kind) => {
+    const c = CREDENTIALS[kind];
+    const part = h("span", {});
+    const show = (...children) => part.replaceChildren(h("span", { class: "muted" }, `${c.label}: `), ...children);
+    const value = credential(kind);
+    if (!value) {
+      show(h("button", { class: "link", onclick: () => openKeyDialog(kind) }, "add"));
+      return part;
+    }
+    show(h("span", { class: "muted" }, "checking…"));
+    c.name(value).then(
+      (name) => show(h("span", {}, name, " "), h("button", { class: "link", onclick: () => openKeyDialog(kind) }, "change")),
+      (e) => show(h("span", { class: "error", title: e.message }, c.rejected(e) ? "rejected " : "could not check "),
+        h("button", { class: "link", onclick: () => openKeyDialog(kind) }, "fix")));
+    return part;
+  });
+  box.replaceChildren(...parts.flatMap((p, i) => (i ? [h("span", { class: "muted" }, " · "), p] : [p])));
 }
 
-// Only Bugzilla's "invalid API key" (306) means the key was refused; an
-// outage or any other error is not the key's fault.
-const rejected = (e) => e.code === 306;
-
-function openKeyDialog() {
+function openKeyDialog(kind = "bugzilla") {
+  const c = CREDENTIALS[kind];
+  const dialog = document.getElementById("key-dialog");
+  dialog.dataset.kind = kind;
+  document.getElementById("key-title").textContent = c.title;
+  document.getElementById("key-why").textContent = c.why;
+  const link = document.getElementById("key-create");
+  [link.href, link.textContent] = c.create;
+  document.getElementById("key-host").textContent = c.host;
   document.getElementById("key-input").value = "";
+  document.getElementById("key-input").placeholder = `Paste your ${c.title}`;
   document.getElementById("key-error").hidden = true;
-  document.getElementById("key-remove").hidden = !apiKey();
-  document.getElementById("key-dialog").showModal();
+  document.getElementById("key-remove").hidden = !credential(kind);
+  dialog.showModal();
 }
 
 function setupKeyDialog() {
   const dialog = document.getElementById("key-dialog");
   const err = document.getElementById("key-error");
+  const kind = () => CREDENTIALS[dialog.dataset.kind];
   document.getElementById("key-cancel").onclick = () => dialog.close();
   document.getElementById("key-remove").onclick = () => {
-    localStorage.removeItem(KEY_STORAGE);
+    localStorage.removeItem(kind().storage);
     dialog.close();
     keyChanged();
   };
   document.getElementById("key-form").onsubmit = async (ev) => {
     ev.preventDefault();
-    const key = document.getElementById("key-input").value.trim();
-    if (!key) return;
+    const c = kind();
+    const value = document.getElementById("key-input").value.trim();
+    if (!value) return;
     err.hidden = true;
     try {
-      await bugzilla.whoami(key);
+      await c.name(value);
     } catch (e) {
-      err.textContent = rejected(e) ? `Bugzilla did not accept that key: ${e.message}` : `Could not check the key: ${e.message}`;
+      err.textContent = c.rejected(e) ? `${c.label} did not accept that: ${e.message}` : `Could not check it: ${e.message}`;
       err.hidden = false;
       return;
     }
-    localStorage.setItem(KEY_STORAGE, key);
+    localStorage.setItem(c.storage, value);
     dialog.close();
     keyChanged();
   };
@@ -305,10 +346,12 @@ class Row {
       h("span", { class: "row-title" }, check.title, queryHelp(() => this.result?.lines ?? check.lines()),
         check.shouldBeZero ? h("span", { class: "tag" }, "should read zero") : null,
         check.needsKey ? h("span", { class: "tag" }, "needs an API key") : null,
+        check.needsPhabricator ? h("span", { class: "tag" }, "needs a Phabricator token") : null,
         check.skills.length ? h("span", { class: "tag skill", title: "Has a deeper check in Claude Code; open the row" }, "Claude skill") : null),
       h("span", { class: "row-right" }, options ? this.optionSelect(options) : null, this.pill, this.refreshButton()));
     this.el = h("div", { class: "row" }, this.header, this.panel);
     if (check.needsKey && !apiKey()) this.setPill("needs key", "warn");
+    else if (check.needsPhabricator && !phabToken()) this.setPill("needs Phabricator token", "warn");
     else if (check.runsOnLoad) this.setPill("queued", "queued", "Waiting for its turn: only a few Bugzilla queries run at once");
     this.renderPanel();
   }
@@ -357,8 +400,10 @@ class Row {
 
   async run({ fresh = false } = {}) {
     if (this.loading || this.result) return;
-    if (this.check.needsKey && !apiKey()) {
-      this.result = { state: "needs_key" };
+    const missing = this.check.needsKey && !apiKey() ? "needs_key"
+      : this.check.needsPhabricator && !phabToken() ? "needs_phab" : null;
+    if (missing) {
+      this.result = { state: missing };
       this.renderPanel();
       return;
     }
@@ -373,7 +418,7 @@ class Row {
     this.renderPanel();
     let result;
     try {
-      result = await runner.run(this.check, apiKey(), this.opts, { fresh });
+      result = await runner.run(this.check, apiKey(), this.opts, { fresh, phabToken: phabToken() });
     } catch (e) {
       result = { state: "error", message: e.message };
     }
@@ -392,6 +437,7 @@ class Row {
     const r = this.result;
     switch (r.state) {
       case "needs_key": return this.setPill("needs key", "warn", "Matches nothing without an API key, so it was not run.");
+      case "needs_phab": return this.setPill("needs Phabricator token", "warn", "Reads Phabricator, which needs your API token, so it was not run.");
       case "unavailable": return this.setPill("unavailable", "warn", r.message);
       case "error": return this.setPill("error", "bad", r.message);
     }
@@ -409,7 +455,8 @@ class Row {
     if (this.loading) parts.push(h("p", { class: "muted" }, h("span", { class: "spinner" }), " Running…"));
     if (this.result) {
       const r = this.result;
-      if (r.state === "needs_key") parts.push(h("p", { class: "warn-text" }, "This check matches nothing without an API key, so a zero would be false reassurance. ", h("button", { class: "link", onclick: openKeyDialog }, "Add a key")));
+      if (r.state === "needs_key") parts.push(h("p", { class: "warn-text" }, "This check matches nothing without an API key, so a zero would be false reassurance. ", h("button", { class: "link", onclick: () => openKeyDialog("bugzilla") }, "Add a key")));
+      if (r.state === "needs_phab") parts.push(h("p", { class: "warn-text" }, "This check reads Phabricator, which has no anonymous access, so it needs your Phabricator API token. ", h("button", { class: "link", onclick: () => openKeyDialog("phabricator") }, "Add a token")));
       if (r.state === "unavailable") parts.push(h("p", { class: "warn-text" }, `Unavailable: ${r.message}. There is no fallback to the unfiltered result: the cross-check subtracts bugs, so without it the count would invent problems.`));
       if (r.state === "error") parts.push(h("p", { class: "error" }, `Failed: ${r.message}`));
       if (r.capped && r.total != null) parts.push(h("p", { class: "error" }, `${r.total.toLocaleString()} bugs match, past Bugzilla's ${r.candidates.toLocaleString()}-row cap. The count is right; the table below lists only the first ${r.count.toLocaleString()}.`));
@@ -484,6 +531,13 @@ function queryHelp(getLines) {
   }, "?");
 }
 
+// A revision becomes a Phabricator link, and an ISO time an age like "Last changed".
+function flagCell(value) {
+  if (/^D\d+$/.test(value)) return h("td", {}, extLink(phabricator.revisionUrl(value.slice(1)), value));
+  if (/^\d{4}-\d\d-\d\dT[\d:]+Z$/.test(value)) return h("td", { title: value }, age(value));
+  return h("td", { class: value === "---" ? "muted" : "" }, value);
+}
+
 function bugTable(bugs, sort) {
   const flagCols = Object.keys(bugs[0].flags);
   const short = (f) => f.replace("cf_status_firefox", "status ").replace("cf_tracking_firefox", "tracking ").replace("_esr", "esr").replace(/_/g, " ");
@@ -498,16 +552,16 @@ function bugTable(bugs, sort) {
     ["Last changed", (b) => Date.now() - new Date(b.last_change_time)], // by age, as shown
   ];
   const row = (b) => h("tr", {},
-    h("td", { class: "bug-id" }, extLink(bugUrl(b.id), b.id),
+    h("td", { class: "bug-id" }, b.id ? extLink(bugUrl(b.id), b.id) : h("span", { class: "muted" }, "—"),
       b.security ? h("span", { class: "lock", role: "img", "aria-label": "Security bug", title: "Security bug" }) : null),
     h("td", { class: "summary" }, b.summary),
-    h("td", {}, `${b.product} :: ${b.component}`),
+    h("td", {}, b.product ? `${b.product} :: ${b.component}` : ""),
     h("td", {}, b.resolution ? `${b.status} ${b.resolution}` : b.status),
     h("td", {}, b.severity),
     b.assignee === "nobody@mozilla.org"
       ? h("td", { class: "muted" }, "nobody")
       : h("td", { title: b.assignee }, b.assignee_name || b.assignee),
-    flagCols.map((f) => h("td", { class: b.flags[f] === "---" ? "muted" : "" }, b.flags[f])),
+    flagCols.map((f) => flagCell(b.flags[f])),
     h("td", { title: b.last_change_time }, age(b.last_change_time)),
   );
   // Clicking a heading sorts ascending, then descending, then back to the query's own order.

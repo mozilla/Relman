@@ -6,6 +6,7 @@
 import { ApprovedThisCycle, NotLandedOnBranch, ReporterNotStaff } from "./postfilters.js";
 import { Changed, Chart, Eq, In, Keywords, Query, allOf, anyOf, notComponent } from "./querydef.js";
 import { LANDED_COLUMN, QUERY as SEC_OPEN_QUERY, SecOpenOnMain } from "./sec_open_on_main.js";
+import { REVISION_COLUMNS, UpliftRevisions } from "./uplift_revisions.js";
 
 // tier -> [name, subtitle, runs on load]
 const TIERS = {
@@ -41,6 +42,7 @@ const ESR_BURNDOWN_EXCLUDED_PRODUCTS = ["NSS", "MailNews Core", "Thunderbird", "
 class Check {
   constructor(id, title, tier, query, channel = null, {
     needsKey = false, shouldBeZero = false, post = [], notes = [],
+    needsPhabricator = false, // reads Phabricator, so it needs the reader's Phabricator token
     columns = [], // extra table columns, mostly status and tracking flags
     source = null, // replaces the single Bugzilla search (see sec_open_on_main.js)
     // Claude Code skills that go deeper on this check's bugs: [{ name, summary }].
@@ -53,7 +55,7 @@ class Check {
     // The query link gets the same condition (filteredQueryUrl).
     filters = [],
   } = {}) {
-    Object.assign(this, { id, title, tier, query, channel, needsKey, shouldBeZero, post, notes, columns, source, skills, filters });
+    Object.assign(this, { id, title, tier, query, channel, needsKey, shouldBeZero, needsPhabricator, post, notes, columns, source, skills, filters });
   }
 
   get runsOnLoad() {
@@ -432,6 +434,20 @@ function channelChecks(c, r) {
           "shows up here even though it did land.",
           "Checked per bug, not per patch: if a bug has two approved patches and " +
           "only one landed, the bug counts as landed and does not show up here.",
+        ],
+      });
+    // Its bugs come from Phabricator, so it has no Bugzilla query of its own.
+    add("uplift-revisions", "Open revisions for this branch: uplift not requested or denied", "3",
+      new Query([]), {
+        shouldBeZero: true,
+        needsPhabricator: true,
+        source: new UpliftRevisions(c),
+        columns: [c.statusField, ...REVISION_COLUMNS],
+        notes: [
+          "Every open revision (needs review, accepted or needs revision) in this branch's Phabricator " +
+          "repository counts, however old, so stale revisions nobody abandoned show up too. " +
+          "Landed and abandoned revisions are left out.",
+          "\"No bug linked\" rows are revisions without a bug, so they can't carry an uplift request at all.",
         ],
       });
   }
