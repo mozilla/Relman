@@ -236,7 +236,7 @@ To add a skill to a check, give the check `skills: [{ name, summary }]` in
 run.py            serves site/ locally, on macOS, Linux and Windows
 bin/check.js      runs one check from the command line (for skills)
 site/
-  index.html, style.css, theme.js
+  index.html, style.css, theme.js, favicon.svg
   app.js          the page
   lib/
     config.js     extra ESR versions (115), cache times, crash windows
