@@ -5,6 +5,7 @@
   --muted: #6b6b73;
   --border: #e2e2e6;
   --accent: #0060df;
+  --visited: #9248c8;
   --good-bg: #e3f4e8; --good: #1a7f37;
   --bad-bg: #fde7e9; --bad: #c50e1f;
   --warn-bg: #fff4ce; --warn: #8a5a00;
@@ -19,6 +20,7 @@
 :root[data-theme="dark"] {
   --bg: #17171a; --surface: #1f1f23; --text: #ececf0; --muted: #9a9aa5; --border: #34343b;
   --accent: #6ea8ff;
+  --visited: #c3a1ff;
   --good-bg: #173322; --good: #6fd38e;
   --bad-bg: #3d1a1e; --bad: #ff8a94;
   --warn-bg: #3a3014; --warn: #f0c75e;
@@ -154,6 +156,9 @@ table.bugs th { text-align: left; color: var(--muted); font-weight: 500; white-s
 table.bugs th, table.bugs td { padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
 table.bugs td.summary { min-width: 300px; }
 table.bugs td.bug-id { white-space: nowrap; }
+/* Only bug numbers show as visited, other links are the same
+   address every time, so they would always read as visited. */
+table.bugs td.bug-id a:visited { color: var(--visited); }
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center; flex: none;
   width: 22px; height: 22px; padding: 0; border: 1px solid transparent; border-radius: 6px;
