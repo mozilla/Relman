@@ -156,15 +156,14 @@ class CannotEvaluate(Exception):
     guard that does not evaluate would be a Gecko build failure.
     """
 
-# Channel guard truth tables. EARLY_BETA_OR_EARLIER is true on nightly and the
-# first half of a beta cycle; RELEASE_OR_BETA is the complement of nightly. Every symbol is written
+# Channel guard truth tables. There is no early Beta: EARLY_BETA_OR_EARLIER is an alias for
+# NIGHTLY_BUILD pending its removal (bug 2052050); RELEASE_OR_BETA is the complement of nightly. Every symbol is written
 # for every row, true or false, so an unlisted symbol stays distinguishable from a false one.
 CHANNEL_SYMBOLS = ("NIGHTLY_BUILD", "EARLY_BETA_OR_EARLIER", "RELEASE_OR_BETA", "MOZ_DEV_EDITION",
                    "MOZILLA_OFFICIAL", "DEBUG")
 CHANNELS = {c: {sym: sym in on for sym in CHANNEL_SYMBOLS} for c, on in {
     "nightly": {"NIGHTLY_BUILD", "EARLY_BETA_OR_EARLIER", "MOZILLA_OFFICIAL"},
-    "beta-early": {"EARLY_BETA_OR_EARLIER", "RELEASE_OR_BETA", "MOZILLA_OFFICIAL"},
-    "beta-late": {"RELEASE_OR_BETA", "MOZILLA_OFFICIAL"},
+    "beta": {"RELEASE_OR_BETA", "MOZILLA_OFFICIAL"},
     "release": {"RELEASE_OR_BETA", "MOZILLA_OFFICIAL"},
 }.items()}
 
@@ -849,10 +848,6 @@ def classify(values: dict[tuple[str, str], str], channels: list[str], platforms:
     if live and all(v is False for v in live.values()):
         return f"off by default on all channels{suffix}"
     if live.get("nightly") is True and live.get("release") is False:
-        if live.get("beta-early") is True and live.get("beta-late") is False:
-            return f"Nightly + early Beta only{suffix}"
-        if live.get("beta-early") is True:
-            return f"Nightly and Beta only{suffix}"
         return f"Nightly-only{suffix}"
     rendered = []
     for ch, v in per_channel.items():

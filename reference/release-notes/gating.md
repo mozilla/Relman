@@ -70,7 +70,7 @@ undetermined.
    pseudo at all (the file's header defers to `longhands.toml` for the semantics), so a pseudo can be
    out of reach for author stylesheets even with its preference on — two independent gates, and the
    preference alone does not settle it. Worked example: `::picker`, `::checkmark` and `::picker-icon`
-   each carry `pref = "dom.select.customizable_select.enabled"`, false on all 16 configurations, so
+   each carry `pref = "dom.select.customizable_select.enabled"`, false on every configuration, so
    those selectors do not parse on a default build — which is why DevTools support for displaying
    their rules was declined as a note.
 2. **Grep the shortest distinctive token** in StaticPrefList:
@@ -258,7 +258,7 @@ Three traps:
 | Guard | True on |
 |---|---|
 | `NIGHTLY_BUILD` | Nightly only |
-| `EARLY_BETA_OR_EARLIER` | Nightly and the early part of Beta |
+| `EARLY_BETA_OR_EARLIER` | Nightly only: an alias for `NIGHTLY_BUILD` pending removal (bug 2052050); there is no early Beta |
 | `RELEASE_OR_BETA` | Beta and Release (i.e. not Nightly) |
 | `MOZ_DEV_EDITION` | Developer Edition |
 | `MOZILLA_OFFICIAL` | Official builds only (not local) |

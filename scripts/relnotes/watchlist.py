@@ -158,6 +158,15 @@ def gate_caveat(rec: dict) -> str:
     return "".join(f"  ({b})" for b in bits)
 
 
+def current_keys(values: dict) -> dict:
+    """Recorded gate values under today's channels: no early Beta, and late Beta is plain Beta.
+
+    Without this every gate recorded before the channels changed reads as moved.
+    """
+    return {k.replace("beta-late/", "beta/", 1): v for k, v in values.items()
+            if not k.startswith("beta-early/")}
+
+
 def release_on(values: dict) -> bool:
     return any(v == "true" for k, v in values.items() if k.startswith("release/"))
 
@@ -190,7 +199,7 @@ def check_gates(data: dict, fetch: bool = True, repo: Path | None = None) -> dic
         if not res["found"]:
             out["unresolvable" if res.get("written_at") else "gone"].append(
                 {**row, "last_change": res.get("last_change", "")})
-        elif res["values"] != rec["values"]:
+        elif res["values"] != current_keys(rec["values"]):
             out["changed"].append({**row, "now": res["summary"],
                                    "release_on": release_on(res["values"])
                                    and not release_on(rec["values"])})
