@@ -448,6 +448,9 @@ def main() -> None:
         prefs = (outdir / "prefs.txt").read_text()
         flips = [l for l in prefs.splitlines() if l.startswith("== ")]
         print("PREFS   " + ("; ".join(flips) if flips else "no preference changes"))
+        for ln in prefs.splitlines():
+            if "NIGHTLY NOTE ENDS" in ln or "(Nightly-note check incomplete" in ln:
+                print("        " + ln.strip())
         if rep:
             # A moved gate is a headline, not a detail: it is the one line that says a feature this
             # watchlist was holding may now be reaching users.

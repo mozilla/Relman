@@ -583,6 +583,16 @@ shipped in an earlier release: bug 2059112 only flipped the gate on bug 2047300,
 **154** and was already region-gated. The note, if any, belongs to that version — the flip is not
 news on its own.
 
+**A flip can end a Nightly note that already exists.** A `nightly+` note runs until its feature is
+enabled by default, and then becomes a release note for the version the flip ships in. `pref-delta.py`
+prints `NIGHTLY NOTE ENDS` under a flip that reaches Release when a live Nightly note's bug left that
+preference on for Nightly or is linked to the flip's bug. That flip is **Tier 1** and needs no fresh significance call:
+the note was already accepted, so propose graduating its wording. Bug 2070498 flipped
+`dom.security.sanitizer.while-parsing` on everywhere and a pass declined it as an edge-case change
+while bug 2070497 carried its Nightly note in 158 and 159; bug 2067411 is the case done right, the
+typed-arithmetic Nightly note from 1827404 graduating to a 158 note. If the line reads `Nightly-note
+check incomplete`, run `fetch-shipped-notes.py --search` on the feature before judging the flip.
+
 **Run this on every window, and read its output before you walk the survivor list from Step 1.** The
 steps are numbered in execution order — `daily-pass.py` runs the scan first because the funnel and
 this share one window — but the *reading* order is the reverse: a flip reframes what the survivor list
@@ -661,7 +671,8 @@ the bug. Then place each candidate in a tier that reflects **how confident you a
 asking**, since that is what the user acts on:
 
 - **Tier 1 — Ask the developer.** Clear user-facing change, or a preference flip making a feature live,
-  or a complete feature cluster. You verified the mechanism.
+  or a complete feature cluster. You verified the mechanism. A flip marked `NIGHTLY NOTE ENDS` is
+  always Tier 1 (Step 2).
 - **Tier 2 — Probably worth asking.** Looks user-facing but you could not confirm scope, impact, or
   gating. Say exactly what you couldn't confirm.
 - **Tier 3 — use sparingly, and expect it to be empty.** Across every calibrated day so far **not one

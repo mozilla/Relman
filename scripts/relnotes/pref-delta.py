@@ -29,6 +29,7 @@ Usage:
 
 import argparse
 import collections
+import datetime
 import functools
 import json
 import posixpath
@@ -641,28 +642,130 @@ def attribution_map(repo: Path, start: str, end: str) -> dict[str, list[str]]:
     log = trainlib.git(repo, "log", f"{start}..{end}", "--format=%h %s", "--", *PREF_FILES)
     commits = [ln for ln in log.splitlines() if ln.strip()]
 
-    # One read per (rev, file) even though consecutive commits share versions.
-    cache: dict[tuple[str, str], dict[str, str]] = {}
-
-    def entries_at(rev: str, path: str) -> dict[str, str]:
-        key = (rev, path)
-        if key not in cache:
-            text = show_optional(repo, rev, path)
-            if text is None:
-                text = ""  # the file genuinely did not exist at this revision
-            cache[key] = spl_entries(text) if path == STATIC_PREF_LIST else js_entries(text)
-        return cache[key]
-
     out: dict[str, list[str]] = collections.defaultdict(list)
     for line in commits:
         sha = line.split(" ", 1)[0]
         for path in PREF_FILES:
-            before = entries_at(f"{sha}^", path)
-            after = entries_at(sha, path)
+            before = entries_at(repo, f"{sha}^", path)
+            after = entries_at(repo, sha, path)
             for name in set(before) | set(after):
                 if before.get(name) != after.get(name) and line not in out[name]:
                     out[name].append(line)
     return out
+
+
+# One read per (rev, file) even though consecutive commits share versions.
+@functools.lru_cache(maxsize=None)
+def entries_at(repo: Path, rev: str, path: str) -> dict[str, str]:
+    text = show_optional(repo, rev, path)
+    if text is None:
+        text = ""  # the file genuinely did not exist at this revision
+    return spl_entries(text) if path == STATIC_PREF_LIST else js_entries(text)
+
+
+# The same cache files fetch-shipped-notes.py reads, so a pass fetches Nucleus once.
+NUCLEUS_CACHE = trainlib.CACHE_DIR / "nucleus"
+# Long, because a Nightly note lives for cycles and Nucleus often answers 502 for minutes: a fresh
+# fetch here would stall flip detection behind three 120-second attempts per URL.
+NUCLEUS_CACHE_TTL = 24 * 3600
+# A Nightly note carries forward for three cycles, plus the cycle in progress.
+NIGHTLY_NOTE_CYCLES = 4
+# How far before the oldest of those cycles to look for the commit that put the pref on for
+# Nightly. ponytail: a note added long after its Nightly enablement is matched only through
+# Bugzilla links; widen this if one is missed.
+NIGHTLY_ENABLE_LOOKBACK_DAYS = 56
+# A Nightly-only note names Nightly, or opens with the version it started in ("Starting with
+# Firefox 155, pages can load faster..." on bug 2067488); a release note attached to a Nightly
+# release (bug 2071913) does neither.
+NIGHTLY_RE = re.compile(r"\bnightly\b|^\s*Starting with Firefox \d+", re.IGNORECASE)
+
+
+def nightly_notes(repo: Path, end: str, flips: list[dict], platforms: list[str]) -> str | None:
+    """Attach `nightly_notes` to each flip whose feature carries a live Nightly note.
+
+    A `nightly+` note runs until its feature is enabled by default, and then becomes a release-note
+    request for the version it ships in -- so a flip can end a note that already exists. Bug 2070498
+    flipped `dom.security.sanitizer.while-parsing` on everywhere and was judged from scratch as "no
+    note", while bug 2070497, which had enabled it on Nightly, carried a Nightly note in 158 and
+    159.
+
+    A note's bug is related to a flip when it is a direct dependency or blocker of the flip's bug (a
+    feature meta, the Nightly-enable bug) or one of its commits changed the flipped preference and
+    left it on for Nightly. A note on the flip's own bug describes the flip itself (bug 2070506 got
+    one in 159.0a1), not a note it ends, so it is skipped.
+
+    Returns an error string when a check could not run, so an empty result is not read as "none".
+    """
+    try:
+        notes = trainlib.cached_json(trainlib.NUCLEUS_NOTES, NUCLEUS_CACHE / "nucleus-notes.json",
+                                     NUCLEUS_CACHE_TTL, stale_ok=True)
+        releases = trainlib.cached_json(trainlib.NUCLEUS_RELEASES,
+                                        NUCLEUS_CACHE / "nucleus-releases.json",
+                                        NUCLEUS_CACHE_TTL, stale_ok=True)
+    except (RuntimeError, ValueError, OSError) as e:
+        return f"Nucleus unavailable ({e})"
+    end_date = trainlib.git(repo, "log", "-1", "--format=%cs", end).strip()
+    nightly = sorted((r for r in releases if r.get("product") == "Firefox"
+                      and r.get("channel") == "Nightly"
+                      and (r.get("release_date") or "")[:10] <= end_date),
+                     key=lambda r: r["release_date"])[-NIGHTLY_NOTE_CYCLES:]
+    version_of = {r["url"]: r["version"] for r in nightly}
+    noted: dict[str, set[str]] = collections.defaultdict(set)
+    for n in notes:
+        vers = {version_of[u] for u in n.get("releases", []) if u in version_of}
+        if (n.get("is_public") and n.get("bug") and vers
+                and NIGHTLY_RE.search(n.get("note") or "")):
+            noted[str(n["bug"])] |= vers
+    if not noted:
+        return None
+
+    errors = []
+    flip_bugs = sorted({b for r in flips for b in r["bugs"]})
+    try:
+        links = trainlib.bugzilla_bugs(flip_bugs, "id,depends_on,blocks") if flip_bugs else {}
+    except (RuntimeError, ValueError, OSError) as e:
+        links = {}
+        errors.append(f"Bugzilla links unavailable ({e})")
+
+    since = (datetime.date.fromisoformat(nightly[0]["release_date"][:10])
+             - datetime.timedelta(days=NIGHTLY_ENABLE_LOOKBACK_DAYS)).isoformat()
+    log = trainlib.git(repo, "log", f"--since={since}", "--format=%h %s", end, "--", *PREF_FILES)
+    wanted = {r["pref"] for r in flips}
+
+    @functools.cache
+    def nightly_table(rev: str) -> dict:
+        return effective_defaults(repo, rev, ["nightly"], platforms)["table"]
+
+    # Changing the entry is not enough: bug 2041381 added `dom.performance.deliverytype.enabled`
+    # switched off while its note was about a different preference. Nor is turning it on: bug
+    # 2067488 restricted an already-on preference to Nightly, and its note is the Nightly note.
+    touched: dict[str, set[str]] = collections.defaultdict(set)
+    for line in log.splitlines():
+        bug = bug_of(line)
+        if bug not in noted:
+            continue
+        sha = line.split(" ", 1)[0]
+        for name in wanted:
+            if not any(entries_at(repo, f"{sha}^", path).get(name)
+                       != entries_at(repo, sha, path).get(name) for path in PREF_FILES):
+                continue
+            if any(truthy(v) for v in nightly_table(sha).get(name, {}).values()):
+                touched[name].add(bug)
+
+    for r in flips:
+        found = []
+        for bug, vers in sorted(noted.items()):
+            if bug in r["bugs"]:
+                continue
+            via = [f"linked to bug {fb}" for fb in r["bugs"]
+                    if int(bug) in links.get(fb, {}).get("depends_on", [])
+                    + links.get(fb, {}).get("blocks", [])]
+            if bug in touched[r["pref"]]:
+                via.append("left this preference on for Nightly")
+            if via:
+                found.append({"bug": bug, "versions": sorted(vers), "via": via})
+        r["nightly_notes"] = found
+    return "; ".join(errors) or None
 
 
 def bug_of(subject: str) -> str | None:
@@ -1426,11 +1529,22 @@ def main() -> None:
             "meta": eff["meta"].get(name, {}),
         })
 
+    note_error = None
+    # Only a flip that turns a Release config on ends a Nightly note.
+    flip_records = [r for r in records if bucket_of(r) == "flips"
+                    and any(truthy(v) and not truthy(r["before_by_config"][k])
+                            for k, v in r["after_by_config"].items() if k.startswith("release/"))]
+    if flip_records:
+        note_error = nightly_notes(repo, end, flip_records, platforms)
+        if note_error:
+            print(f"# WARNING: Nightly-note check incomplete: {note_error}", file=sys.stderr)
+
     if args.format == "json":
         print(json.dumps({
             "window": {"start": start, "end": end,
                        "start_desc": start_desc, "end_desc": end_desc},
             "changed": records,
+            "nightly_note_error": note_error,
         }, indent=2))
         return
 
@@ -1463,6 +1577,9 @@ def main() -> None:
         if not group:
             continue
         print(f"== {title} [{len(group)}]")
+        if group is flips and note_error:
+            print(f"  (Nightly-note check incomplete: {note_error}. A flip below may still end a "
+                  "Nightly note.)")
         for r in group:
             bugs = ", ".join(f"bug {b}" for b in r["bugs"]) or "no bug in commit subject"
             print(f"  {r['pref']}")
@@ -1475,6 +1592,10 @@ def main() -> None:
                 print(f"    effective now: {r['effective']}   <-- CHANGED SINCE THIS WINDOW")
             else:
                 print(f"    effective now: {r['effective']}")
+            for n in r.get("nightly_notes", []):
+                print(f"    NIGHTLY NOTE ENDS  {r['pref']}: bug {n['bug']} "
+                      f"({', '.join(n['versions'])}; {', '.join(n['via'])}) -- graduate it to a "
+                      "release note, Tier 1")
             for c in r["commits"][:4]:
                 print(f"      {c}")
         print()
