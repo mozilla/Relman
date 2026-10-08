@@ -400,14 +400,19 @@ def main() -> None:
         watchlist.print_gate_report(rep)
         print()
     if standing:
-        # One line each: these are reminders, re-read on every pass, and full summaries of several
-        # hundred characters made this the largest section of the report. The cut is marked.
-        print("STANDING WATCHLIST (not in this window; re-surface when the gate flips; "
-              "`watchlist.py list -v` has the full notes):")
+        # A count, not the list: entries whose gate moved are the ones a pass acts on. `resume`
+        # shows only the current release and not every open status, so the rest are counted.
+        cur = watchlist.current_release()
+        unseen = sum(1 for it in standing.values()
+                     if it.get("release") != cur or it.get("status") == "note-requested")
+        print(f"STANDING WATCHLIST: {len(standing)} open entries outside this window"
+              + (f", {unseen} of them not shown by `resume`" if unseen else "")
+              + " (`watchlist.py list --all-releases` lists them, `show <key>` gives one in full)")
         for k, it in sorted(standing.items()):
-            flag = "  <-- GATE MOVED, see above" if k in moved else ""
-            s = textwrap.shorten(it.get("summary", ""), 116, placeholder=" [...]")
-            print(f"  {k}: [{it.get('status','?')}] Fx{it.get('release','?')} {s}{flag}")
+            if k in moved:
+                s = textwrap.shorten(it.get("summary", ""), 116, placeholder=" [...]")
+                print(f"  {k}: [{it.get('status','?')}] Fx{it.get('release','?')} {s}"
+                      "  <-- GATE MOVED, see above")
         print()
 
     if r4.returncode != 0:

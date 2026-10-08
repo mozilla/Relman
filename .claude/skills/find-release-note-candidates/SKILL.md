@@ -58,11 +58,14 @@ damages trust, so **never guess and never present inference as verification**. C
 | Command forms that don't trigger permission prompts | `reference/release-notes/command-forms.md` |
 | Machine setup, and what the tooling check means | `reference/release-notes/pass-setup.md` |
 | What real passes got wrong — before tiering, and per step; and the 153 backtest of this skill's own recall | `reference/release-notes/calibration.md` |
+| **The per-pass digest of the survey, `calibration.md` and the style guide** | `reference/release-notes/tiering-card.md` |
+| Cycle tags, rollup, census, nominations, backfilling | `reference/release-notes/cycle-passes.md` |
+| Every watchlist command | `reference/release-notes/watchlist.md` |
 
-The survey is the calibration source. Read at least its "bar in one line", the `Fixed` threshold
-section, and the zero-yield table before judging significance. Note that the `Fixed`-in-majors bar
-is **actively moving** — the survey measures a roughly 4× rise over two years — so treat "fixes don't
-get mainline notes" as outdated.
+**Read `tiering-card.md` every pass, before tiering.** It digests the survey, `calibration.md` and
+the style guide into the rules a pass applies; the full files hold the measurements and the
+incidents behind them. Open them when a rule looks arbitrary, when you are deciding how strictly to
+apply one, or when the card does not settle a case.
 
 ## Invoking the scripts
 
@@ -93,7 +96,8 @@ one, and why its answer is provisional, is under Step 1.
 
 The convention is that uplifts get flagged for notes **at uplift time** by the owner doing the
 uplift. In practice that happens reliably for **dot-release** uplifts and less reliably for **beta**
-uplifts, which is a known weak spot this skill can help with — see the beta-uplift mode below.
+uplifts, which is a known weak spot this skill can help with; see the beta-uplift mode in
+`reference/release-notes/cycle-passes.md`.
 
 ## Opening a pass
 
@@ -181,14 +185,37 @@ working them up; they still count toward "every survivor was looked at".
 
 ### How each mode is executed
 
-- **Daily:** one `daily-pass.py` run, then deep-dive the survivors inline. Small enough to be
-  exhaustive.
+- **Daily:** one `daily-pass.py` run, then deep-dive the survivors, with the first pass delegated
+  per the table below when there are more than ~60. Small enough to be exhaustive.
 - **Cycle:** the same run, then fan out subagents by area over the *ranked* clusters and the preference
   flips — not over the raw survivor list. Give every subagent the freshness rules (read prefs from
   `origin/main`), the truthfulness rules above, and the requirement to verify final FIXED state.
   Then synthesize.
 
 Whichever you run, the funnel counts and the coverage caveats travel into the output.
+
+### Delegate mechanical reading to cheaper subagents
+
+Everything read in this conversation is re-sent on every later turn, and a pass runs for dozens of
+turns. Bulk reading whose result is a short list goes to a subagent on a cheaper model (the Agent
+tool's `model`), which returns only that list. Give it the absolute paths, the rule it applies, and
+the exact return shape. Run independent ones in parallel.
+
+| Chunk | Model | Returns |
+|---|---|---|
+| Drop audit (`dropped.txt`), any size | haiku | the count it read against the header's, then any entry whose landings read like user-facing work, with the line |
+| First pass over `scan.txt` when there are more than ~60 survivors | sonnet | per survivor one of `look` / `drop: <reason>` (internals, tests, crash, perf, cosmetic, train-hop, Smart Window), erring toward `look`; give it `tiering-card.md` |
+| Census residue and the explanation buckets | sonnet | per bug: the cycle its landings are in, its feature gate, one line |
+| Gate resolution for a batch of feature-shaped bugs | sonnet | per bug: the gate found and its `--lookup`/FML verdict, or "none found in <where>" |
+| Precedent searches (`fetch-shipped-notes.py --search`) | haiku | match count and the two closest notes, verbatim |
+| A long discussion (`bug-detail.py --comment all`) | sonnet | the specific facts asked for (regressor, uplift talk, platforms, scope), each with its comment number |
+
+Stays in the main thread: tiering, wording, the asks, the one-at-a-time handover, and every
+`watchlist.py` write (one writer, so nothing is recorded twice). A subagent's finding is
+**inferred** until it cites the line, comment or file it came from; spot-check before calling it
+verified. A first-pass `drop` list is still part of "every survivor was looked at": read its reasons
+(one line each) and pull back anything that looks wrong. Say in the methodology note which chunks
+were delegated, to which model.
 
 ## Choosing the window — never by date
 
@@ -252,55 +279,6 @@ through the first. Two reasons beyond not talking over them:
 Record each day as you finish it (`days <YYYYMMDD>`, `--save-state`, a `log` entry) so stopping
 costs nothing and the next turn resumes exactly where the review did.
 
-### Backfilling old windows vs. the normal forward pass
-
-Normal use is **forward, one day at a time**, where the tree state and the window state coincide.
-Working *backwards* through past days — as during calibration — introduces a hazard that never
-arises going forward: preference state can have changed between the window and today.
-`pref-delta.py` handles this by reporting `at window end:` alongside `effective now:` and flagging
-when they differ, but the wider point holds for anything read from `origin/main`. When backfilling,
-treat "what is true today" and "what was true then" as separate questions.
-
-## Cycle tags
-
-**The repository's cycle tags are the authoritative boundaries.** Don't infer a cycle from release
-tags, dates, or `version.txt`; the tags exist for exactly this:
-
-**Nightly cycle for version N — use this, it is validated:**
-
-```
-FIREFOX_NIGHTLY_{N-1}_END..FIREFOX_NIGHTLY_{N}_END
-```
-
-Note there is **no `FIREFOX_NIGHTLY_{N}_BASE` tag** — only `_END` exists, so the cycle start is the
-previous version's `_END`. `FIREFOX_BETA_{N}_BASE` is the same commit as `FIREFOX_NIGHTLY_{N}_END`
-(verified identical SHA), so either works as the closing boundary.
-
-**Beta cycle for version N — work also lands during beta, so this is required for version coverage:**
-
-```
-scan-window.py --version N --first-parent \
-    --range FIREFOX_BETA_{N}_BASE..FIREFOX_RELEASE_{N}_BASE
-```
-
-Three things about this range, each verified against the 153 cycle:
-
-- **`--first-parent` is mandatory.** It restricts the walk to the beta branch's own chain. Without
-  it the range pulls in every merged `main` ancestor: **71,678 commits instead of 682.**
-- **The closing boundary is `FIREFOX_RELEASE_{N}_BASE`, not `FIREFOX_BETA_{N}_END`.** In the git
-  mirror `FIREFOX_BETA_153_END` points at a merge-day config commit dated the *same day* as
-  `_BASE` ("No Bug - Update configs after merge day operations") — it sits at the **start** of the
-  beta cycle, not the end. This differs from the hg tag of the same name; don't assume the mirror's
-  tags match hg's.
-- **It matches the hg pushlog.** Cross-checked against
-  `hg-edge.mozilla.org/releases/mozilla-beta/json-pushes?fromchange=FIREFOX_BETA_153_BASE&tochange=FIREFOX_BETA_153_END&full=1&version=2`:
-  the git range **contains every bug hg reports**, plus a few more. A superset, so it errs toward
-  inclusion.
-
-Uplift commits carry an `a=<approver>` marker (`Bug 2033733 - enable LNA for all desktop users by
-default. a=pascalc`). Both 153 uplifts that earned notes were **preference flips**, so run
-`pref-delta.py` across the beta endpoints too, not just the nightly ones.
-
 ## Run it: one command
 
 `daily-pass.py` runs the scan, the preference delta and the clustering over a **guaranteed-identical**
@@ -325,95 +303,29 @@ python3 scripts/relnotes/daily-pass.py --build-day 20260801 --outdir /tmp/day01 
   second `scan-window.py --save-state` re-enumerates the window and re-fetches every bug to record one
   line of state. A pass did exactly that, for nothing.
 
-## Other passes: the cycle rollup, the census, and other people's nominations
+## Other passes: cycle tags, rollup, census, nominations, backfilling
 
-Everything above describes the daily forward pass. These run on their own schedules and none of them
-is a window choice: the rollup, the census and the policy-template check are end-of-cycle work, the
-nomination queue starts from Bugzilla rather than from what landed, and the beta-uplift mode produces
-candidates for a different release's owner.
-
-### End-of-cycle rollup check
-
-Long-running clusters that were deferred all cycle need one deliberate pass before the merge:
-**run `--cycle N` near the end of the Nightly cycle and revisit every cluster that was on hold**, to
-decide whether the finished body of work now deserves a single rollup note. Interop work, multi-bug
-feature pushes and preference-gated features that flipped late are the usual candidates. Track
-deferrals in the watchlist (`--status watching`) so they resurface rather than being rediscovered.
-
-**Once a cycle has shipped, retire its state.** Re-check each open entry's gate, `carry` the ones
-still gated into the current release, and `drop-release` the old one. The drop refuses while open
-entries remain (`--force` overrides), which is the point: those are what the daily pass re-surfaces.
-
-**Then check coverage from Bugzilla's side**, which is the one question a window scan cannot answer
-about itself:
-
-```
-python3 scripts/relnotes/scan-window.py --cycle 155 --version 155 --census
-```
-
-`--census` searches for every bug Bugzilla flags as landed in the version and reports the ones no
-commit in the cycle mentions. It refuses on anything narrower than the full cycle, because a partial
-window reports the rest of the cycle as unseen. `daily-pass.py --census` does the same and leaves it
-in `census.txt`; on a `--format json` run, `--census-out PATH` writes the readable section. Most of
-what it finds is explained rather than missed, and it sorts what it finds into buckets that say so:
-mechanical, flagged for an earlier version as well (QA sets `verified` on the version they *tested*),
-and no landing of their own. What survives all of those is **a handful** out of thousands flagged, and
-that residue is where a **beta uplift** shows up: those commits live on the beta branch, so no scan of
-main can see them however wide the window.
-
-### Cumulative passes
-
-Use `--cycle N` for the wider sweeps where notes have no daily granularity — feature rollups that
-only become visible across weeks, and preference flips that make earlier work live. Run
-`bug-tree.py` and `pref-delta.py` over the same range.
-
-### The nomination queue — bugs someone else proposed
-
-Discovery works forward from what landed, but developers and triagers also nominate bugs directly by
-setting `cf_tracking_firefox_relnote` to `?`. Those never appear in a window scan unless they happen
-to land in it.
-
-```
-python3 scripts/relnotes/relnote-flag.py --nominated
-```
-
-**Defaults to nominations on bugs that are actually fixed, and that default matters.** Most `?` bugs
-are open — a developer pre-registering an intention months ahead — and the team treats those as noise
-rather than decisions waiting to be made, so the fixed subset is usually a small fraction of the
-queue. `--include-open` shows the rest if you specifically want the pipeline view.
-
-Work a fixed nomination exactly like a candidate you found yourself: the bar, the tiering, the
-precedent search and the gating checks below all apply unchanged. The only difference is that someone
-has already argued it deserves a note, so the question is whether you agree, and the answer is a
-comment in the bug rather than a proposal in a report.
-
-### The beta-uplift mode — a future mode worth knowing about
-
-Running this skill over the beta cycle's uplifts, to prompt that release's owner. Same machinery,
-different window (`--range FIREFOX_BETA_{N}_BASE..` with `--first-parent`), and the audience is the
-beta owner rather than you.
+Everything in this file describes the daily forward pass. **Before any other kind of pass, read
+`reference/release-notes/cycle-passes.md`**: the cycle and beta boundaries, the end-of-cycle rollup,
+cumulative passes, the `--census`, the `relnote-flag.py --nominated` queue, the beta-uplift mode,
+backfilling old windows, and validating against whattrainisitnow.com.
 
 ## Keeping the watchlist current
 
 The watchlist is the only memory between passes:
 
 ```
-watchlist.py summary                     # per-release counts and days reviewed
-watchlist.py list --status asked         # or declined, gated, noted -- implies --all
-watchlist.py add <bug> --status asked --note "<what and when>"       # asked | declined | gated |
-watchlist.py add <bug> --status declined --note "<why>"             # watching | noted | done
-watchlist.py add <bug> --status watching --due 2026-09-01   # sets the "follow up after" date that
-                                                            # resume and followup both display
-watchlist.py decline <bug> --note "<why>"   # ONLY for a bug already on the list -- see below
-watchlist.py noted <bug> --note "<where it shipped>"   # the note is live in Nucleus
+watchlist.py add <bug> --status asked --note "<what it is>; asked dev <date> re: FxNNN relnote"
+watchlist.py add <bug> --status declined --note "<what it is>. DECLINED <date>: <why>"
+watchlist.py add <bug> --status gated --gate <pref> --note "<what it is>. GATED <date>: <gate>"
+watchlist.py days <YYYYMMDD>             # record the day as reviewed
 watchlist.py log "<pass summary>"        # release-level context; resume replays these
-watchlist.py days 20260801               # record the day as reviewed
-watchlist.py rm <bug>                    # delete the entry outright -- see the caveat below
-watchlist.py add <bug> --status gated --gate <pref>   # record the gating preference; see below
-watchlist.py gates                       # re-check every recorded gate now
-watchlist.py carry <bug> --from 155      # move an open entry from an older release, log intact
-watchlist.py drop-release 155            # delete a finished release; refuses while it has open entries
+watchlist.py show <bug>                  # one entry in full, instead of list -v
 ```
+
+Everything else (`list`, `noted`, `rm`, `carry`, `drop-release`, `gates`, `--due`) is in
+`reference/release-notes/watchlist.md`. **Read it before `rm`**, which deletes an entry's whole
+history with no undo.
 
 **Record a preference gate with `--gate`, not only in the note.** A gate written in prose is never
 looked at again: the 155 state went three cycles with 11 of its 36 open entries shipped while every
@@ -423,12 +335,6 @@ name is refused, with the nearest real names) and stores its per-channel default
 `--gate` again re-records a changed one, `--drop-gate <pref>` retires a gone or unknown one. A
 Fenix Nimbus feature is recorded the same way as `--gate fml:<feature>`. A gate that is neither (a
 hardcoded getter, a meta bug) still goes in the note.
-
-**`rm` deletes the entry and everything recorded on it**, with no confirmation and nothing to undo:
-its summary, its `--note` trail and its due date all go. The watchlist is per-user, so that history
-is the only record that this bug was already judged — losing it is how a bug already declined gets
-re-proposed next cycle. Use `add --status <verdict> --note "<why>"` to change a verdict, and `rm`
-only for an entry created in error, such as a typo'd bug number.
 
 **Record a verdict with `add --status <verdict>`, not with `decline`/`noted`/`asked`.** Those short
 forms change the status of something already tracked, and a bug you judged during this pass has
@@ -485,24 +391,6 @@ the wrong `cf_status_firefox{N}` field entirely when you're scanning a past cycl
 maintained enterprise release notes rather than a copy, so there is nothing to discover here — see
 `calibration.md`, which records why a label for them was built and then removed.
 
-### Validating against whattrainisitnow.com
-
-`https://whattrainisitnow.com/nightly/` is how Release Management currently hunts notes by hand, so
-it's the reference for checking this skill's coverage — **not** an input the skill depends on.
-
-Two things about that list:
-
-- **It does not filter backouts**, and it counts security-restricted bugs. The funnel here removes
-  both, so its survivor count sits well below the length of that list.
-- **`--build <id>` reproduces its enumeration exactly**, because both resolve the same build
-  boundaries — `trainlib.py`'s header records the check. So a difference between this skill and a
-  manual pass is a difference in *judgment*, not coverage, which is what makes the comparison
-  meaningful.
-
-Build boundaries resolve through two public hg endpoints (`json-firefoxreleases` for build id → hg
-node, then `json-rev/<node>` for the `git_commit` field). `trainlib.py` handles this and caches the
-build index for three hours.
-
 ### Uplifts change which version a note belongs to
 
 Scope, above, says whose queue an uplifted bug belongs to. This is how the scan finds them, and why
@@ -540,9 +428,10 @@ beta-cycle window. So:
 ### Audit the mechanical drop list
 
 `daily-pass.py` always writes it complete to `<outdir>/dropped.txt`, with the entry count in its
-header line — **read that file, every pass**. The drops are heuristics and they do get things wrong,
-so skim the dropped summaries for anything that reads like user-facing work and rescue it. A false
-drop is invisible in the survivor list by construction, so this is the only place it can be caught.
+header line. **Read that file (or have a subagent read it, per the delegation table), every pass**.
+The drops are heuristics and they do get things wrong, so skim the dropped summaries for anything
+that reads like user-facing work and rescue it. A false drop is invisible in the survivor list by
+construction, so this is the only place it can be caught.
 
 **Before reporting the audit, reconcile the count you actually read against the funnel's `mechanical`
 number.** Both come from the same scan, so they always agree — if you have seen fewer entries than
@@ -600,6 +489,14 @@ means, so knowing what went live comes first. A feature's code often lands month
 before it becomes live; the commit that makes it note-worthy is a one-line default change with an
 unremarkable subject that no subject-based funnel will surface. `FLIPPED ON` is the strongest single
 release-note signal there is.
+
+**Two flips no preference file shows** get their own sections, read like any other flip:
+`== FENIX NIMBUS DEFAULTS CHANGED` (a feature variable or channel override in a Fenix `.fml.yaml`
+moved between the window's endpoints, including the case where only map or list values moved and
+nothing could be compared) and `== NIGHTLY-ONLY BUILD GUARDS REMOVED` (`NIGHTLY_BUILD`,
+`EARLY_BETA_OR_EARLIER`, `RELEASE_OR_BETA` or `isNightlyOrDebug` guards net-removed from code, the
+way 2069039 shipped ASWebAuthenticationSession). The second is a pointer to read the diff, not a
+verdict: test-only and internal guards land there too.
 
 The script resolves defaults per channel and platform from `origin/main`, handles the `@DEFINE@`
 indirection, distinguishes *absent* from *false*, and collapses land/backout/re-land churn by
@@ -712,27 +609,23 @@ Both are true; "important" is doing the work.
 
 ### Calibration from real passes — read this before tiering
 
-**Read `reference/release-notes/calibration.md` before tiering.** It is the incident log for this
-skill: every entry is a case where a pass was wrong and a Release Manager or the tree corrected it,
-and it outranks intuition on all of them. The signals arguing for and against a note are what you
-need here.
-
-**Its other sections pair with the steps around them** — "Gate misses" with Step 2, "Drafting and
-wording" with Step 5, "Drop-audit lessons" with the drop audit. Each rule in this skill is stated at
-the step that needs it; read the case when the rule looks arbitrary, or when you are deciding how
-strictly to apply it.
+**Read `reference/release-notes/tiering-card.md` before tiering.** Its signals for and against a
+note come from `calibration.md`, the incident log for this skill: every entry there is a case where
+a pass was wrong and a Release Manager or the tree corrected it, and it outranks intuition on all of
+them. Open `calibration.md` for the case behind a rule when the rule looks arbitrary, or when you
+are deciding how strictly to apply it.
 
 ### The `relnote-firefox` flag, including `nightly+`
 
 Field: `cf_tracking_firefox_relnote`.
 
 **Check it before proposing anything** — if it's already set, someone has made a call and the bug
-doesn't need another ask. `daily-pass.py` reads the flag for every survivor, so a normal pass already
-tells you. To go the other way and ask *which bugs carry a given value*, use
-`relnote-flag.py` — `--nominated` for the `?` queue (see above), `--approved N` and `--nightly` for
-what is already decided, `--declined` for every bug Release Management has said no to, which is the
-only negative calibration corpus available. Those four are shorthands; `--value <v>` queries any
-flag value directly, including ones no shorthand covers.
+doesn't need another ask. `daily-pass.py` reads the flag for every survivor, so a normal pass
+already tells you. To go the other way and ask *which bugs carry a given value*, use
+`relnote-flag.py`: `--nominated` for the `?` queue (see `cycle-passes.md`), `--approved N` and
+`--nightly` for what is already decided, `--declined` for every bug Release Management has said no
+to, which is the only negative calibration corpus available. Those four are shorthands;
+`--value <v>` queries any flag value directly, including ones no shorthand covers.
 
 **`nightly+` is a real, used value** for changes enabled on **Nightly only** that are still worth
 calling out, typically to invite testing and feedback. Verified examples: `Enable QUIC version
@@ -759,12 +652,14 @@ candidate:
 
 ## Step 5 — Draft the one-liner, category, and screenshot call
 
-**Read `reference/release-notes/style-guide.md` before drafting any wording** — not "consult it if
-unsure", read it, every pass. Categories and the full rules live there.
+**Run the drafting checklist in `tiering-card.md` over every draft**, not "consult it if unsure",
+every draft, every pass. It carries the style-guide rules drafts have broken, including two the
+guide covered the whole time. Open `reference/release-notes/style-guide.md` itself for a Firefox
+Labs note, a dot-release note, a note shared between desktop and Android, or anything the checklist
+does not settle.
 
-**What follows is not a summary of that guide** — it is the rules that drafts in *this* workflow have
-already broken, and the guide still has to be read for the ones they haven't. The rejected drafts
-themselves are in `calibration.md` under "Drafting and wording".
+**What follows is the rules that drafts in *this* workflow have already broken.** The rejected
+drafts themselves are in `calibration.md` under "Drafting and wording".
 
 Keep drafts copy-pasteable; the user and the developer will edit. Median shipped note is ~20 words.
 
@@ -824,24 +719,12 @@ happened so the next pass doesn't repeat it.
 
 ### Where this fits in the documented process
 
-The canonical process is
-<https://wiki.mozilla.org/Release_Management/Release_Notes> — read it when a question isn't
-covered here. Its "Daily during the Nightly cycle" step is exactly what this skill automates:
-
-> Look through all patches that land in central via whattrainisitnow.com → identify if any patch is
-> a candidate for release note nomination → needinfo the bug assignee and request if it should be
-> considered for release note nomination.
-
-Two things follow that the skill should respect:
-
-- **The ask is a needinfo on the bug assignee**, not just a comment. The wiki's template is
-  the nomination page. This skill adds suggested wording and uses the house phrasing — see the ask
-  template below, which is the form to emit.
-- **The daily pass has a second half this skill does not finish.** The process also says Release
-  Management *monitors the `relnote-firefox` flag* for bugs developers nominated themselves, checks
-  their wording and gating, and adds them to Nucleus. Reading that queue and judging what is in it
-  **is** in scope — see "The nomination queue" above — but the decision and the Nucleus entry are
-  not, so don't describe a nomination as handled once you have formed a view on it.
+This automates the "Daily during the Nightly cycle" step of
+<https://wiki.mozilla.org/Release_Management/Release_Notes>: the ask is a **needinfo on the bug
+assignee**, in the form below. The other half of that step, Release Management working the
+`relnote-firefox` flag queue into Nucleus, is not finished here. Judging what is in that queue is in
+scope (`cycle-passes.md`); the decision and the Nucleus entry are not, so forming a view on a
+nomination is not handling it. Read the wiki for anything this file does not cover.
 
 ### Emit the bug comment ready to paste
 

@@ -45,6 +45,10 @@ def version_fields(trains: dict) -> list[str]:
     return out
 
 
+def clip(text: str, width: int) -> str:
+    return text if len(text) <= width else f"{text[:width]} [+{len(text) - width} chars]"
+
+
 def fetch(bug_ids: list[str], trains: dict) -> list[dict]:
     fields = [
         "id", "summary", "product", "component", "status", "resolution", "keywords",
@@ -232,7 +236,7 @@ def main() -> None:
     for b in sorted(bugs, key=lambda x: str(x["id"])):
         bid = str(b["id"])
         print(f"=== {bid}  {b['product']} :: {b['component']}")
-        print(f"    {b['summary'][:110]}")
+        print(f"    {b['summary']}")
         flags = []
         for f in version_fields(trains):
             val = b.get(f)
@@ -264,7 +268,9 @@ def main() -> None:
             except RuntimeError:
                 continue
             for rb in rel_bugs.values():
-                print(f"    {label}: {rb['id']} [{rb['status']}] {rb['summary'][:78]}")
+                print(f"    {label}: {rb['id']} [{rb['status']}] {clip(rb['summary'], 78)}")
+            if len(rel_ids) > 8:
+                print(f"    {label}: ... and {len(rel_ids) - 8} more")
         # The URLs, not just the count: see_also is where the same symptom on another platform or
         # in another tracker shows up, which is evidence about a note's scope. A count cannot be
         # read for that.
@@ -299,11 +305,13 @@ def main() -> None:
                         except ValueError:
                             pass
                     print(f"    regressed_by: {rb['id']} (landed {landed}){age}")
-                    print(f"        {rb['summary'][:80]}")
+                    print(f"        {clip(rb['summary'], 80)}")
+                if len(b["regressed_by"]) > 5:
+                    print(f"    regressed_by: ... and {len(b['regressed_by']) - 5} more")
             except RuntimeError:
                 print(f"    regressed_by: {b['regressed_by']}")
         if b.get("whiteboard"):
-            print(f"    whiteboard: {b['whiteboard'][:110]}")
+            print(f"    whiteboard: {clip(b['whiteboard'], 110)}")
         if b.get("op_sys") and b["op_sys"] not in ("Unspecified", "All"):
             print(f"    os: {b['op_sys']}")
         up = trainlib.pending_uplifts(bid)

@@ -759,9 +759,30 @@ def render(rel: str, b: dict, show_all: bool, verbose: bool, status: str = None)
                 print(f"      {last['date']}  {last['text']}")
         if verbose:
             for e in it.get("log", [])[-6:]:
-                print(f"        {e['date']}  {e['text']}")
+                if e.get("text") != it.get("summary"):
+                    print(f"        {e['date']}  {e['text']}")
     if days:
         print(f"  days reviewed: {', '.join(days)}")
+
+
+def cmd_show(args) -> None:
+    data = load()
+    hit = find(data, str(args.key), args.release)
+    if not hit:
+        sys.exit(f"error: {args.key} is not tracked in any release")
+    rel, it = hit
+    print(f"[{rel}] {args.key}  [{it.get('status', '?')}] {it.get('kind', '')}"
+          f"   added {it.get('added', '?')}, updated {it.get('updated', '?')}")
+    if it.get("due"):
+        print(f"    follow up after {it['due']}")
+    if it.get("summary"):
+        print(f"    {it['summary']}")
+    for pref, rec in (it.get("gates") or {}).items():
+        print(f"    gate {pref}: {rec.get('state')} (recorded {rec.get('recorded', '?')})"
+              + gate_caveat(rec))
+    for e in it.get("log", []):
+        if e.get("text") != it.get("summary"):
+            print(f"      {e['date']}  {e['text']}")
 
 
 def cmd_list(args) -> None:
@@ -1116,6 +1137,10 @@ def main() -> None:
     lst.add_argument("--all-releases", action="store_true")
     lst.add_argument("-v", "--verbose", action="store_true")
     lst.set_defaults(func=cmd_list)
+
+    sh = add_parser("show", help="one entry in full: summary, gates and its whole log")
+    sh.add_argument("key")
+    sh.set_defaults(func=cmd_show)
 
     fu = add_parser("followup", help="check relnote flag state on asked/replied bugs")
     fu.add_argument("--all-releases", action="store_true")

@@ -1182,7 +1182,7 @@ def _apply(values: dict, entries, channel: str) -> dict:
     return out
 
 
-def fml_lookup(repo: Path, rev: str, names: list[str]) -> list[dict]:
+def fml_lookup(repo: Path, rev: str, names: list[str], loaded=None) -> list[dict]:
     """Per-channel defaults of Fenix Nimbus features, in the same result shape as --lookup.
 
     Reads what gating.md sends a pass to read by hand: a feature's variable defaults in
@@ -1192,7 +1192,16 @@ def fml_lookup(repo: Path, rev: str, names: list[str]) -> list[dict]:
     rather than a YAML parser, because the scripts are stdlib-only; values it cannot read as one
     scalar (maps, lists) are reported as <complex> rather than guessed.
     """
-    app_text = show(repo, rev, FENIX_FML)
+    feats, origin, imported, channels = loaded or _fml_load(repo, rev)
+    return _fml_resolve(repo, rev, names, feats, origin, imported, channels)
+
+
+def _fml_load(repo: Path, rev: str, strict: bool = True):
+    """(features, origin path, imported features, channels) at `rev`; None when not strict and the
+    app manifest does not exist there."""
+    app_text = show(repo, rev, FENIX_FML) if strict else show_optional(repo, rev, FENIX_FML)
+    if app_text is None:
+        return None
     feats, top, lines = _fml_features(app_text)
     origin = {n: FENIX_FML for n in feats}
     base_dir = FENIX_FML.rsplit("/", 1)[0]
@@ -1216,7 +1225,10 @@ def fml_lookup(repo: Path, rev: str, names: list[str]) -> list[dict]:
                     overrides[fname] = _fml_entries(sub, es, ee)
             for fname, spec in _fml_features(show_optional(repo, rev, path) or "")[0].items():
                 imported[fname] = (path, chan, spec, overrides.get(fname, []))
+    return feats, origin, imported, channels
 
+
+def _fml_resolve(repo, rev, names, feats, origin, imported, channels) -> list[dict]:
     results = []
     for name in names:
         if name in feats:
@@ -1254,6 +1266,121 @@ def fml_lookup(repo: Path, rev: str, names: list[str]) -> list[dict]:
                         "meta": {"source": src + (f" (imported at channel {fixed})" if fixed else "")},
                         "values": values})
     return results
+
+
+FML_GLOB = ":(glob)mobile/android/**/*.fml.yaml"
+
+# The same pattern serves git's -G (extended regex) and Python. The preference files are left to the
+# preference diff, which already reads their @IS_NIGHTLY_BUILD@ defaults.
+GUARD_GREP = r"NIGHTLY_BUILD|EARLY_BETA_OR_EARLIER|RELEASE_OR_BETA|isNightlyOrDebug"
+GUARD_RE = re.compile(GUARD_GREP)
+GUARD_EXCLUDE = [f":(exclude){p}" for p in (
+    "modules/libpref/init/StaticPrefList.yaml", "modules/libpref/init/all.js",
+    "browser/app/profile/firefox.js", "mobile/android/app/geckoview-prefs.js",
+    "toolkit/components/pdfjs/PdfJsDefaultPrefs.js")]
+
+
+def guards_removed(repo: Path, start: str, end: str) -> list[dict]:
+    """Files that lost more Nightly-only build guards than they gained over the window.
+
+    `#ifdef NIGHTLY_BUILD` or `#ifndef RELEASE_OR_BETA` around a feature, a moz.build
+    `CONFIG["NIGHTLY_BUILD"]` or Fenix's `isNightlyOrDebug` ships a feature with no preference
+    changing, so the preference diff above is blind to it. Counted on the endpoint diff, like the
+    preferences, so a land and its backout cancel and a swap of one guard for another nets out; the
+    commits listed are the ones that touched the file with a guard line.
+    """
+    log = trainlib.git(repo, "log", "--format=commit %h %s", "--name-only", "-G", GUARD_GREP,
+                       f"{start}..{end}", "--", ".", *GUARD_EXCLUDE)
+    touched: dict[str, list[str]] = collections.defaultdict(list)
+    commit = None
+    for line in log.splitlines():
+        if line.startswith("commit "):
+            commit = line[7:]
+        elif line.strip() and commit:
+            touched[line.strip()].append(commit)
+    if not touched:
+        return []
+    counts: dict[str, list[int]] = collections.defaultdict(lambda: [0, 0])
+    path = None
+    for line in trainlib.git(repo, "diff", start, end, "--", *sorted(touched)).splitlines():
+        if line.startswith("+++ "):
+            path = line[6:] if line.startswith("+++ b/") else path
+        elif line.startswith("--- "):
+            path = line[6:] if line.startswith("--- a/") else path
+        elif path and line[:1] in "+-" and GUARD_RE.search(line):
+            counts[path][0 if line[0] == "-" else 1] += 1
+    grouped: dict[tuple, dict] = {}
+    for f, (removed, added) in sorted(counts.items()):
+        if removed > added:
+            g = grouped.setdefault(tuple(touched.get(f, [])),
+                                   {"commits": touched.get(f, []), "files": [], "removed": 0,
+                                    "added": 0})
+            g["files"].append(f)
+            g["removed"] += removed
+            g["added"] += added
+    return list(grouped.values())
+
+
+def print_guards_removed(found: list[dict]) -> None:
+    if not found:
+        return
+    print(f"== NIGHTLY-ONLY BUILD GUARDS REMOVED [{len(found)}] -- a feature can ship this way "
+          "with no preference changing; read the diff")
+    for g in found:
+        for c in g["commits"]:
+            print(f"  {c}")
+        print(f"    net guard lines removed {g['removed']}, added {g['added']}; "
+              f"files: {', '.join(g['files'][:6])}"
+              + (f" and {len(g['files']) - 6} more" if len(g["files"]) > 6 else ""))
+    print()
+
+
+def fml_delta(repo: Path, start: str, end: str) -> dict:
+    """Fenix Nimbus per-channel values that differ between the window's endpoints.
+
+    A channel override in nimbus.fml.yaml turns a Fenix feature on with no preference file touched,
+    so the preference diff above cannot see it.
+    """
+    if trainlib.git_rc(repo, "diff", "--quiet", start, end, "--", FML_GLOB)[0] == 0:
+        return {"features": [], "commits": []}
+    tables = []
+    for rev in (start, end):
+        loaded = _fml_load(repo, rev, strict=False)
+        names = sorted(set(loaded[0]) | set(loaded[2])) if loaded else []
+        tables.append({r["pref"][4:]: r["values"]
+                       for r in (fml_lookup(repo, rev, names, loaded) if loaded else [])})
+    commits = trainlib.git(repo, "log", "--format=%h %s", f"{start}..{end}", "--",
+                           FML_GLOB).splitlines()
+    out = []
+    for name in sorted(set(tables[0]) | set(tables[1])):
+        before, after = tables[0].get(name, {}), tables[1].get(name, {})
+        moved = collections.defaultdict(list)
+        for key in sorted(set(before) | set(after)):
+            if before.get(key) != after.get(key):
+                ch, var = key.split("/", 1)
+                moved[(var, before.get(key), after.get(key))].append(ch)
+        if moved:
+            out.append({"feature": name,
+                        "changes": [{"variable": v, "before": b, "after": a, "channels": chs}
+                                    for (v, b, a), chs in moved.items()]})
+    return {"features": out, "commits": commits}
+
+
+def print_fml_delta(delta: dict) -> None:
+    if not delta["commits"]:
+        return
+    print(f"== FENIX NIMBUS DEFAULTS CHANGED [{len(delta['features'])}]")
+    if not delta["features"]:
+        print("  no scalar default moved; map and list values are not compared, so read these:")
+    for c in delta["features"]:
+        print(f"  fml:{c['feature']}")
+        for ch in c["changes"]:
+            before, after = (("(absent)" if v is None else v) for v in (ch["before"], ch["after"]))
+            print(f"    {ch['variable']}: {before} -> {after}   [{', '.join(ch['channels'])}]")
+    print(f"  commits touching a Fenix manifest in this window ({len(delta['commits'])}):")
+    for line in delta["commits"]:
+        print(f"      {line}")
+    print()
 
 
 def _shares_any(name: str, cand: str) -> bool:
@@ -1534,17 +1661,24 @@ def main() -> None:
         if note_error:
             print(f"# WARNING: Nightly-note check incomplete: {note_error}", file=sys.stderr)
 
+    fml = fml_delta(repo, start, end)
+    guards = guards_removed(repo, start, end)
+
     if args.format == "json":
         print(json.dumps({
             "window": {"start": start, "end": end,
                        "start_desc": start_desc, "end_desc": end_desc},
             "changed": records,
             "nightly_note_error": note_error,
+            "fml_changed": fml,
+            "guards_removed": guards,
         }, indent=2))
         return
 
     if not records:
         print(f"No preference default changes between {start_desc} and {end_desc}.")
+        print_fml_delta(fml)
+        print_guards_removed(guards)
         return
 
     # A pref that did not exist before is a new feature landing; a pref that
@@ -1594,6 +1728,8 @@ def main() -> None:
             for c in r["commits"][:4]:
                 print(f"      {c}")
         print()
+    print_fml_delta(fml)
+    print_guards_removed(guards)
 
 
 if __name__ == "__main__":

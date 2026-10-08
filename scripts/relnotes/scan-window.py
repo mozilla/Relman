@@ -366,6 +366,7 @@ def render_census(c: dict) -> list[str]:
         f"window, {c['outside_window']} not -- of those, {c['filtered_mechanical']} "
         f"mechanical, {c['earlier_version']} belong to an earlier version, "
         f"{c['flag_only']} have no landing of their own, "
+        f"{c.get('previous_cycle', 0)} landed in the previous cycle, "
         f"{c['to_review']} to look at."
     )
     if c["truncated"]:
@@ -374,7 +375,7 @@ def render_census(c: dict) -> list[str]:
     if c["unfetchable"]:
         lines.append(f"  *** searchable but not fetchable ({len(c['unfetchable'])}): "
                      + capped(c["unfetchable"])
-                     + " -- excluded from the four counts above, which therefore do not sum")
+                     + " -- excluded from the bucket counts above, which therefore do not sum")
     if c["candidates"]:
         lines.append("")
         lines.append("Landed on a ref this window does not cover -- check for a beta uplift:")
@@ -406,6 +407,15 @@ def render_census(c: dict) -> list[str]:
         for r in c["no_landing"]:
             lines.append(f"  {r['bug']}  {r['product']} :: {r['component']}"
                          f"  {r['summary'][:100]}")
+    if c.get("prev_cycle"):
+        lines.append("")
+        lines.append(f"Every landing is an ancestor of {c['prev_cycle'][0]['prev_cycle_end']} "
+                     f"({len(c['prev_cycle'])}) -- landed by the end of {c['version'] - 1}'s cycle "
+                     f"despite the {c['version']} flag, so any note belongs there, gated as it was "
+                     "then:")
+        for r in c["prev_cycle"]:
+            lines.append(f"  {r['bug']}  {r['product']} :: {r['component']}"
+                         f"  flag={r['status_flag']}  {r['summary'][:100]}")
     return lines
 
 
@@ -457,8 +467,8 @@ def census_ids(version: int) -> list[str]:
     return [str(b["id"]) for b in payload.get("bugs", [])]
 
 
-def landings_anywhere(repo: Path, bug_ids: list[str]) -> dict[str, list[str]]:
-    """Landing subjects for each bug, across every ref in the clone.
+def landings_anywhere(repo: Path, bug_ids: list[str]) -> dict[str, list[tuple[str, str]]]:
+    """(sha, subject) of each bug's landings, across every ref in the clone.
 
     Attribution is BUG_RE's leading match, the same rule the window path uses: `--grep` also matches
     the message body, so a commit that names the bug only as a dependency, or as what a backout
@@ -466,17 +476,18 @@ def landings_anywhere(repo: Path, bug_ids: list[str]) -> dict[str, list[str]]:
 
     Bounded by what the clone has -- a beta-only landing is invisible without a beta ref.
     """
-    found: dict[str, list[str]] = collections.defaultdict(list)
+    found: dict[str, list[tuple[str, str]]] = collections.defaultdict(list)
     for i in range(0, len(bug_ids), 200):
         batch = set(bug_ids[i:i + 200])
-        log = trainlib.git(repo, "log", "--all", "--format=%s",
+        log = trainlib.git(repo, "log", "--all", "--format=%H %s",
                            *[f"--grep={b}" for b in sorted(batch)])
-        for subject in log.splitlines():
+        for line in log.splitlines():
+            sha, _, subject = line.partition(" ")
             m = BUG_RE.search(subject)
             # Membership is against this batch, not all ids: a commit matched here for a body mention
             # may lead with a bug from another batch, and would otherwise be recorded twice.
             if m and m.group(1) in batch:
-                found[m.group(1)].append(subject)
+                found[m.group(1)].append((sha, subject))
     return found
 
 
@@ -516,12 +527,15 @@ def run_census(repo: Path, version: int, window_bugs: set[str], esrs: list[int],
 
     bugs, unfetchable = fetch_bugs(unseen, version, esrs) if unseen else ({}, [])
     elsewhere = landings_anywhere(repo, unseen) if unseen else {}
-    kept, filtered, earlier, no_landing = [], [], [], []
+    prev_end = f"FIREFOX_NIGHTLY_{version - 1}_END"
+    have_prev = trainlib.git_rc(repo, "rev-parse", "--verify", "--quiet", prev_end)[0] == 0
+    kept, filtered, earlier, no_landing, prev_cycle = [], [], [], [], []
     for bug_id in unseen:
         bug = bugs.get(bug_id)
         if bug is None:
             continue
-        subjects = [s for s in elsewhere.get(bug_id, []) if not REVERT_RE.match(s)]
+        lands = [(sha, s) for sha, s in elsewhere.get(bug_id, []) if not REVERT_RE.match(s)]
+        subjects = [s for _, s in lands]
         rec = {**base_record(bug_id, bug, version, esrs), "landings": subjects}
         reason = drop_reason(bug, subjects)
         if reason:
@@ -531,6 +545,12 @@ def run_census(repo: Path, version: int, window_bugs: set[str], esrs: list[int],
             earlier.append(rec)
         elif not subjects:
             no_landing.append(rec)
+        # Every landing, not any: a bug with one part in N-1 and another elsewhere stays residue.
+        elif have_prev and all(
+                trainlib.git_rc(repo, "merge-base", "--is-ancestor", sha, prev_end)[0] == 0
+                for sha, _ in lands):
+            rec["prev_cycle_end"] = prev_end
+            prev_cycle.append(rec)
         else:
             kept.append(rec)
     return {
@@ -544,10 +564,12 @@ def run_census(repo: Path, version: int, window_bugs: set[str], esrs: list[int],
         "filtered_mechanical": len(filtered),
         "earlier_version": len(earlier),
         "flag_only": len(no_landing),
+        "previous_cycle": len(prev_cycle),
         "to_review": len(kept),
         "candidates": kept,
         "earlier": earlier,
         "no_landing": no_landing,
+        "prev_cycle": prev_cycle,
         "filtered": filtered,
         # Searchable but not fetchable should not happen, and dropping it silently would make a short
         # census read as a complete one.
