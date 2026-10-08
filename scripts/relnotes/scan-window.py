@@ -997,24 +997,30 @@ def main() -> None:
     text = (render_text(result, args.show_dropped)
             if args.format == "text" or args.text_out else "")
     out = json.dumps(result, indent=2) if args.format == "json" else text
+
+    def write(path, content):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
     if args.text_out:
-        Path(args.text_out).write_text(text)
+        write(args.text_out, text)
         print(f"# wrote {args.text_out}", file=sys.stderr)
 
     if args.census_out:
         if census is None:
             sys.exit("error: --census-out needs --census; there is nothing to write without it.")
-        Path(args.census_out).write_text("\n".join(render_census(census)) + "\n")
+        write(args.census_out, "\n".join(render_census(census)) + "\n")
         print(f"# wrote {args.census_out} ({census['to_review']} to look at)", file=sys.stderr)
 
     # Independent of --format: the drop list is the audit artifact, and a JSON run still needs it.
     if args.dropped_out:
-        Path(args.dropped_out).write_text("\n".join(render_dropped(dropped)) + "\n")
+        write(args.dropped_out, "\n".join(render_dropped(dropped)) + "\n")
         print(f"# wrote {args.dropped_out} ({len(dropped)} mechanical drops to audit)",
               file=sys.stderr)
 
     if args.output:
-        Path(args.output).write_text(out)
+        write(args.output, out)
         print(f"# wrote {args.output}", file=sys.stderr)
     else:
         sys.stdout.write(out)
