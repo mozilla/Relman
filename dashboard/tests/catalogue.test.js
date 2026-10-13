@@ -40,6 +40,9 @@ test("REST params omit link-only terms", () => {
   assert.ok(q.linkParams().some(([, v]) => v === "%group.editbugs%"));
 });
 
+const ESR_LESS = ["Firefox for Android", "Focus", "GeckoView", "Data Platform and Tools"]
+  .map((p) => `product notequals ${p}`);
+
 test("readable text of a nested query", () => {
   assert.deepEqual(checks.get("beta.sec-pending-affected").lines(), [
     "resolution = FIXED",
@@ -48,9 +51,12 @@ test("readable text of a nested query", () => {
     "ANY OF (",
     "  cf_status_firefox158 equals ---",
     "  cf_status_firefox157 equals ---",
-    "  cf_status_firefox_esr153 equals ---",
-    "  cf_status_firefox_esr140 equals ---",
-    "  cf_status_firefox_esr115 equals ---",
+    ...["esr153", "esr140", "esr115"].flatMap((v) => [
+      "  ALL OF (",
+      `    cf_status_firefox_${v} equals ---`,
+      ...ESR_LESS.map((l) => `    ${l}`),
+      "  )",
+    ]),
     ")",
   ]);
 });
@@ -64,8 +70,7 @@ test("post-filters are listed as then: steps", () => {
 
 test("ESR excludes products that have no ESR versions, mainline does not", () => {
   const products = (id) => checks.get(id).lines().filter((l) => l.startsWith("product notequals"));
-  assert.deepEqual(products("esr115.uplift-approved-not-fixed"),
-    ["product notequals Firefox for Android", "product notequals Data Platform and Tools"]);
+  assert.deepEqual(products("esr115.uplift-approved-not-fixed"), ESR_LESS);
   assert.deepEqual(products("beta.uplift-approved-not-fixed"), []);
 });
 

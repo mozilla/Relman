@@ -31,7 +31,7 @@ const NOT_FIXED = "fixed,wontfix,disabled,verified";
 const BAD_RESOLUTIONS = "INVALID,WORKSFORME,DUPLICATE";
 const NOBODY = "nobody@mozilla.org";
 // Products with no ESR versions.
-const ESR_LESS_PRODUCTS = ["Firefox for Android", "Data Platform and Tools"];
+const ESR_LESS_PRODUCTS = ["Firefox for Android", "Focus", "GeckoView", "Data Platform and Tools"];
 
 class Check {
   constructor(id, title, tier, query, channel = null, {
@@ -86,12 +86,18 @@ const secFixedOnNightly = (r) => [
 
 const olderThanNightly = (r) => [r.beta, r.release, ...r.esrs];
 
+// Status not set yet. An ESR status is never set on a product with no ESR.
+const statusUnset = (c) => {
+  const unset = Chart(c.statusField, "equals", "---");
+  return c.isEsr ? allOf(unset, ...ESR_LESS_PRODUCTS.map((p) => Chart("product", "notequals", p))) : unset;
+};
+
 function secPendingTracking(r) {
   const older = olderThanNightly(r);
   return new Query([...secFixedOnNightly(r),
     anyOf(
       Chart(r.nightly.trackingField, "equals", "---"),
-      ...older.map((c) => Chart(c.statusField, "equals", "---")),
+      ...older.map(statusUnset),
       ...older.map((c) => allOf(
         Chart(c.statusField, "anyexact", "affected,fix-optional"),
         Chart(c.trackingField, "equals", "---"),
@@ -101,7 +107,7 @@ function secPendingTracking(r) {
 }
 
 const secPendingAffected = (r) => new Query([...secFixedOnNightly(r),
-  anyOf(...olderThanNightly(r).map((c) => Chart(c.statusField, "equals", "---"))),
+  anyOf(...olderThanNightly(r).map(statusUnset)),
 ]);
 
 // --- Tier 2 -----------------------------------------------------------------
