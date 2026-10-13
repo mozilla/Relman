@@ -197,7 +197,7 @@ const secResolvedMissingVersion = (r) => new Query([
   Chart(r.nightly.statusField, "equals", "---"),
   // One row per product: nowords splits on spaces too, so
   // "MailNews Core" would also exclude Core.
-  ...["NSS", "MailNews Core", "Thunderbird"].map((p) => Chart("product", "notequals", p)),
+  ...["NSS", "MailNews Core", "Thunderbird", "Calendar", "Firefox for iOS"].map((p) => Chart("product", "notequals", p)),
 ]);
 
 // --- Misc tier ----------------------------------------------------------------
