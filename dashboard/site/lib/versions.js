@@ -62,7 +62,9 @@ export function build(train, details, mergeDay) {
   const mainline = (kind, shipping) => new Channel(kind, kind, Number(train[kind].version), shipping);
   const esrVersions = new Set(EXTRA_ESR_VERSIONS);
   for (const slot of ["esr", "esr_previous"]) {
-    if (train[slot]) esrVersions.add(Number(train[slot].version));
+    // esr_previous is {version: null} outside an ESR transition.
+    const v = Number(train[slot]?.version);
+    if (v > 0) esrVersions.add(v);
   }
   return new Releases({
     nightly: mainline("nightly", details.FIREFOX_NIGHTLY),

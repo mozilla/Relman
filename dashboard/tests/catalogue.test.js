@@ -85,6 +85,11 @@ test("the extra ESR is not duplicated when the API lists it", () => {
   assert.deepEqual(r.esrs.map((c) => c.key), ["esr153", "esr115"]);
 });
 
+test("no previous ESR outside a transition", () => {
+  const r = versions.build({ ...train, esr_previous: { version: null } }, details, mergeDay);
+  assert.deepEqual(r.esrs.map((c) => c.key), ["esr153", "esr115"]);
+});
+
 test("ESR has a tracking queue per mainline version", () => {
   const ids = new Set(catalogue.pageChecks("esr", releases).map((c) => c.id));
   for (const esr of ["esr153", "esr140", "esr115"]) {
