@@ -278,7 +278,14 @@ function channelChecks(c, r) {
     add("sec-pending-tracking", "Security Bugs pending tracking", "1",
       secPendingTracking(r), { needsKey: true, columns: secCols });
     add("sec-pending-affected", "Security Bugs pending affected versions", "1",
-      secPendingAffected(r), { needsKey: true, columns: secCols });
+      secPendingAffected(r), {
+        needsKey: true,
+        columns: secCols,
+        skills: [{
+          name: "beta-sec-affected-audit",
+          summary: "for each bug, whether Beta, Release and each ESR are affected, unaffected or already fixed, worked out from the code. Paste it the “Open these bugs in Bugzilla” link above, unless $BUGZILLA_API_KEY is set in your shell",
+        }],
+      });
   }
 
   // Tier 2
