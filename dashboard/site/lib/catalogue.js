@@ -272,7 +272,14 @@ function channelChecks(c, r) {
   // Tier 1
   add("tracking-requested", "Tracking requested", "1", trackingRequested(c));
   if (mainline) add("relnote-requests", "Release Note Requests", "1", relnoteRequests(c));
-  if (k !== "nightly") add("uplift-requested", "Uplift requested", "1", upliftRequested(c));
+  if (k !== "nightly") {
+    add("uplift-requested", "Uplift requested", "1", upliftRequested(c), {
+      skills: [{
+        name: "uplift-risk-review",
+        summary: `a low, medium or high risk rating for each uplift patch, with a one-line reason. Run it as /uplift-risk-review ${c.key}`,
+      }],
+    });
+  }
   if (k === "beta") {
     const secCols = r.all.map((ch) => ch.statusField);
     add("sec-pending-tracking", "Security Bugs pending tracking", "1",

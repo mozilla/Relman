@@ -227,7 +227,8 @@ with the same code the page runs, so it returns exactly the bugs that row
 shows, and the query in `catalogue.js` is the only definition. It uses `$BUGZILLA_API_KEY` when set.
 
 To add a skill to a check, give the check `skills: [{ name, summary }]` in
-`catalogue.js` and write `.claude/skills/<name>/SKILL.md` naming the check id.
+`catalogue.js` and write `.claude/skills/<name>/SKILL.md` naming the check id
+(or `<channel>.<slug>`, for a skill shared by every channel's copy of a check).
 `tests/skills.test.js` fails if either side is missing.
 
 ## Layout

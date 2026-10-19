@@ -1,4 +1,5 @@
-// Every skill a check names must exist, and must name that check: the skill
+// Every skill a check names must exist, and must name that check (or
+// <channel>.<slug> for one shared across channels): the skill
 // gets its bugs from bin/check.js by check id, so a rename on either side
 // breaks it silently.
 import assert from "node:assert/strict";
@@ -22,7 +23,9 @@ test("every skill a check names exists and names that check", () => {
       assert.ok(existsSync(skillFile(name)), `${check.id}: no .claude/skills/${name}/SKILL.md`);
       const text = readFileSync(skillFile(name), "utf8");
       assert.match(text, new RegExp(`^name: ${name}$`, "m"), `${name}: frontmatter name differs`);
-      assert.ok(text.includes(check.id), `${name} does not mention ${check.id}`);
+      // A skill shared by every channel's copy of a check names it as <channel>.<slug>.
+      const anyChannel = check.id.replace(/^[^.]+/, "<channel>");
+      assert.ok(text.includes(check.id) || text.includes(anyChannel), `${name} does not mention ${check.id}`);
     }
   }
 });
