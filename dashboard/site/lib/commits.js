@@ -1,14 +1,15 @@
 // Commits on mozilla-firefox/firefox, from GitHub, and the bugs they name.
 //
 // The summary line of a landing starts with its bugs: "Bug 123 - ...",
-// "Bug 123: ...", "Bug 123, Bug 456 - ...". A backout is a revert of one:
+// "Bug 123: ...", "Bug 123, Bug 456 - ...", sometimes behind a branch tag
+// ("[ESR 115] Bug 123 - ...") or in brackets ("[Bug 123] ..."). A backout is a revert of one:
 // 'Revert "Bug 123 - ..." for causing ...'. It names the same bug, and it is
 // the opposite of a landing, so the two are told apart before anything counts.
 
 import { GITHUB_REPO } from "./config.js";
 import { SourceError, get } from "./http.js";
 
-const LANDING = /^\s*((?:bug\s*\d+\s*(?:,|&|and)?\s*)+)/i;
+const LANDING = /^\s*(?:\[(?!bug)[^\]]*\]\s*)?\[?((?:bug\s*\d+\s*(?:,|&|and)?\s*)+)/i;
 const BACKOUT = /^\s*(revert\b|back(ed|ing)?\s*out\b)/i;
 const BUG = /\bbug\s*(\d+)/gi;
 const REVERTS = /^This reverts commit ([0-9a-f]{40})/m;

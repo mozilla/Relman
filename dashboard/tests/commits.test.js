@@ -11,6 +11,9 @@ test("classify", () => {
     ['Revert "Bug 2072379 - Add test; r=smaug" for causing failures', ["backout", [2072379]]],
     ['Revert "Bug 2077977, Bug 2077976 - Map names" for causing failures', ["backout", [2077977, 2077976]]],
     ["Backed out changeset 0a1b2c (bug 1234567) for bustage", ["backout", [1234567]]],
+    ["[ESR 115] Bug 2071733 - Update FFmpeg plane handling.  a=RyanVM", ["landing", [2071733]]],
+    ["[release] Bug 2053586 - Part 1: Gate the fallback.  a=pascalc", ["landing", [2053586]]],
+    ["[Bug 2025291] Add launch on login for new Windows users.", ["landing", [2025291]]],
     ["No Bug - Bumping Firefox l10n changesets r=release", [null, []]],
     // Only the leading bug list is the landing; a bug mentioned later is not.
     ["Bug 111 - Follow-up to bug 222", ["landing", [111]]],
