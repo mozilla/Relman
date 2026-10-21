@@ -146,16 +146,42 @@ the branch, the branch is **unaffected**, verified. If blame lands on a commit
 that only moved or reformatted the code, follow it back
 (`git blame <that sha>^ …`) to where the hazard really started.
 
-**e. `git apply --check` proves nothing about the defect.** It checks text
+**e. Is it switched on there?** Only when the hazard is in the branch's code
+(from c and d). Look for the gate in the enclosing code and its callers: a pref
+read (`StaticPrefs::foo_bar_enabled()` maps to `foo.bar.enabled` in
+`StaticPrefList.yaml`; in JS `Services.prefs.get*Pref("…")`,
+`defineLazyPreferenceGetter`, `StaticPrefs.…`), or the pref that turns on the
+whole feature (for example `dom.webgpu.enabled` for `gfx/wgpu_bindings/`). Note
+too whether the hazard only runs on some platforms (a Vulkan path is Linux and
+Android, a D3D path Windows, a Cocoa path macOS). Then resolve the pref on that
+branch:
+
+```sh
+python3 scripts/relnotes/pref-delta.py --lookup <pref> --rev origin/<branch> --no-fetch --format json
+```
+
+Read the column for the channel the branch ships as: `beta/*` for `beta`,
+`release/*` for `release` and the ESRs. Off on every platform where the hazard
+runs → **disabled**. On for any of them → stays **affected** (name the
+platforms if not all). A gate that is a Nimbus feature, a build flag such as
+`NIGHTLY_BUILD`, or a non-empty `unresolved_define` → keep **affected** and say
+the gate couldn't be resolved. Name the gate pref only from the code, and mark
+**disabled** as **inferred** when the gate was found in a caller rather than
+around the changed lines.
+
+**f. `git apply --check` proves nothing about the defect.** It checks text
 only, so a patch can apply cleanly to a branch missing the identifiers it calls.
 If you use it to judge how hard a port is, check those identifiers exist on the
 branch separately, with `git grep` as in b.
 
-**f. The answer for the branch:**
+**g. The answer for the branch:**
 
-- **affected**: the hazard is in the branch's code. Say what a port needs
-  (applies as-is, needs adapting to an older code shape, depends on an earlier
-  refactor that isn't there).
+- **affected**: the hazard is in the branch's code and switched on (from e).
+  Say what a port needs (applies as-is, needs adapting to an older code shape,
+  depends on an earlier refactor that isn't there).
+- **disabled**: the hazard is in the branch's code but its gate is off where it
+  runs (from e). Name the pref and platforms. Say what a port would need, as
+  for affected, in case the gate is turned on later.
 - **unaffected**: the code isn't there, or the hazard arrived after the branch
   (from d), or the branch's code is shaped so the hazard can't happen (say why).
 - **fixed**: from a.
@@ -176,10 +202,12 @@ One table, a row per bug, a column per branch, using the flag values:
 | Bug | Fix | beta 159 | release 158 | esr153 | esr115 |
 |---|---|---|---|---|---|
 | 2012345 | `abc1234` (2 parts) | affected (verified) | affected (verified) | affected (inferred) | unaffected (verified) |
+| 2023456 | `def5678` | disabled (verified) | disabled (verified) | unaffected (verified) | unaffected (verified) |
 
 Then one short paragraph per bug: what the fix guarantees, when the hazard
-arrived, and the reasons behind any **inferred** or **Could not tell** answer
-and any port adaptation. Put **affected** on Beta and Release first: an uplift
+arrived, the reasons behind any **inferred** or **Could not tell** answer,
+the gate pref and platforms behind any **disabled** answer, and any port
+adaptation. Put **affected** on Beta and Release first: an uplift
 there is usually the most useful finding.
 
 End with one line: how many bugs, where the list came from (link or
