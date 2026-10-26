@@ -89,8 +89,11 @@ export class Query {
     return this.#params([...this.terms, ...this.linkOnly]);
   }
 
-  buglistUrl() {
-    return `${BUGZILLA}/buglist.cgi?${new URLSearchParams(this.linkParams())}`;
+  // `title` names the list on the Bugzilla page.
+  buglistUrl(title) {
+    const params = this.linkParams();
+    if (title) params.push(["title", title]);
+    return `${BUGZILLA}/buglist.cgi?${new URLSearchParams(params).toString().replaceAll("+", "%20")}`;
   }
 
   lines() {

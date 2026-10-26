@@ -60,7 +60,11 @@ class Check {
 
   // A sourced check's query depends on what the source found, so it has no link.
   get queryUrl() {
-    return this.source ? null : this.query.buglistUrl();
+    if (this.source) return null;
+    const c = this.channel;
+    // "Beta Fx160", "ESR115"
+    const name = !c ? "" : c.isEsr ? ` ESR${c.version}` : ` ${c.kind[0].toUpperCase()}${c.kind.slice(1)} Fx${c.version}`;
+    return this.query.buglistUrl(this.title + name);
   }
 }
 
