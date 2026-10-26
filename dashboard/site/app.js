@@ -53,6 +53,26 @@ function extLink(href, text) {
   return h("a", { href, target: "_blank", rel: "noopener" }, text);
 }
 
+const bugUrl = (id) => `https://bugzilla.mozilla.org/show_bug.cgi?id=${id}`;
+const TABS_CONFIRM_ABOVE = 20;
+
+// A tab per bug. Browsers allow one new tab per click unless the site may
+// open pop-ups, so report how many were blocked.
+function openTabsButton(bugs) {
+  const blocked = h("span", { class: "warn-text", hidden: true });
+  const open = () => {
+    if (bugs.length > TABS_CONFIRM_ABOVE && !confirm(`Open ${bugs.length} tabs?`)) return;
+    let failed = 0;
+    for (const b of bugs) {
+      const w = window.open(bugUrl(b.id), "_blank"); // "noopener" would always return null
+      if (w) w.opener = null; else failed++;
+    }
+    blocked.hidden = !failed;
+    blocked.textContent = ` The browser blocked ${failed} of ${bugs.length} tabs: allow pop-ups for this site and click again.`;
+  };
+  return [h("button", { type: "button", class: "link", onclick: open }, `Open all ${bugs.length} bugs in tabs`), blocked];
+}
+
 // --- account ---------------------------------------------------------------
 
 async function renderAccount() {
@@ -415,7 +435,7 @@ class Row {
     const ids = this.filterOn && fixed ? runner.idsLink(fixed) : this.result?.ids_url;
     if (ids) {
       if (links.length) links.push(" · ");
-      links.push(extLink(ids, `Open these ${count} bugs in Bugzilla`));
+      links.push(extLink(ids, `Open buglist for ${count} bugs`), " · ", ...openTabsButton(bugs));
     } else if (this.result && this.result.state === "ok" && count > 0) {
       // The runner leaves ids_url out when the bug_id link would be too long.
       if (links.length) links.push(" · ");
@@ -470,7 +490,7 @@ function bugTable(bugs) {
     h("thead", {}, h("tr", {},
       ["Bug", "Summary", "Product :: Component", "Status", "Sev", "Assignee", ...flagCols.map(short), "Last changed"].map((t) => h("th", {}, t)))),
     h("tbody", {}, bugs.map((b) => h("tr", {},
-      h("td", { class: "bug-id" }, extLink(`https://bugzilla.mozilla.org/show_bug.cgi?id=${b.id}`, b.id),
+      h("td", { class: "bug-id" }, extLink(bugUrl(b.id), b.id),
         b.security ? h("span", { class: "lock", role: "img", "aria-label": "Security bug", title: "Security bug" }) : null),
       h("td", { class: "summary" }, b.summary),
       h("td", {}, `${b.product} :: ${b.component}`),

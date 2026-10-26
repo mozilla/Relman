@@ -316,7 +316,7 @@ function channelChecks(c, r) {
         columns: secCols,
         skills: [{
           name: "beta-sec-affected-audit",
-          summary: "for each bug, whether Beta, Release and each ESR are affected, unaffected or already fixed, worked out from the code. Paste it the “Open these bugs in Bugzilla” link above, unless $BUGZILLA_API_KEY is set in your shell",
+          summary: "for each bug, whether Beta, Release and each ESR are affected, unaffected or already fixed, worked out from the code. Paste it the “Open buglist for N bugs” link above, unless $BUGZILLA_API_KEY is set in your shell",
         }],
       });
   }

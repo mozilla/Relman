@@ -1,6 +1,6 @@
 ---
 name: beta-sec-affected-audit
-description: Audit the dashboard's Beta check "Bugs pending affected versions" (beta.sec-pending-affected) — bugs fixed on Nightly whose Beta, Release or ESR status is still unset — and work out from the code alone, for each bug and each branch, whether that branch is affected, unaffected, or already fixed, separating what was verified from what was inferred. Use when asked things like "which branches do these bugs affect", "set the affected versions for the pending bugs", "is esr115 affected by this fix", "audit the pending affected list". Takes the dashboard's "Open these N bugs in Bugzilla" link as its argument.
+description: Audit the dashboard's Beta check "Bugs pending affected versions" (beta.sec-pending-affected) — bugs fixed on Nightly whose Beta, Release or ESR status is still unset — and work out from the code alone, for each bug and each branch, whether that branch is affected, unaffected, or already fixed, separating what was verified from what was inferred. Use when asked things like "which branches do these bugs affect", "set the affected versions for the pending bugs", "is esr115 affected by this fix", "audit the pending affected list". Takes the dashboard's "Open buglist for N bugs" link as its argument.
 ---
 
 # Bugs pending affected versions
@@ -33,8 +33,8 @@ because these bugs are hidden from anonymous users. In order:
 
    > I can't see this check's bugs without a Bugzilla API
    > key. On the dashboard's Beta tab, open "Bugs pending affected
-   > versions" and paste the "Open these N bugs in Bugzilla" link here, or set
-   > `$BUGZILLA_API_KEY` in your shell and run me again.
+   > versions" and paste the "Open buglist for N bugs" link here,
+   > or set `$BUGZILLA_API_KEY` in your shell and run me again.
 
 No bugs: report "None." and stop.
 
