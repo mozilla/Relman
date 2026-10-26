@@ -2,9 +2,10 @@
 //
 // The summary line of a landing starts with its bugs: "Bug 123 - ...",
 // "Bug 123: ...", "Bug 123, Bug 456 - ...", sometimes behind a branch tag
-// ("[ESR 115] Bug 123 - ...") or in brackets ("[Bug 123] ..."). A backout is a revert of one:
-// 'Revert "Bug 123 - ..." for causing ...'. It names the same bug, and it is
-// the opposite of a landing, so the two are told apart before anything counts.
+// ("[ESR 115] Bug 123 - ...") or in brackets ("[Bug 123] ..."). A backout is
+// a revert of one: 'Revert "Bug 123 - ..." for causing ...'. It names the same
+// bug, and it is the opposite of a landing, so the two are told apart before
+// anything counts.
 
 import { GITHUB_REPO } from "./config.js";
 import { SourceError, get } from "./http.js";

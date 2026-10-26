@@ -124,3 +124,22 @@ test("crash series", () => {
     for (const v of no) assert.ok(!inSeries(shipping, v, kind), `${v} not in ${shipping}`);
   }
 });
+
+test("each uplift filter looks at the next newer branch", () => {
+  const filters = (r) => Object.fromEntries([...catalogue.allChecks(r)]
+    .filter(([id, c]) => id.endsWith(".uplift-requested") && c.filter).map(([id, c]) => [id, c.filter.label]));
+  // During a transition there are three ESRs.
+  const transition = versions.build({ ...train, esr: { version: "175" }, esr_previous: { version: "153" } }, details, mergeDay);
+  assert.deepEqual(filters(transition), {
+    "beta.uplift-requested": "Fixed in Nightly",
+    "release.uplift-requested": "Fixed in Beta",
+    "esr175.uplift-requested": "Fixed in Beta",
+    "esr153.uplift-requested": "Fixed in ESR175",
+    "esr115.uplift-requested": "Fixed in ESR153",
+  });
+  const c = catalogue.allChecks(transition).get("esr153.uplift-requested");
+  assert.ok(c.columns.includes(c.filter.field), "the filter's field is fetched");
+  const link = new URL(c.filteredQueryUrl).searchParams;
+  assert.equal(link.get("title"), "Uplift requested ESR153 fixed in ESR175");
+  assert.ok([...link].some(([k, v]) => k.startsWith("f") && v === c.filter.field), "the filtered link adds the field");
+});

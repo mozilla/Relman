@@ -14,6 +14,9 @@ import { idsUrl } from "./querydef.js";
 
 const IDS_URL_MAX = 400; // past this many ids the bug_id link gets too long to open (BugDash's limit too)
 
+// A link to exactly these bugs, or null when there are none or too many.
+export const idsLink = (bugs) => (bugs.length > 0 && bugs.length <= IDS_URL_MAX ? idsUrl(bugs.map((b) => b.id)) : null);
+
 const now = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
 function shape(bug, columns) {
@@ -69,7 +72,7 @@ async function execute(check, key, opts, fresh) {
     candidates,
     capped: candidates >= BUGZILLA_ROW_CAP,
     bugs: bugs.map((b) => shape(b, check.columns)),
-    ids_url: bugs.length > 0 && bugs.length <= IDS_URL_MAX ? idsUrl(bugs.map((b) => b.id)) : null,
+    ids_url: idsLink(bugs),
     ran_at: now(),
     ...extra,
   };

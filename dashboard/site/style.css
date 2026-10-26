@@ -66,6 +66,8 @@ button {
 }
 button.secondary { background: transparent; color: var(--text); border-color: var(--border); }
 button.small { padding: 3px 10px; font-size: 13px; }
+.view-filter button { margin-left: 6px; }
+.view-filter button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.link { background: none; border: none; color: var(--accent); padding: 0; text-decoration: underline; }
 
 /* landing */

@@ -42,8 +42,12 @@ class Check {
     // Each lives in .claude/skills/<name>/ at the repo root and gets its bugs
     // from bin/check.js, so the query stays here.
     skills = [],
+    // An in-page filter offered as "All / label": { label, field } keeps the
+    // loaded bugs whose `field` is fixed or verified, without a new search.
+    // The query link gets the same condition (filteredQueryUrl).
+    filter = null,
   } = {}) {
-    Object.assign(this, { id, title, tier, query, channel, needsKey, shouldBeZero, post, notes, columns, source, skills });
+    Object.assign(this, { id, title, tier, query, channel, needsKey, shouldBeZero, post, notes, columns, source, skills, filter });
   }
 
   get runsOnLoad() {
@@ -60,15 +64,26 @@ class Check {
 
   // A sourced check's query depends on what the source found, so it has no link.
   get queryUrl() {
-    if (this.source) return null;
+    return this.source ? null : this.query.buglistUrl(this.#listTitle());
+  }
+
+  // The link with `filter` applied: "Uplift requested ESR153 fixed in Beta".
+  get filteredQueryUrl() {
+    const { label, field } = this.filter;
+    return this.query.extended(Chart(field, "anywords", "fixed,verified"))
+      .buglistUrl(`${this.#listTitle()} ${label[0].toLowerCase()}${label.slice(1)}`);
+  }
+
+  // "Tracking requested Beta Fx160", "Tracking requested ESR115"
+  #listTitle() {
     const c = this.channel;
-    // "Beta Fx160", "ESR115"
-    const name = !c ? "" : c.isEsr ? ` ESR${c.version}` : ` ${c.kind[0].toUpperCase()}${c.kind.slice(1)} Fx${c.version}`;
-    return this.query.buglistUrl(this.title + name);
+    const name = !c ? "" : c.isEsr ? ` ESR${c.version}` : ` ${cap(c.kind)} Fx${c.version}`;
+    return this.title + name;
   }
 }
 
 const status = (v) => `cf_status_firefox${v}`;
+const cap = (s) => s[0].toUpperCase() + s.slice(1);
 
 // --- Tier 1 -----------------------------------------------------------------
 
@@ -277,7 +292,14 @@ function channelChecks(c, r) {
   add("tracking-requested", "Tracking requested", "1", trackingRequested(c));
   if (mainline) add("relnote-requests", "Release Note Requests", "1", relnoteRequests(c));
   if (k !== "nightly") {
+    // An uplift is easier to judge once the next newer branch has it: Beta
+    // looks at Nightly, Release at Beta, the newest ESR at Beta and an older
+    // ESR at the next newer ESR.
+    const newer = { beta: r.nightly, release: r.beta }[k] ?? r.esrs[r.esrs.indexOf(c) - 1] ?? r.beta;
+    const newerName = newer.isEsr ? `ESR${newer.version}` : cap(newer.kind);
     add("uplift-requested", "Uplift requested", "1", upliftRequested(c), {
+      columns: [c.statusField, c.trackingField, newer.statusField],
+      filter: { label: `Fixed in ${newerName}`, field: newer.statusField },
       skills: [{
         name: "uplift-risk-review",
         summary: `a low, medium or high risk rating for each uplift patch, with a one-line reason. Run it as /uplift-risk-review ${c.key}`,

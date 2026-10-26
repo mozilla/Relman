@@ -267,6 +267,7 @@ class Row {
     this.token = token;
     this.result = null;
     this.loading = false;
+    this.filterOn = false; // whether check.filter is applied
     this.pill = h("span", { class: "pill idle" }, "–");
     this.panel = h("div", { class: "panel", hidden: true });
     const options = check.source?.options;
@@ -397,14 +398,28 @@ class Row {
     }
     for (const n of c.notes || []) parts.push(h("p", { class: "note" }, n));
 
-    const links = c.queryUrl ? [extLink(c.queryUrl, "Open query in Bugzilla")] : [];
-    if (this.result && this.result.ids_url) {
+    const fixed = this.result?.state === "ok" && c.filter ? this.result.bugs.filter((b) => ["fixed", "verified"].includes(b.flags[c.filter.field])) : null;
+    const bugs = this.filterOn && fixed ? fixed : this.result?.bugs;
+    if (fixed && this.result.bugs.length) {
+      const choice = (on, text) => h("button", {
+        type: "button", class: "secondary small", "aria-pressed": String(this.filterOn === on),
+        onclick: () => { this.filterOn = on; this.renderPanel(); },
+      }, text);
+      parts.push(h("p", { class: "view-filter", role: "group", "aria-label": "Show" }, "Show: ",
+        choice(false, `All (${this.result.bugs.length})`),
+        choice(true, `${c.filter.label} (${fixed.length})`)));
+    }
+    const queryUrl = this.filterOn && fixed ? c.filteredQueryUrl : c.queryUrl;
+    const links = queryUrl ? [extLink(queryUrl, "Open query in Bugzilla")] : [];
+    const count = this.filterOn && fixed ? fixed.length : this.result?.count;
+    const ids = this.filterOn && fixed ? runner.idsLink(fixed) : this.result?.ids_url;
+    if (ids) {
       if (links.length) links.push(" · ");
-      links.push(extLink(this.result.ids_url, `Open these ${this.result.count} bugs in Bugzilla`));
-    } else if (this.result && this.result.state === "ok" && this.result.count > 0) {
+      links.push(extLink(ids, `Open these ${count} bugs in Bugzilla`));
+    } else if (this.result && this.result.state === "ok" && count > 0) {
       // The runner leaves ids_url out when the bug_id link would be too long.
       if (links.length) links.push(" · ");
-      links.push(h("span", { class: "muted" }, `Too many bugs (${this.result.count}) to open by number`));
+      links.push(h("span", { class: "muted" }, `Too many bugs (${count}) to open by number`));
     }
     parts.push(h("p", { class: "links" }, links));
     if (c.skills.length) {
@@ -418,7 +433,7 @@ class Row {
     if (this.result && this.result.state === "ok") {
       const r = this.result;
       if (filtered) parts.push(h("p", { class: "muted small" }, `Bugzilla matched ${r.candidates} bugs; ${r.count} are left after the dashboard's own filtering.`));
-      if (r.bugs.length) parts.push(bugTable(r.bugs));
+      if (bugs.length) parts.push(bugTable(bugs));
       parts.push(h("p", { class: "muted small" }, `Ran ${new Date(r.ran_at).toLocaleString()} (results are reused for up to ${CACHE_MS / 60_000} minutes; reload the page for fresh ones).`));
     }
     this.panel.replaceChildren(...parts);
