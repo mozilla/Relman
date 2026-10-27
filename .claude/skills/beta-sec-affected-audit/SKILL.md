@@ -125,14 +125,52 @@ unreliable with shell interpolation here. A file that was moved or renamed may
 still hold the same code: search for the enclosing function by name before
 deciding it is absent.
 
-**c. Is the hazard there?** Read the whole enclosing function on the branch, not
-just whether an identifier is present. The main mistake to avoid: concluding
-**unaffected** because a name or helper introduced by a recent refactor is
-missing, when the branch has the same hazard in an older shape. Always ask
-"does this branch have code with the same hazard, written differently?"
+**c. Is it the same code?** Do this before reading anything. For each function
+the fix changes, compare its text on the branch with main just before the fix:
 
-**d. When the hazard arrived.** This is the strongest evidence. Find the commit
-that introduced the code the fix changes, from the pre-fix lines on main:
+```sh
+git -C $REPO grep -h -W 'fn_name_or_signature' origin/<branch> -- <path> > /tmp/branch.txt
+git -C $REPO grep -h -W 'fn_name_or_signature' <first>^ -- <path> > /tmp/prefix.txt
+diff /tmp/branch.txt /tmp/prefix.txt
+```
+
+Identical for every changed function → the hazard is on the branch verbatim:
+**affected**, verified (go on to f). Compare function by function, not with
+`git apply --check` on the whole fix: one hunk in an unrelated function makes
+the whole patch fail. `-W` finds function bounds by heuristics; if its output
+clearly stops at the wrong place, compare the line range by hand instead.
+
+**d. If not, what changed since the branch split?** The branch has older or
+newer code there. List exactly the commits that make the difference, on each
+side of the split:
+
+```sh
+split=$(git -C $REPO merge-base origin/<branch> <first>^)
+git -C $REPO log -s --format='%h %cs %s' -L ':<func>:<path>' $split..<first>^     # main side
+git -C $REPO log -s --format='%h %cs %s' -L ':<func>:<path>' $split..origin/<branch>  # branch side
+```
+
+(`-L ':<func>:<path>'` matches the first definition of `<func>`; if the name is
+ambiguous, use `-L <start>,<end>:<path>` with the lines on `<first>^`.) Read
+each main-side commit's change to the function (`git show <sha> -- <path>`) and
+put it in one of three groups:
+
+- **introduced the hazard** → the branch predates it: **unaffected**, verified.
+  Name the commit.
+- **only reshaped code that already had the hazard** (renamed, moved, split,
+  refactored) → the hazard predates the split.
+- **reshaped it in a way that may change the hazard** → this is the only
+  **inferred** case. Name the commit and say what is uncertain.
+
+If every main-side commit only reshaped, and the branch side is empty, the
+branch has the pre-split code, hazard included: **affected**, verified (cite the
+commit list). A branch-side commit (an uplift) gets the same reading: did it
+remove the hazard? Never conclude **unaffected** just because a name or helper
+from a recent refactor is missing; the branch can have the same hazard in an
+older shape, and this step is how you show it.
+
+**e. When the hazard arrived.** Find the commit that introduced the code the fix
+changes, from the pre-fix lines on main:
 
 ```sh
 git -C $REPO blame -L <start>,<end> <first>^ -- <path>
@@ -141,13 +179,21 @@ git -C $REPO tag --contains <sha>
 
 Its version is the smallest major `N` among `FIREFOX_NIGHTLY_<N>_END` and
 `FIREFOX_<N>_…_RELEASE` tags (betas, `FIREFOX_<N>_0bX_RELEASE`, count). No such
-tag: it is in the current Nightly only. If it arrived in a version later than
-the branch, the branch is **unaffected**, verified. If blame lands on a commit
-that only moved or reformatted the code, follow it back
-(`git blame <that sha>^ …`) to where the hazard really started.
+tag: it is in the current Nightly only. If blame lands on a commit that only
+moved or reformatted the code, follow it back (`git blame <that sha>^ …`) to
+where the hazard really started. Tags miss uplifts, so before calling a branch
+**unaffected** because the hazard arrived in a later version, grep the branch's
+log for that commit's bug number, with the rules from a:
 
-**e. Is it switched on there?** Only when the hazard is in the branch's code
-(from c and d). Look for the gate in the enclosing code and its callers: a pref
+```sh
+git -C $REPO log origin/<branch> -i --grep="bug <introducing bug>" --format='%H%x00%s'
+```
+
+A surviving landing means the hazard was uplifted there: go back to c for that
+branch. None → **unaffected**, verified.
+
+**f. Is it switched on there?** Only when the hazard is in the branch's code
+(from c to e). Look for the gate in the enclosing code and its callers: a pref
 read (`StaticPrefs::foo_bar_enabled()` maps to `foo.bar.enabled` in
 `StaticPrefList.yaml`; in JS `Services.prefs.get*Pref("…")`,
 `defineLazyPreferenceGetter`, `StaticPrefs.…`), or the pref that turns on the
@@ -165,32 +211,50 @@ Read the column for the channel the branch ships as: `beta/*` for `beta`,
 runs → **disabled**. On for any of them → stays **affected** (name the
 platforms if not all). A gate that is a Nimbus feature, a build flag such as
 `NIGHTLY_BUILD`, or a non-empty `unresolved_define` → keep **affected** and say
-the gate couldn't be resolved. Name the gate pref only from the code, and mark
-**disabled** as **inferred** when the gate was found in a caller rather than
-around the changed lines.
+the gate couldn't be resolved. Name the gate pref only from the code.
 
-**f. `git apply --check` proves nothing about the defect.** It checks text
+A gate in a caller rather than around the changed lines only counts if every
+way in goes through it. List the callers on the branch:
+
+```sh
+git -C $REPO grep -n '<func>(' origin/<branch>
+```
+
+Every caller checks the gate (directly, or through its own callers that all do)
+→ **disabled**, verified (name the callers). Any caller that doesn't → stays
+**affected**. Too many callers to follow (a widely used helper) → **disabled**,
+inferred, and say so.
+
+**g. `git apply --check` proves nothing about the defect.** It checks text
 only, so a patch can apply cleanly to a branch missing the identifiers it calls.
 If you use it to judge how hard a port is, check those identifiers exist on the
 branch separately, with `git grep` as in b.
 
-**g. The answer for the branch:**
+**h. The answer for the branch:**
 
-- **affected**: the hazard is in the branch's code and switched on (from e).
+- **affected**: the hazard is in the branch's code (from c to e) and switched
+  on (from f).
   Say what a port needs (applies as-is, needs adapting to an older code shape,
   depends on an earlier refactor that isn't there).
 - **disabled**: the hazard is in the branch's code but its gate is off where it
-  runs (from e). Name the pref and platforms. Say what a port would need, as
+  runs (from f). Name the pref and platforms. Say what a port would need, as
   for affected, in case the gate is turned on later.
 - **unaffected**: the code isn't there, or the hazard arrived after the branch
-  (from d), or the branch's code is shaped so the hazard can't happen (say why).
+  and was not uplifted (from d or e), or the branch's code is shaped so the
+  hazard can't happen (say why, citing the commit from d that shows it).
 - **fixed**: from a.
 - **Could not tell**: say what you looked for, and what's needed to settle it
   (a runtime check, knowing whether a pref or build flag is on, a code owner).
 
-Mark every answer **verified** (shown by the code: the hazard is or isn't
-present, or the introducing version dates it) or **inferred** (a judgment, such
-as the same hazard in a different shape).
+Mark every answer **verified** or **inferred**. **Verified** means a command
+above shows it, and the report names that evidence: the identical-function
+check (c), the commit list (d), the introducing commit and its version (e), or
+the callers (f). **Inferred** is left for what the code can't settle: a
+commit in d that reshapes the code in a way that may change the hazard, a gate
+behind too many callers to follow, or a hazard that depends on runtime
+behaviour (a race, a callback, input-dependent paths). An inferred answer says
+which of these it is and what would settle it (a runtime test, the module
+owner).
 
 Code under `mobile/android/` only ships in Firefox for Android, which has no
 ESR: for a fix touching only that, the ESR answer is **n/a**.
@@ -205,7 +269,9 @@ One table, a row per bug, a column per branch, using the flag values:
 | 2023456 | `def5678` | disabled (verified) | disabled (verified) | unaffected (verified) | unaffected (verified) |
 
 Then one short paragraph per bug: what the fix guarantees, when the hazard
-arrived, the reasons behind any **inferred** or **Could not tell** answer,
+arrived, the evidence behind each **verified** answer (in a few words: "same
+function", "only reshaped since the split: `abc1234`", "arrived in 161, not
+uplifted"), the reasons behind any **inferred** or **Could not tell** answer,
 the gate pref and platforms behind any **disabled** answer, and any port
 adaptation. Put **affected** on Beta and Release first: an uplift
 there is usually the most useful finding.
