@@ -180,6 +180,29 @@ const secHighPendingUplift = (r) => new Query([
   Chart("flagtypes.name", "notsubstring", r.beta.approvalFlag),
 ]);
 
+// An ESR said no to a fix that ships with the current Beta: Beta has it or
+// still needs it, and Release is wontfix, so it did not ship there.
+const esrSecHighWontfix = (c, r) => new Query([
+  Chart("keywords", "anywordssubstr", "sec-critical sec-high"),
+  Chart(c.statusField, "equals", "wontfix"),
+  Chart(r.beta.statusField, "anyexact", "affected,fixed,verified"),
+  Chart(r.release.statusField, "equals", "wontfix"),
+]);
+
+// The uplifts an ESR's request should follow: Beta, plus the newest ESR when
+// this is an older one.
+const upliftsBefore = (c, r) => [r.beta, ...(c === r.esrs[0] ? [] : [r.esrs[0]])];
+
+// Fixed on Nightly and the ESR still affected: the uplifts it follows were
+// asked for (in any state), but this ESR's was not.
+const esrSecHighNoUpliftRequest = (c, r) => new Query([
+  Chart("keywords", "anywordssubstr", "sec-critical sec-high"),
+  Chart(r.nightly.statusField, "anywordssubstr", "fixed,verified"),
+  Chart(c.statusField, "equals", "affected"),
+  ...upliftsBefore(c, r).map((u) => Chart("flagtypes.name", "substring", u.approvalFlag)),
+  Chart("flagtypes.name", "notsubstring", c.approvalFlag),
+]);
+
 // --- Tier 3 -----------------------------------------------------------------
 
 const fixedFixOptionals = (c) => new Query([Eq("resolution", "FIXED"), Chart(c.statusField, "equals", "fix-optional")]);
@@ -408,6 +431,15 @@ function channelChecks(c, r) {
   if (mainline) {
     add("relnote-plus", "Release Notes +", "misc", relnotePlus(c),
       { columns: ["cf_tracking_firefox_relnote", c.statusField] });
+  }
+  if (c.isEsr) {
+    add("sec-high-wontfix", "Sec-high wontfix, Beta fixed or affected", "misc", esrSecHighWontfix(c, r),
+      { needsKey: true, columns: [c.statusField, r.beta.statusField, r.release.statusField] });
+    const before = upliftsBefore(c, r).map((u) => (u.isEsr ? `ESR${u.version}` : "Beta"));
+    add("sec-high-no-uplift-request",
+      `Sec-high affected, uplift requested for ${before.join(" and ")} but not ESR${c.version}`, "misc",
+      esrSecHighNoUpliftRequest(c, r),
+      { needsKey: true, shouldBeZero: true, columns: [r.nightly.statusField, c.statusField] });
   }
   return out;
 }

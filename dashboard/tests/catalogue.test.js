@@ -109,7 +109,8 @@ test("Tier 3 and Misc do not run on load", () => {
 test("gap detectors", () => {
   const flagged = [...checks.values()].filter((c) => c.shouldBeZero).map((c) => c.id).sort();
   const want = ["beta.sec-high-pending-uplift", ...["beta", "release", "esr153", "esr140", "esr115"]
-    .flatMap((ch) => [`${ch}.uplift-approved-not-fixed`, `${ch}.approved-never-landed`])].sort();
+    .flatMap((ch) => [`${ch}.uplift-approved-not-fixed`, `${ch}.approved-never-landed`]),
+  ...["esr153", "esr140", "esr115"].map((ch) => `${ch}.sec-high-no-uplift-request`)].sort();
   assert.deepEqual(flagged, want);
 });
 
@@ -142,4 +143,14 @@ test("each uplift filter looks at the next newer branch", () => {
   const link = new URL(c.filteredQueryUrl).searchParams;
   assert.equal(link.get("title"), "Uplift requested ESR153 fixed in ESR175");
   assert.ok([...link].some(([k, v]) => k.startsWith("f") && v === c.filter.field), "the filtered link adds the field");
+});
+
+test("an ESR's missing uplift request follows Beta and the newest ESR", () => {
+  const transition = versions.build({ ...train, esr: { version: "175" }, esr_previous: { version: "153" } }, details, mergeDay);
+  const all = catalogue.allChecks(transition);
+  for (const [esr, title] of [
+    ["esr175", "Sec-high affected, uplift requested for Beta but not ESR175"],
+    ["esr153", "Sec-high affected, uplift requested for Beta and ESR175 but not ESR153"],
+    ["esr115", "Sec-high affected, uplift requested for Beta and ESR175 but not ESR115"],
+  ]) assert.equal(all.get(`${esr}.sec-high-no-uplift-request`).title, title);
 });
