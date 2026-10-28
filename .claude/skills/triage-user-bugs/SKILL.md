@@ -123,28 +123,72 @@ When synthesizing, spot-check any candidate you intend to relay, especially one 
 
 Dedupe across the two sources before assigning batches (a bug can be in both).
 
+## Re-runs in the same session
+
+When the user says "run again" (or similar) in a session that has already produced a triage report, re-run `scripts/fetch-bugs.sh` with fresh data, then filter it before triaging. Don't ask whether to filter.
+
+- **Exclude every bug the user already saw.** That means any bug shown in a table this session, plus any bug cited as a dup target, related bug, or regressor. You may still cite one of these as a dup target, but don't re-triage it.
+- **Exception: escalations that are still pending action.** For each earlier Escalations row, re-check its live state through REST: resolution, `regressed_by`, uplift and approval flags, `cf_status_*`, and new comments.
+  - **Action taken:** if `regressed_by` was set, a fix landed, uplift was requested or approved, or the bug was resolved, drop it.
+  - **Still pending:** show it again in a **Still pending from earlier** table at the top of Part 1, using the same columns as Escalations. Its Explanation gives only the **Status:** change since the last report and the outstanding **Action:**. Don't repeat the earlier evidence.
+- **Bugs triaged but never shown.** These are bugs in Part 2 groups the user didn't open. Keep their earlier classification without re-triaging, and fold them into this run's Part 2 group counts.
+- **State the filter in the Method note.** Give the number fetched, the number excluded as already seen, the number of pending escalations re-shown, and the number of new bugs triaged.
+- **Nothing new:** if no new bugs remain and no escalation is still pending, say so in one line.
+
 ## Output
 
-Group by **topic** — Escalations first, then one section per bucket. Under each topic, a table with exactly three columns and one row per bug. Nothing else per bug.
+The report comes in **two parts**. Part 1 covers what needs a decision now. Part 2 is everything else, and it is shown only if the user asks for it. Most runs only need Part 1.
 
-| Bug # | Regressor candidate | Explanation |
-|---|---|---|
-| 2071835 | bug 1859385 — candidate | Explicit `border-color` on a pseudo-element of a visited link collapses to `currentColor`. Fix exists in 157 only; wontfix on 155 and 156. Reconsider the 156 uplift before it ships. |
-| 2071749 | none — longstanding | `filter: blur()` dropped at exactly `0.5turn`/`scale:-1`; the predicate that misclassifies it is unchanged since 2021. |
+### Format rules (apply to every section)
 
-Column rules:
+- **Every section is a single table, with one row per bug.** No per-bug paragraphs, no per-bug mini-tables, and no field/value tables. They are hard to scan once the output is large.
+- **Each bug appears exactly once.** Don't summarize a bug in one place and give its details somewhere else. Its deep-dive evidence, component move and needinfo draft all go with its row.
+- **The Explanation cell uses bold labels** so its parts are easy to tell apart: **Issue:**, **Mechanism:** (or **Before → after:**), **Containment:**, **Corroboration:**, **Test:**, **Action:**, **Component:**, **Lead:**, **Watch:**, **Request:**. For escalations, the lead label is **Data loss:** or **Security exposure:** where that applies. Use only the labels the bug needs.
+- **Keep cells short.** Use fragments, not sentences, and aim for one or two lines of text per label. Very long cells stop the terminal from rendering the table and leave raw pipes. If an Explanation is getting long, cut words; don't add rows.
+- **Needinfo drafts go on a `↳ needinfo` row** directly under the bug's row. Put the italic, quoted draft in the last column and leave the other cells empty. Trim the draft to the questions that matter.
+- **Mark deep-dived regressors** in the Regressor column with `(deep dive)`, for example `bug 2069901 — candidate (deep dive)`, and put the evidence in that row's Explanation as **Mechanism**, **Containment** and **Test**. Add **Corroboration** only when it changes confidence.
+- **Regressor column values:** a bug number plus `candidate` or `validated`, or one of `none — longstanding`, `none — blocked (reason)`, or `n/a`. Never present a candidate as certain.
+- Security-restricted bugs can be named as leads, but mark them **"security-restricted — don't cite publicly"**.
 
-- **Bug #** — the id alone. Add the bucket in brackets only when the section isn't bucket-named (e.g. under Escalations).
-- **Regressor candidate** — a bug number plus `candidate` or `validated`, or one of `none — longstanding` / `none — blocked (reason)` / `n/a`. Never assert a candidate as certain.
-- **Explanation** — one to three sentences: why it's in this bucket, the mechanism if found, and the recommended action. This column absorbs the dup number, the component move, and the escalation reason — do not give any of them their own column or line.
+### Part 1: always shown, in this order
 
-**Do not** put per-bug component inventories, See-Also lists, evidence rundowns, or drafted comments in the tables. If there are needinfo drafts or component moves to apply, collect them in one short section after the tables — drafts verbatim, moves as a single list of `id → component`.
+1. **Escalations.** Columns: `Bug # | Bucket | Regressor candidate | Explanation`. Include shipped-channel regressions, data loss and security exposure, whatever their bucket.
+2. **Duplicates.** Columns: `Bug # | Duplicate of | Regressor candidate | Explanation`. If the target already has `regressed_by`, write `n/a (target has NNN; checked)`. An escalation-worthy bug that is already tracked by a fixed or open dup target goes here, with that fact noted, not under Escalations.
+3. **Other regressions with a candidate.** Columns: `Bug # | Bucket | Regressor candidate | Explanation`. These are bugs not covered above that got a named regressor candidate.
 
-Close with a brief methodology note: the exact query window, the **UNCONFIRMED-proxy disclaimer**, MCP vs REST, freshness basis (checkout HEAD/searchfox), and anything you could not determine (and why). A few lines, not a section per item.
+Example:
 
-**Regressor deep dives** get their own section after the tables — one short block per candidate, and only for bugs where a candidate was actually named. Each block: the candidate, the before/after mechanism in a sentence or two, the containment result, the corroboration, and the residual gap plus the decisive test. Keep it to a handful of lines each; the table row stays a one-cell summary that points here. This keeps the queue scannable while leaving the verification auditable — the evidence is the reason anyone should trust the candidate, so it cannot be dropped, but it does not belong inline.
+| Bug # | Bucket | Regressor candidate | Explanation |
+|---|---|---|---|
+| 2085863 | REGRESSION-FINDABLE | bug 2069901 — candidate (deep dive) | **Issue:** Fenix AV1 WebRTC video is black (Chrome Remote Desktop); Release since 157. **Mechanism:** AV1 now goes to MediaCodec instead of dav1d. **Containment:** in 157, not 156; pref off in 156, on in 157. **Test:** Fenix 156 vs 157. **Action:** turn the pref off on Android only and uplift to 160. **Component:** → Core::WebRTC: Audio/Video. |
+| 2086049 | NEEDS-INFO | n/a | **Security exposure:** passwords shown in cleartext; the field has no `type="password"`, so it went to form history. **Component:** → Toolkit::Form Manager if confirmed. |
+| ↳ needinfo | | | *"The password input has no `type` attribute, so Firefox saves it to form history. Could you check the live page for `type="password"`? ..."* |
 
-Keep the whole report scannable — this is a working queue, not an essay. Nothing else earns more than its row unless the user asks for it.
+After the Part 1 tables, add a brief **Method** note as a few bullets: the exact query window, the **UNCONFIRMED-proxy disclaimer**, REST vs MCP, the freshness basis (release tags, searchfox), whether you re-checked candidate containment yourself, and anything you couldn't determine.
+
+End Part 1 with a **prompt listing the remaining groups and their counts**. Name one or two notable bugs per group in a few words so the user can decide whether to look. For example:
+
+> **There are 33 more bugs. Want to see any of these groups?**
+> 1. **Needs-info (12):** includes 2086588 and 2086294.
+> 2. **Valid-new, no regressor (14):** includes 2086560 (a reasonable 160 uplift).
+> 3. **Feature requests (6).**
+> 4. **Invalid (1).**
+
+Then stop and wait for the answer.
+
+### Part 2: shown on request
+
+Use the same table rules. Columns: `Bug # | Regressor candidate | Explanation`. Show one table per requested group:
+
+- **Needs-info.** Every row gets a `↳ needinfo` row, and component moves go in the bug's own row.
+- **Valid-new, no regressor.** These are longstanding or blocked bugs. Keep the git evidence for "longstanding" in the bug's row as a short **Mechanism** fragment (for example, "check unchanged since 2014").
+- **Feature requests.** Use **Request:** and **Action:**.
+- **Invalid / worksforme.**
+- **Out-of-scope.** Include this only if there are any, for example Thunderbird bugs.
+
+Every bug from the fetch must land in exactly one Part 1 or Part 2 table, so the counts add up to the total. When Part 2 is done, say so ("That's all N bugs").
+
+Subagents must return, per bug, a component move and a needinfo draft where applicable, so that synthesis can place them inline.
 
 ## Mozilla context cheatsheet
 
