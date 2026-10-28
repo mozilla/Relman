@@ -149,8 +149,8 @@ test("an ESR's missing uplift request follows Beta and the newest ESR", () => {
   const transition = versions.build({ ...train, esr: { version: "175" }, esr_previous: { version: "153" } }, details, mergeDay);
   const all = catalogue.allChecks(transition);
   for (const [esr, title] of [
-    ["esr175", "Sec-high affected, uplift requested for Beta but not ESR175"],
-    ["esr153", "Sec-high affected, uplift requested for Beta and ESR175 but not ESR153"],
-    ["esr115", "Sec-high affected, uplift requested for Beta and ESR175 but not ESR115"],
+    ["esr175", "Sec-high affected, in Beta but no ESR175 uplift request"],
+    ["esr153", "Sec-high affected, in Beta and requested for ESR175 but not ESR153"],
+    ["esr115", "Sec-high affected, in Beta and requested for ESR175 but not ESR115"],
   ]) assert.equal(all.get(`${esr}.sec-high-no-uplift-request`).title, title);
 });

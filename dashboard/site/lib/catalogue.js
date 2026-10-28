@@ -189,19 +189,29 @@ const esrSecHighWontfix = (c, r) => new Query([
   Chart(r.release.statusField, "equals", "wontfix"),
 ]);
 
-// The uplifts an ESR's request should follow: Beta, plus the newest ESR when
-// this is an older one.
-const upliftsBefore = (c, r) => [r.beta, ...(c === r.esrs[0] ? [] : [r.esrs[0]])];
+// An older ESR's request follows the newest ESR's.
+const newestEsrBefore = (c, r) => (c === r.esrs[0] ? null : r.esrs[0]);
 
-// Fixed on Nightly and the ESR still affected: the uplifts it follows were
-// asked for (in any state), but this ESR's was not.
-const esrSecHighNoUpliftRequest = (c, r) => new Query([
-  Chart("keywords", "anywordssubstr", "sec-critical sec-high"),
-  Chart(r.nightly.statusField, "anywordssubstr", "fixed,verified"),
-  Chart(c.statusField, "equals", "affected"),
-  ...upliftsBefore(c, r).map((u) => Chart("flagtypes.name", "substring", u.approvalFlag)),
-  Chart("flagtypes.name", "notsubstring", c.approvalFlag),
-]);
+// The fix is in Beta (it rode the train from Nightly, or its uplift landed) or
+// on its way (fixed on Nightly with a Beta uplift asked for, in any state).
+// The newest ESR's uplift was asked for too, for an older ESR, but this
+// ESR's was not, though it is still affected.
+const esrSecHighNoUpliftRequest = (c, r) => {
+  const newest = newestEsrBefore(c, r);
+  return new Query([
+    Chart("keywords", "anywordssubstr", "sec-critical sec-high"),
+    anyOf(
+      Chart(r.beta.statusField, "anyexact", "fixed,verified"),
+      allOf(
+        Chart(r.nightly.statusField, "anywordssubstr", "fixed,verified"),
+        Chart("flagtypes.name", "substring", r.beta.approvalFlag),
+      ),
+    ),
+    ...(newest ? [Chart("flagtypes.name", "substring", newest.approvalFlag)] : []),
+    Chart(c.statusField, "equals", "affected"),
+    Chart("flagtypes.name", "notsubstring", c.approvalFlag),
+  ]);
+};
 
 // --- Tier 3 -----------------------------------------------------------------
 
@@ -435,11 +445,20 @@ function channelChecks(c, r) {
   if (c.isEsr) {
     add("sec-high-wontfix", "Sec-high wontfix, Beta fixed or affected", "misc", esrSecHighWontfix(c, r),
       { needsKey: true, columns: [c.statusField, r.beta.statusField, r.release.statusField] });
-    const before = upliftsBefore(c, r).map((u) => (u.isEsr ? `ESR${u.version}` : "Beta"));
-    add("sec-high-no-uplift-request",
-      `Sec-high affected, uplift requested for ${before.join(" and ")} but not ESR${c.version}`, "misc",
-      esrSecHighNoUpliftRequest(c, r),
-      { needsKey: true, shouldBeZero: true, columns: [r.nightly.statusField, c.statusField] });
+    const newest = newestEsrBefore(c, r);
+    add("sec-high-no-uplift-request", newest
+      ? `Sec-high affected, in Beta and requested for ESR${newest.version} but not ESR${c.version}`
+      : `Sec-high affected, in Beta but no ESR${c.version} uplift request`, "misc",
+    esrSecHighNoUpliftRequest(c, r), {
+      needsKey: true,
+      shouldBeZero: true,
+      columns: [r.nightly.statusField, r.beta.statusField, ...(newest ? [newest.statusField] : []), c.statusField],
+      notes: [
+        `“In Beta” means Beta ${r.beta.version} is fixed or verified (the fix rode the ` +
+        `train from Nightly, or its uplift landed), or the fix is on Nightly ` +
+        `${r.nightly.version} with a Beta uplift requested.`,
+      ],
+    });
   }
   return out;
 }
