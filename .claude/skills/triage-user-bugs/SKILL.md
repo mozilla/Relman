@@ -180,7 +180,16 @@ Report only what Focus says to report. Use the format rules below for every tabl
 - **Every section is a single table, with one row per bug.** No per-bug paragraphs, no per-bug mini-tables, no field/value tables.
 - **Each bug appears exactly once.** Its deep-dive evidence and needinfo draft go with its row. Component moves are the only exception: they are held back for the closing prompt.
 - **The Explanation cell uses bold labels** to separate its parts: **Issue:**, **Mechanism:** (or **Before → after:**), **Containment:**, **Corroboration:**, **Test:**, **Action:**, **Missing:**, **Bot:**. For escalations, lead with **Data loss:** or **Security exposure:** where that applies. Use only the labels the bug needs.
-- **Keep cells short.** Use fragments, aiming for one or two lines per label. Very long cells stop the table rendering in the terminal.
+- **Hard cell limits, so the table renders.** If any row is wider than the terminal, it stops drawing a table. It either falls back to vertical `Bug #: … / Explanation: …` blocks, or the overflowing columns garble. Limits:
+  - **Explanation:** at most about 250 characters per cell.
+  - **Other columns:** at most about 40 characters each. Put long dup-target status, for example "FIXED in 161, landed 2026-10-28", in the Explanation, not the Duplicate-of column.
+  - Use fragments, not sentences. Drop "the", "this is", and hedging.
+- **Overflow goes on `↳` continuation rows directly under the bug,** never into a longer cell and never into a separate section. Each continuation row obeys the same limit. Use these in order, and only as many as needed:
+  - `↳ evidence` for **Mechanism** and **Containment**
+  - `↳ action` for **Test** and **Action**
+  - `↳ needinfo` for the draft
+  
+  A deep-dived regressor typically takes the main row plus `↳ evidence` and `↳ action`.
 - **Needinfo drafts go on a `↳ needinfo` row** directly under the bug: put the italic, quoted draft in the last column and leave the other cells empty.
 - **Mark deep-dived regressors with `(deep dive)`** in the Regressor column, and put the evidence in that row as **Mechanism**, **Containment** and **Test**.
 - **Regressor column values:** a bug number plus `candidate` or `validated`, or `none — longstanding`, `none — blocked (reason)`, or `n/a`. Never present a candidate as certain.
@@ -200,8 +209,10 @@ Example:
 
 | Bug # | Affects | Regressor candidate | Explanation |
 |---|---|---|---|
-| 2085863 | Release NNN, Beta NNN+1 (since NNN-2) | bug 2069901 — candidate (deep dive) | **Issue:** Fenix AV1 WebRTC video is black. **Mechanism:** AV1 now goes to MediaCodec instead of dav1d. **Containment:** in NNN-2, not NNN-3; pref off in NNN-3, on in NNN-2. **Test:** Fenix NNN-3 vs NNN-2. **Action:** turn the pref off on Android only and uplift to beta. |
-| 2086560 | Release NNN | none — longstanding | **Bot:** hackbot diagnosed it and proposed a fix. **Missing:** severity and release/beta status flags unset; worth a beta uplift once the fix lands. |
+| 2085863 | Release NNN, Beta NNN+1 | bug 2069901 — candidate (deep dive) | **Issue:** Fenix AV1 WebRTC video black (Chrome Remote Desktop), since NNN-2. **Action:** pref off on Android only; uplift to beta. |
+| ↳ evidence | | | **Mechanism:** AV1 now routed to MediaCodec instead of dav1d. **Containment:** in NNN-2, not NNN-3; pref off in NNN-3, on in NNN-2. |
+| ↳ action | | | **Test:** Fenix NNN-3 vs NNN-2 with AV1. Needinfo the patch author. |
+| 2086560 | Release NNN | none — longstanding | **Bot:** hackbot diagnosed it, fix proposed. **Missing:** severity, release/beta status flags; beta uplift once fixed. |
 
 After the tables, add:
 - **Skipped:** a single line of counts, for example "Skipped 31: 12 needs-info, 9 longstanding, 4 bot-handled, 4 feature requests, 1 dupe, 1 invalid". Don't list them; the user can ask.
@@ -218,6 +229,8 @@ End the report with a **component-move prompt**, then stop and wait for an answe
 > **6 bugs in General/Untriaged components look misfiled. Want to see the suggested component moves?**
 
 If the user says yes, show one table: `Bug # | From | To | Why`, where **Why** is a few words. Leave the prompt out if there are none.
+
+**Before sending, check every table:** no Explanation cell is over about 250 characters, and no other cell is over about 40. Split any cell that breaks a limit onto `↳` rows. Keep this check even when the report is short. Overlong cells are what make the tables fail to render.
 
 Subagents must return, for each bug:
 - whether a triage bot already investigated it, and what it concluded
