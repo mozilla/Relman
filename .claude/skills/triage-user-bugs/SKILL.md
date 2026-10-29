@@ -9,6 +9,37 @@ Pull the recent **user-filed** bug queue plus recently-tagged **regressionwindow
 
 **Scope: triage and report only.** This skill reads bugs and produces a triage summary. It does **not** modify bugs, post comments, set flags, change components, or set `regressed_by` — those are follow-up actions the user takes (or explicitly approves) afterward. When you've drafted a comment or a `regressed_by` attribution, present it for the user to apply; never write to Bugzilla from this skill.
 
+## Focus — what the report is for
+
+The report exists to surface **what needs release-management attention in the current cycle**. Classify every bug, but **report** only these:
+
+1. **Escalations.** Shipped-channel functional regressions, data loss, and security exposure (see Escalation below).
+2. **Current-cycle regressions.** Anything that is new in, or newly affects, the current nightly, beta, or release version, with or without a regressor candidate. Hunting a regressor for these is the main work.
+3. **Clear regressors no bot has investigated.** Any bug with a clear version boundary or regressor where no triage bot has posted an analysis.
+4. **Duplicates that looked like a new regression.** Only when a bug first looked like a current-cycle regression but turns out to be an existing bug. Ordinary dupes of longstanding bugs are not reported.
+5. **Patterns not yet identified.** Several bugs in this run, or in this run plus recent open bugs, that share a symptom, site, platform, or version boundary and aren't already tied together by a tracking bug or dup chain. Report these even when each bug alone would be needs-info or longstanding.
+6. **Component moves**, offered at the end as a question rather than listed, and only for bugs currently in a **General** or **Untriaged** component (for example Firefox::General, Firefox::Untriaged, Core::General, Firefox for Android::General).
+
+**Everything else is skipped**, and appears only as counts in a one-line tally. That includes longstanding bugs, needs-info with no current-cycle signal, ordinary dupes, feature requests, invalid bugs, and bot-handled bugs (below).
+
+### Bot-handled bugs
+
+Skip a bug that a triage bot has already investigated. A bot has investigated a bug when a comment contains an actual diagnosis or regressor analysis. The known accounts are:
+- `hackbot@mozilla.tld`
+- `firefoxmanagerdev@gmail.com`
+- `clouseau-bot@mozilla.tld`
+- any other account whose name marks it as a triage or analysis bot
+
+A comment from `release-mgmt-account-bot@mozilla.tld` that only moves the component (the bugbug notice) is **not** an investigation.
+
+**Don't skip a bot-handled bug if** it needs attention for the current cycle and something is still missing. Examples:
+- the bot found a current-cycle regressor but `regressed_by` isn't set
+- `cf_status_firefoxNN` or tracking flags for the current nightly, beta, or release are unset
+- it's an escalation-class issue
+- the bot's conclusion fails the version-timing or containment check
+
+In that case, report only the missing piece; don't redo the bot's analysis. Validate a bot-named regressor with deep-dive steps 1–2 before relaying it.
+
 ## What it pulls (two sources)
 
 **Source 1 — community-filed, last 24h.** Bugs created in the last day, in the relman product set, filed by users who are *not* automation and *not* privileged (the editbugs/mozilla-corporation exclusion — see the proxy note below). This is the incoming user queue.
@@ -64,6 +95,11 @@ Per-bug, also note: a wrong bugbug auto-component, cross-links/See-Also, and whe
 **Regressor hunting is a first-class pass, not an afterthought — prioritize it whenever the bucket qualifies.** Run regressor discovery on **every** bug that lands in **CLEAR-FUNCTIONAL-REGRESSION**, **REGRESSION-FINDABLE**, and **VALID-NEW** — not just the `regressionwindow-wanted` set. For VALID-NEW the hunt doubles as a regression check: conclude "longstanding / not a regression" with git evidence when that's what the archaeology shows — don't force a candidate, but don't skip the check either (a bug mis-triaged as "longstanding" can hide a live regression with a trivial fix). **Skip** the minor buckets: INVALID/WORKSFORME, NEEDS-INFO, FEATURE-REQUEST, and out-of-scope (NEEDS-INFO by definition lacks the signal to hunt).
 
 **DUPLICATE is conditional — this is the easy one to get wrong.** Skip the hunt only when duping really is the *only* action left, i.e. the dup target already has a `regressed_by` (then just validate it, per step 1 below). If **neither the duplicate nor its target has a regressor**, run the full hunt on the target. Closing a bug forward without doing so buries a findable regressor, and the newer duplicate is often the better-evidenced report — a second reporter usually adds the boundary, testcase, or partial-failure detail that makes the archaeology possible in the first place.
+
+**Effort follows Focus.**
+- **Full seven-step deep dive:** escalations, current-cycle regressions, and clear-regressor bugs that no bot has investigated.
+- **VALID-NEW:** a quick longstanding check (is the implicated code unchanged across the current release tags?) is enough to decide whether it's current-cycle. Go deeper only if it is.
+- **Bot-handled bugs:** don't re-hunt. Validate a bot-named regressor with steps 1–2 only.
 
 Priority order: shipped-channel CLEAR-FUNCTIONAL-REGRESSION first, then REGRESSION-FINDABLE, then VALID-NEW, then regressor-less DUPLICATE pairs. **Do the code archaeology — do not default to recommending a mozregression range.** Only fall back to mozregression when archaeology is genuinely blocked, and then state the specific reason and the narrowest range.
 
@@ -130,65 +166,64 @@ When the user says "run again" (or similar) in a session that has already produc
 - **Exclude every bug the user already saw.** That means any bug shown in a table this session, plus any bug cited as a dup target, related bug, or regressor. You may still cite one of these as a dup target, but don't re-triage it.
 - **Exception: escalations that are still pending action.** For each earlier Escalations row, re-check its live state through REST: resolution, `regressed_by`, uplift and approval flags, `cf_status_*`, and new comments.
   - **Action taken:** if `regressed_by` was set, a fix landed, uplift was requested or approved, or the bug was resolved, drop it.
-  - **Still pending:** show it again in a **Still pending from earlier** table at the top of Part 1, using the same columns as Escalations. Its Explanation gives only the **Status:** change since the last report and the outstanding **Action:**. Don't repeat the earlier evidence.
-- **Bugs triaged but never shown.** These are bugs in Part 2 groups the user didn't open. Keep their earlier classification without re-triaging, and fold them into this run's Part 2 group counts.
+  - **Still pending:** show it again in a **Still pending from earlier** table at the top of the report, using the same columns as Escalations. Its Explanation gives only the **Status:** change since the last report and the outstanding **Action:**. Don't repeat the earlier evidence.
+- **Bugs that were skipped earlier stay skipped.** Count them in the Skipped tally as "previously skipped" unless they now meet the Focus criteria (for example, a new reporter forms a pattern, or the bug is newly confirmed on the current release).
 - **State the filter in the Method note.** Give the number fetched, the number excluded as already seen, the number of pending escalations re-shown, and the number of new bugs triaged.
 - **Nothing new:** if no new bugs remain and no escalation is still pending, say so in one line.
 
 ## Output
 
-The report comes in **two parts**. Part 1 covers what needs a decision now. Part 2 is everything else, and it is shown only if the user asks for it. Most runs only need Part 1.
+Report only what Focus says to report. Use the format rules below for every table.
 
-### Format rules (apply to every section)
+### Format rules
 
-- **Every section is a single table, with one row per bug.** No per-bug paragraphs, no per-bug mini-tables, and no field/value tables. They are hard to scan once the output is large.
-- **Each bug appears exactly once.** Don't summarize a bug in one place and give its details somewhere else. Its deep-dive evidence, component move and needinfo draft all go with its row.
-- **The Explanation cell uses bold labels** so its parts are easy to tell apart: **Issue:**, **Mechanism:** (or **Before → after:**), **Containment:**, **Corroboration:**, **Test:**, **Action:**, **Component:**, **Lead:**, **Watch:**, **Request:**. For escalations, the lead label is **Data loss:** or **Security exposure:** where that applies. Use only the labels the bug needs.
-- **Keep cells short.** Use fragments, not sentences, and aim for one or two lines of text per label. Very long cells stop the terminal from rendering the table and leave raw pipes. If an Explanation is getting long, cut words; don't add rows.
-- **Needinfo drafts go on a `↳ needinfo` row** directly under the bug's row. Put the italic, quoted draft in the last column and leave the other cells empty. Trim the draft to the questions that matter.
-- **Mark deep-dived regressors** in the Regressor column with `(deep dive)`, for example `bug 2069901 — candidate (deep dive)`, and put the evidence in that row's Explanation as **Mechanism**, **Containment** and **Test**. Add **Corroboration** only when it changes confidence.
-- **Regressor column values:** a bug number plus `candidate` or `validated`, or one of `none — longstanding`, `none — blocked (reason)`, or `n/a`. Never present a candidate as certain.
-- Security-restricted bugs can be named as leads, but mark them **"security-restricted — don't cite publicly"**.
+- **Every section is a single table, with one row per bug.** No per-bug paragraphs, no per-bug mini-tables, no field/value tables.
+- **Each bug appears exactly once.** Its deep-dive evidence and needinfo draft go with its row. Component moves are the only exception: they are held back for the closing prompt.
+- **The Explanation cell uses bold labels** to separate its parts: **Issue:**, **Mechanism:** (or **Before → after:**), **Containment:**, **Corroboration:**, **Test:**, **Action:**, **Missing:**, **Bot:**. For escalations, lead with **Data loss:** or **Security exposure:** where that applies. Use only the labels the bug needs.
+- **Keep cells short.** Use fragments, aiming for one or two lines per label. Very long cells stop the table rendering in the terminal.
+- **Needinfo drafts go on a `↳ needinfo` row** directly under the bug: put the italic, quoted draft in the last column and leave the other cells empty.
+- **Mark deep-dived regressors with `(deep dive)`** in the Regressor column, and put the evidence in that row as **Mechanism**, **Containment** and **Test**.
+- **Regressor column values:** a bug number plus `candidate` or `validated`, or `none — longstanding`, `none — blocked (reason)`, or `n/a`. Never present a candidate as certain.
+- **For a bot-handled bug that is reported because something is missing,** add **Bot:** with the bot's conclusion in a few words, and **Missing:** for what still needs doing.
+- **Security-restricted bugs** may be named as leads, marked **"security-restricted — don't cite publicly"**.
 
-### Part 1: always shown, in this order
+### Sections, in this order
 
-1. **Escalations.** Columns: `Bug # | Bucket | Regressor candidate | Explanation`. Include shipped-channel regressions, data loss and security exposure, whatever their bucket.
-2. **Duplicates.** Columns: `Bug # | Duplicate of | Regressor candidate | Explanation`. If the target already has `regressed_by`, write `n/a (target has NNN; checked)`. An escalation-worthy bug that is already tracked by a fixed or open dup target goes here, with that fact noted, not under Escalations.
-3. **Other regressions with a candidate.** Columns: `Bug # | Bucket | Regressor candidate | Explanation`. These are bugs not covered above that got a named regressor candidate.
+Omit a section if it would be empty.
+
+1. **Escalations** — `Bug # | Bucket | Regressor candidate | Explanation`
+2. **Current-cycle regressions** — `Bug # | Affects | Regressor candidate | Explanation`. **Affects** names the channels and versions, for example "Release 159, Beta 160". This section includes clear-regressor bugs with no bot investigation, and bot-handled bugs reported for a missing piece.
+3. **Looked new, actually dupes** — `Bug # | Duplicate of | Regressor candidate | Explanation`. Say why it looked new and where the dup target stands, for example "fixed in 159", or "open, regressed_by set".
+4. **Possible patterns** — `Bugs | Shared signal | Explanation`. Give the suggested tracking or dup action.
 
 Example:
 
-| Bug # | Bucket | Regressor candidate | Explanation |
+| Bug # | Affects | Regressor candidate | Explanation |
 |---|---|---|---|
-| 2085863 | REGRESSION-FINDABLE | bug 2069901 — candidate (deep dive) | **Issue:** Fenix AV1 WebRTC video is black (Chrome Remote Desktop); Release since 157. **Mechanism:** AV1 now goes to MediaCodec instead of dav1d. **Containment:** in 157, not 156; pref off in 156, on in 157. **Test:** Fenix 156 vs 157. **Action:** turn the pref off on Android only and uplift to 160. **Component:** → Core::WebRTC: Audio/Video. |
-| 2086049 | NEEDS-INFO | n/a | **Security exposure:** passwords shown in cleartext; the field has no `type="password"`, so it went to form history. **Component:** → Toolkit::Form Manager if confirmed. |
-| ↳ needinfo | | | *"The password input has no `type` attribute, so Firefox saves it to form history. Could you check the live page for `type="password"`? ..."* |
+| 2085863 | Release 159, Beta 160 (since 157) | bug 2069901 — candidate (deep dive) | **Issue:** Fenix AV1 WebRTC video is black. **Mechanism:** AV1 now goes to MediaCodec instead of dav1d. **Containment:** in 157, not 156; pref off in 156, on in 157. **Test:** Fenix 156 vs 157. **Action:** turn the pref off on Android only and uplift to 160. |
+| 2086560 | Release 159 | none — longstanding | **Bot:** hackbot diagnosed it and proposed a fix. **Missing:** severity and status flags for 159/160 unset; worth a 160 uplift once the fix lands. |
 
-After the Part 1 tables, add a brief **Method** note as a few bullets: the exact query window, the **UNCONFIRMED-proxy disclaimer**, REST vs MCP, the freshness basis (release tags, searchfox), whether you re-checked candidate containment yourself, and anything you couldn't determine.
+After the tables, add:
+- **Skipped:** a single line of counts, for example "Skipped 31: 12 needs-info, 9 longstanding, 4 bot-handled, 4 feature requests, 1 dupe, 1 invalid". Don't list them; the user can ask.
+- **Method:** a few bullets covering:
+  - the exact query window
+  - the **UNCONFIRMED-proxy disclaimer**
+  - REST vs MCP
+  - the freshness basis (release tags, searchfox)
+  - whether you re-checked candidate containment yourself
+  - anything you couldn't determine
 
-End Part 1 with a **prompt listing the remaining groups and their counts**. Name one or two notable bugs per group in a few words so the user can decide whether to look. For example:
+End the report with a **component-move prompt**, then stop and wait for an answer. Count every bug from the run that sits in a General or Untriaged component and has a better home, including skipped bugs, because a misfiled bug in a General component still needs someone to act. For example:
 
-> **There are 33 more bugs. Want to see any of these groups?**
-> 1. **Needs-info (12):** includes 2086588 and 2086294.
-> 2. **Valid-new, no regressor (14):** includes 2086560 (a reasonable 160 uplift).
-> 3. **Feature requests (6).**
-> 4. **Invalid (1).**
+> **6 bugs in General/Untriaged components look misfiled. Want to see the suggested component moves?**
 
-Then stop and wait for the answer.
+If the user says yes, show one table: `Bug # | From | To | Why`, where **Why** is a few words. Leave the prompt out if there are none.
 
-### Part 2: shown on request
-
-Use the same table rules. Columns: `Bug # | Regressor candidate | Explanation`. Show one table per requested group:
-
-- **Needs-info.** Every row gets a `↳ needinfo` row, and component moves go in the bug's own row.
-- **Valid-new, no regressor.** These are longstanding or blocked bugs. Keep the git evidence for "longstanding" in the bug's row as a short **Mechanism** fragment (for example, "check unchanged since 2014").
-- **Feature requests.** Use **Request:** and **Action:**.
-- **Invalid / worksforme.**
-- **Out-of-scope.** Include this only if there are any, for example Thunderbird bugs.
-
-Every bug from the fetch must land in exactly one Part 1 or Part 2 table, so the counts add up to the total. When Part 2 is done, say so ("That's all N bugs").
-
-Subagents must return, per bug, a component move and a needinfo draft where applicable, so that synthesis can place them inline.
+Subagents must return, for each bug:
+- whether a triage bot already investigated it, and what it concluded
+- which current-cycle versions it affects
+- the current component
+- a component move and a needinfo draft, where they apply
 
 ## Mozilla context cheatsheet
 
