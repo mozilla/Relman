@@ -74,7 +74,7 @@ This is a first-class rule, not a footnote. Getting it wrong produces confidentl
 - **Version-timing guardrail on every regressor candidate.** Before naming a regressor, verify the candidate's landing version (`cf_status_firefoxNN` / `target_milestone` on the *candidate* bug) is **≤ the version this bug was reported against / first appears in**. A change that first ships in 154 cannot regress a 152 report — reject such candidates explicitly. (This is the exact mistake to avoid: pattern-matching a plausible refactor that landed too late.)
 - **Pull bug data fresh at run time.** Never reuse a cached list; record the query window in the output.
 
-Know the current channel mapping when you run (it shifts ~monthly): release = NNN.0.x, beta = NNN+1, nightly = NNN+2, with ESR separate. Confirm the live numbers rather than assuming.
+Know the current channel mapping when you run (it shifts ~monthly): release = NNN.0.x, beta = NNN+1, nightly = NNN+2, with ESR separate. Confirm the live numbers rather than assuming. Read them from `https://product-details.mozilla.org/1.0/firefox_versions.json`: use `LATEST_FIREFOX_VERSION` for release, `LATEST_FIREFOX_DEVEL_VERSION` for beta, `FIREFOX_NIGHTLY` for nightly, and `FIREFOX_ESR` and `FIREFOX_ESR115` for ESR. "Current cycle" in Focus means those release, beta and nightly versions.
 
 ## Triage taxonomy
 
@@ -192,16 +192,16 @@ Report only what Focus says to report. Use the format rules below for every tabl
 Omit a section if it would be empty.
 
 1. **Escalations** — `Bug # | Bucket | Regressor candidate | Explanation`
-2. **Current-cycle regressions** — `Bug # | Affects | Regressor candidate | Explanation`. **Affects** names the channels and versions, for example "Release 159, Beta 160". This section includes clear-regressor bugs with no bot investigation, and bot-handled bugs reported for a missing piece.
-3. **Looked new, actually dupes** — `Bug # | Duplicate of | Regressor candidate | Explanation`. Say why it looked new and where the dup target stands, for example "fixed in 159", or "open, regressed_by set".
+2. **Current-cycle regressions** — `Bug # | Affects | Regressor candidate | Explanation`. **Affects** names the channels and versions, for example "Release NNN, Beta NNN+1". This section includes clear-regressor bugs with no bot investigation, and bot-handled bugs reported for a missing piece.
+3. **Looked new, actually dupes** — `Bug # | Duplicate of | Regressor candidate | Explanation`. Say why it looked new and where the dup target stands, for example "fixed in NNN", or "open, regressed_by set".
 4. **Possible patterns** — `Bugs | Shared signal | Explanation`. Give the suggested tracking or dup action.
 
 Example:
 
 | Bug # | Affects | Regressor candidate | Explanation |
 |---|---|---|---|
-| 2085863 | Release 159, Beta 160 (since 157) | bug 2069901 — candidate (deep dive) | **Issue:** Fenix AV1 WebRTC video is black. **Mechanism:** AV1 now goes to MediaCodec instead of dav1d. **Containment:** in 157, not 156; pref off in 156, on in 157. **Test:** Fenix 156 vs 157. **Action:** turn the pref off on Android only and uplift to 160. |
-| 2086560 | Release 159 | none — longstanding | **Bot:** hackbot diagnosed it and proposed a fix. **Missing:** severity and status flags for 159/160 unset; worth a 160 uplift once the fix lands. |
+| 2085863 | Release NNN, Beta NNN+1 (since NNN-2) | bug 2069901 — candidate (deep dive) | **Issue:** Fenix AV1 WebRTC video is black. **Mechanism:** AV1 now goes to MediaCodec instead of dav1d. **Containment:** in NNN-2, not NNN-3; pref off in NNN-3, on in NNN-2. **Test:** Fenix NNN-3 vs NNN-2. **Action:** turn the pref off on Android only and uplift to beta. |
+| 2086560 | Release NNN | none — longstanding | **Bot:** hackbot diagnosed it and proposed a fix. **Missing:** severity and release/beta status flags unset; worth a beta uplift once the fix lands. |
 
 After the tables, add:
 - **Skipped:** a single line of counts, for example "Skipped 31: 12 needs-info, 9 longstanding, 4 bot-handled, 4 feature requests, 1 dupe, 1 invalid". Don't list them; the user can ask.
