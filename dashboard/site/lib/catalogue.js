@@ -32,6 +32,8 @@ const BAD_RESOLUTIONS = "INVALID,WORKSFORME,DUPLICATE";
 const NOBODY = "nobody@mozilla.org";
 // Products with no ESR versions.
 const ESR_LESS_PRODUCTS = ["Firefox for Android", "Focus", "GeckoView", "Data Platform and Tools"];
+// Left out of ESR Burndown, there may be products we would still uplift for if request but we won't follow them
+const ESR_BURNDOWN_EXCLUDED_PRODUCTS = ["NSS", "MailNews Core", "Thunderbird", "Calendar", "Firefox for iOS"];
 
 class Check {
   constructor(id, title, tier, query, channel = null, {
@@ -171,6 +173,9 @@ const burndown = (c) => new Query([
   Eq("resolution", "FIXED"),
   Chart(c.statusField, "equals", "affected"),
   Chart("flagtypes.name", "notsubstring", c.approvalFlag),
+  // One row per product: nowords splits on spaces too, so "MailNews Core"
+  // would also exclude Core.
+  ...(c.isEsr ? ESR_BURNDOWN_EXCLUDED_PRODUCTS.map((p) => Chart("product", "notequals", p)) : []),
 ]);
 
 const secHighPendingUplift = (r) => new Query([
