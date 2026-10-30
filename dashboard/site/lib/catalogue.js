@@ -354,7 +354,7 @@ function channelChecks(c, r) {
         columns: secCols,
         skills: [{
           name: "beta-sec-affected-audit",
-          summary: "for each bug, whether Beta, Release and each ESR are affected, unaffected or already fixed, worked out from the code. Paste it the “Open buglist for N bugs” link above, unless $BUGZILLA_API_KEY is set in your shell",
+          summary: "for each bug, whether Beta, Release and each ESR are affected, unaffected or already fixed, worked out from the code. Paste it the “Open buglist for N bugs” link above, unless you have a Bugzilla API key in ~/.config/bugzilla/api-key or $BUGZILLA_API_KEY",
         }],
       });
   }
@@ -363,7 +363,12 @@ function channelChecks(c, r) {
   if (mainline) {
     add("new-regressions", "New Regressions", "2", newRegressions(c));
     add("carryover-regressions", "Carry Over Regressions", "2", carryoverRegressions(c));
-    add("tracking-not-fixed", "Tracking+ not fixed", "2", trackingNotFixed(c));
+    add("tracking-not-fixed", "Tracking+ not fixed", "2", trackingNotFixed(c), {
+      skills: [{
+        name: "slack-nudge",
+        summary: `a Slack message to each assignee asking whether a fix will land in time, sent only once you approve it. Run it as /slack-nudge ${c.key}.tracking-not-fixed`,
+      }],
+    });
   } else {
     add("open-regressions", "Open regressions", "2", openRegressionsEsr(c));
     for (const m of r.mainline) {
@@ -374,7 +379,15 @@ function channelChecks(c, r) {
   if (k !== "nightly") add("burndown", "Burndown (no uplift requested)", "2", burndown(c));
   if (k === "beta") {
     add("sec-high-pending-uplift", "Sec-high pending uplift request", "2", secHighPendingUplift(r),
-      { needsKey: true, shouldBeZero: true, columns: [r.nightly.statusField, c.statusField] });
+      {
+        needsKey: true,
+        shouldBeZero: true,
+        columns: [r.nightly.statusField, c.statusField, ...r.esrs.map((e) => e.statusField)],
+        skills: [{
+          name: "slack-nudge",
+          summary: "a Slack message to each assignee asking for a Beta uplift request, sent only once you approve it. Needs a Bugzilla API key in ~/.config/bugzilla/api-key or $BUGZILLA_API_KEY. Run it as /slack-nudge beta.sec-high-pending-uplift",
+        }],
+      });
   }
 
   // Tier 3

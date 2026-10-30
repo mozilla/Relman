@@ -10,6 +10,7 @@ const REST = "https://bugzilla.mozilla.org/rest";
 export const BASE_FIELDS = [
   "id", "summary", "status", "resolution", "product", "component",
   "assigned_to", "severity", "last_change_time", "groups",
+  "triage_owner", // for skills that fall back to it (slack-nudge)
 ];
 
 // Bugzilla is shared and rate limited: cap how many requests this page has open.

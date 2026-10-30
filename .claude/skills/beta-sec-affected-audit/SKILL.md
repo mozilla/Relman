@@ -24,17 +24,21 @@ because these bugs are hidden from anonymous users. In order:
 
 1. **A link was passed** (`/beta-sec-affected-audit <url>`): take the bug
    numbers from its `bug_id` parameter (comma-separated). Use the bugs from the link, even if
-   `$BUGZILLA_API_KEY` is also set.
-2. **`$BUGZILLA_API_KEY` is set:** run
+   a key is also set up.
+2. **Otherwise:** run
    `node dashboard/bin/check.js beta.sec-pending-affected --json` and use the
-   `id` of each entry in `bugs`. A `state` other than `ok`: stop and report the
-   `message`.
-3. **Neither:** stop and ask for the link:
+   `id` of each entry in `bugs`. It reads the key itself, from
+   `$BUGZILLA_API_KEY` or else `~/.config/bugzilla/api-key`; never read,
+   print or copy the key. A `state` of `needs_key` means neither is set up:
+   stop and ask for the link:
 
    > I can't see this check's bugs without a Bugzilla API
    > key. On the dashboard's Beta tab, open "Bugs pending affected
    > versions" and paste the "Open buglist for N bugs" link here,
-   > or set `$BUGZILLA_API_KEY` in your shell and run me again.
+   > or save a key to `~/.config/bugzilla/api-key` (`chmod 600`) and run
+   > me again.
+
+   Any other `state` than `ok`: stop and report the `message`.
 
 No bugs: report "None." and stop.
 

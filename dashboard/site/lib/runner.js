@@ -30,6 +30,8 @@ function shape(bug, columns) {
     component: bug.component ?? "",
     assignee: bug.assigned_to ?? "",
     assignee_name: who.real_name || who.nick || "",
+    triage_owner: bug.triage_owner ?? "",
+    triage_owner_name: bug.triage_owner_detail?.real_name || bug.triage_owner_detail?.nick || "",
     severity: bug.severity ?? "",
     last_change_time: bug.last_change_time ?? "",
     // Hidden in a security group (core-security, dom-core-security, ...).

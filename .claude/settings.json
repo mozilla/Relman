@@ -11,7 +11,8 @@
     "working tree outside scripts/ and reference/.",
     "A compound command needs EVERY segment allowed: a permitted script piped through grep or head still prompts, which is why the read-only text utilities are listed. curl entries appear twice because prefix matching is literal and quoted URLs do not match an unquoted entry.",
     "No Gecko-checkout entries live here on purpose. This file is shared and the clone path is per-machine, so a literal path in it is wrong for everyone but its author. The checkout path is resolved once by `watchlist.py check-setup`, stored per-user, and the matching Bash(git -C <path> ...) entries are written to the git-ignored settings.local.json. Run check-setup on a new machine or the gecko reads will prompt on every call.",
-    "SYNTAX NOTE: entries whose prefix ends mid-argument use the glob form `Bash(prefix*)`, not `Bash(prefix:*)`. Observed 2026-08-05: `Bash(python3 scripts/relnotes/:*)` did NOT stop prompts for `python3 scripts/relnotes/daily-pass.py ...` while a blanket `Bash(python3 *)` did, and the entries that worked all end at a token boundary (`git log:*`, `grep:*`). So `:*` appears to match only where the prefix ends a whole argument; a prefix ending in `/` never matches. Do not convert these back to `:*`."
+    "SYNTAX NOTE: entries whose prefix ends mid-argument use the glob form `Bash(prefix*)`, not `Bash(prefix:*)`. Observed 2026-08-05: `Bash(python3 scripts/relnotes/:*)` did NOT stop prompts for `python3 scripts/relnotes/daily-pass.py ...` while a blanket `Bash(python3 *)` did, and the entries that worked all end at a token boundary (`git log:*`, `grep:*`). So `:*` appears to match only where the prefix ends a whole argument; a prefix ending in `/` never matches. Do not convert these back to `:*`.",
+    "ASK, never allow: Slack sends (the slack-nudge skill). Every message needs its own go-ahead; an ask rule beats an allow in anyone's settings.local.json."
   ],
   "permissions": {
     "allow": [
@@ -107,6 +108,10 @@
       "Read(//tmp/**)",
       "Edit(//tmp/**)",
       "Read(~/.local/state/relman-relnotes/**)"
+    ],
+    "ask": [
+      "mcp__slack__slack_send_message",
+      "mcp__slack__slack_schedule_message"
     ]
   }
 }

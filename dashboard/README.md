@@ -224,7 +224,7 @@ node dashboard/bin/check.js nightly.relnote-nightly-plus --json
 
 `bin/check.js` runs a check (a dashboard row: its query and any "then:" steps)
 with the same code the page runs, so it returns exactly the bugs that row
-shows, and the query in `catalogue.js` is the only definition. It uses `$BUGZILLA_API_KEY` when set.
+shows, and the query in `catalogue.js` is the only definition. It uses `$BUGZILLA_API_KEY`, or else `~/.config/bugzilla/api-key`.
 
 To add a skill to a check, give the check `skills: [{ name, summary }]` in
 `catalogue.js` and write `.claude/skills/<name>/SKILL.md` naming the check id

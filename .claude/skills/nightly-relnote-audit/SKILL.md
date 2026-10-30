@@ -22,8 +22,9 @@ The query lives in the dashboard (`dashboard/site/lib/catalogue.js`, check id
 node dashboard/bin/check.js nightly.relnote-nightly-plus --json
 ```
 
-It runs the same code the dashboard page runs. It uses `$BUGZILLA_API_KEY` when
-set; the JSON's `key_used` says whether it was. If `key_used` is false, say in
+It runs the same code the dashboard page runs. It reads the Bugzilla API key
+itself, from `$BUGZILLA_API_KEY` or else `~/.config/bugzilla/api-key` (never
+read, print or copy the key); the JSON's `key_used` says whether it had one. If `key_used` is false, say in
 the report that bugs hidden from anonymous users (security bugs) are not
 included. If `state` is not `ok`, stop and report the `message`.
 

@@ -7,8 +7,12 @@
 //   node dashboard/bin/check.js nightly.relnote-nightly-plus --json
 //   node dashboard/bin/check.js beta.sec-open-on-main --opt days=7
 //
-// Uses $BUGZILLA_API_KEY when set; without it, hidden bugs are not returned
+// Uses $BUGZILLA_API_KEY, or else ~/.config/bugzilla/api-key (the Relman
+// convention); without either, hidden bugs are not returned
 // and checks that need a key report needs_key. Exits 1 unless the check ran.
+
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 
 import * as catalogue from "../site/lib/catalogue.js";
 import * as runner from "../site/lib/runner.js";
@@ -39,7 +43,10 @@ if (!check) {
   process.exit(1);
 }
 
-const key = process.env.BUGZILLA_API_KEY || "";
+const keyFile = () => {
+  try { return readFileSync(`${homedir()}/.config/bugzilla/api-key`, "utf8").trim(); } catch { return ""; }
+};
+const key = process.env.BUGZILLA_API_KEY?.trim() || keyFile();
 const result = await runner.run(check, key, opts);
 const out = {
   id: check.id,
@@ -56,7 +63,7 @@ if (json) {
 } else {
   console.log(`${out.title}${out.channel ? ` (${out.channel})` : ""}: ${out.state}${out.count != null ? `, ${out.count} bugs` : ""}`);
   if (out.message) console.log(out.message);
-  if (!key) console.log("No $BUGZILLA_API_KEY: bugs hidden from anonymous users are not included.");
+  if (!key) console.log("No $BUGZILLA_API_KEY or ~/.config/bugzilla/api-key: bugs hidden from anonymous users are not included.");
   for (const b of out.bugs ?? []) {
     const flags = Object.entries(b.flags).map(([k, v]) => `${k}=${v}`).join(" ");
     console.log(`${b.id}${b.security ? " [security]" : ""}\t${b.status} ${b.resolution}\t${b.summary}\t${flags}`);
