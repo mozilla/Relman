@@ -384,7 +384,7 @@ def fetch_origin(repo: Path, consequence: str, timeout: int | None = None,
         print(f"# {remote} fetched {int(age // 60)} min ago; not fetching again "
               f"(RELMAN_FETCH_MAX_AGE={max_age}s)", file=sys.stderr)
         return True
-    print(f"# fetching {remote}...", file=sys.stderr)
+    print(f"# fetching {remote} in {Path(repo).resolve().name}...", file=sys.stderr)
     try:
         r = subprocess.run(["git", "-C", str(repo), "fetch", "--quiet", remote],
                            capture_output=True, text=True, check=False, timeout=timeout)

@@ -460,12 +460,22 @@ def cmd_resume(args) -> None:  # noqa: C901
     print_tooling(trainlib.tooling_status(fetch=not args.no_fetch))
 
     repo = trainlib.resolve_repo(args.repo)
+    # The fetch above is the Relman checkout's. Without this one, "commits behind" counts against
+    # whatever upstream ref the last scan left in the Gecko clone, which reads "0 behind" right
+    # after a pass however much has landed since. No max_age: that skip would bring the bug back.
+    fetched = False
+    if not args.no_fetch:
+        fetched = trainlib.fetch_origin(
+            repo, remote=trainlib.gecko_remote(),
+            consequence="The commits-behind count below may be low.")
     st = trainlib.watermark_status(repo, trainlib.read_watermark(),
                                    int(rel) if rel.isdigit() else 0)
     if st.get("known"):
         stale = "  *** STALE: predates the current train ***" if st.get("stale_train") else ""
+        unfetched = "" if fetched else "  (Gecko clone not fetched; count may be low)"
         print(f"SCAN POSITION  watermark {st['commit'][:12]} ({st['date']}), "
-              f"{st['commits_behind']} commits behind {st.get('upstream', 'upstream')}{stale}")
+              f"{st['commits_behind']} commits behind {st.get('upstream', 'upstream')}"
+              f"{stale}{unfetched}")
         print(f"               resume with: daily-pass.py --next-day --save-state --brief")
     else:
         print("SCAN POSITION  no usable watermark; run scan-window.py --show-state and pick a build")
