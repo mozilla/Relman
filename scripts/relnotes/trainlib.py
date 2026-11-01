@@ -104,7 +104,10 @@ def fetch_text(url: str, errors: str = "strict") -> str:
     """
     last, attempts = None, 3
     for attempt in range(1, attempts + 1):
-        req = url_request.Request(url, headers={"User-Agent": USER_AGENT})
+        headers = {"User-Agent": USER_AGENT}
+        if url.startswith("https://bugzilla.mozilla.org/") and os.environ.get("BUGZILLA_API_KEY"):
+            headers["X-Bugzilla-API-Key"] = os.environ["BUGZILLA_API_KEY"]
+        req = url_request.Request(url, headers=headers)
         try:
             with url_request.urlopen(req, timeout=120) as r:
                 charset = r.headers.get_content_charset() or "utf-8"
