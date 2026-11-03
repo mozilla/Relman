@@ -166,6 +166,25 @@ included phab-bot's uplift form.
   and the one before it is `unaffected`. A new feature rather than a fix is
   worth less on both. Say "feature, not a fix" under **Value**: the approval
   question is then mostly about value.
+- **Reach: is the broken code switched on in this branch?** A bug in code
+  that only runs behind a pref that's off on the branch can't reach its users,
+  so the uplift is worth less. Find the pref on the *path to the bug*: follow
+  the fix's changed function back through its callers to the pref or Nimbus
+  check that guards it. Get the name from the code, the way
+  `reference/release-notes/gating.md` describes under "Which preference is
+  it?", never from the bug's wording. Then resolve it on the branch:
+
+  ```sh
+  python3 scripts/relnotes/pref-delta.py --lookup <pref> --rev origin/<channel> --no-fetch
+  ```
+
+  **A pref the regressor or feature added is not the gate unless it guards
+  that path.** Bug 2087575's regressor (2070993) added two prefs, both off on
+  Beta, but the crash came through an unguarded change to
+  `SVGClipPathFrame::IsTrivial` in the same patch, so the crash reached Beta
+  with default settings. The answer is one of: **gated** (name the pref and
+  its value on the branch), **ungated**, or **could not tell** (say which part
+  of the path is unclear).
 
 ### 6. Rate it
 
@@ -203,6 +222,7 @@ their own; they don't change the risk rating:
 |---|---|---|
 | Severity | S1/S2, top crash, security, data loss | S3/S4, cosmetic, a feature rather than a fix |
 | Regression status | fixes a regression new in this release | an old bug, there for several releases |
+| Reach | the broken code runs with default settings on the branch | only reachable behind a pref that's off on the branch |
 
 Where the answers come from:
 
@@ -215,7 +235,7 @@ Where the answers come from:
   `python3 scripts/relnotes/pref-delta.py --lookup <pref> --rev origin/<channel> --no-fetch --format json`.
 - **Bake time, regression history:** step 2 (landings, backouts, time on a
   newer channel), step 4 (follow-ups) and step 5 (`regressions`).
-- **Severity, regression status:** step 5.
+- **Severity, regression status, reach:** step 5.
 - **Test coverage:** a patch with no new test is fine if existing tests
   already cover the code it changes. In order:
   1. Test files in the stack.
@@ -269,7 +289,9 @@ for anything an approver must know that didn't fit: a patch that doesn't apply,
 one reworked for the branch, a part left out of the stack, a dependency or
 follow-up that isn't on the branch, a developer comment
 that limits what the fix achieves, a disagreement
-with the developer's rating.
+with the developer's rating. When a bug is gated, give the pref and its value
+on the branch, e.g. `gfx.webrender.svg-simple-clips = false on beta (all
+platforms)`.
 
 End with one line: the channel, how many bugs, and the commit read
 (`branch_head`).
@@ -280,3 +302,5 @@ End with one line: the channel, how many bugs, and the commit read
 - **"Could not tell" is a correct answer.** Use it rather than guessing, and
   say what's missing.
 - If a fetch fails, say which and for which bug. Don't silently leave bugs out.
+- **Don't call a bug gated because a pref exists nearby.** Say gated only
+  when you found the pref check on the path to the bug.
