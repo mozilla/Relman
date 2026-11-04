@@ -667,8 +667,9 @@ NUCLEUS_CACHE = trainlib.CACHE_DIR / "nucleus"
 # Long, because a Nightly note lives for cycles and Nucleus often answers 502 for minutes: a fresh
 # fetch here would stall flip detection behind three 120-second attempts per URL.
 NUCLEUS_CACHE_TTL = 24 * 3600
-# A Nightly note carries forward for three cycles, plus the cycle in progress.
-NIGHTLY_NOTE_CYCLES = 4
+# A Nightly note carries forward for six cycles, plus the cycle in progress. Six since the move to a
+# two-week release cycle, which keeps the exposure time the earlier three-cycle rule gave.
+NIGHTLY_NOTE_CYCLES = 7
 # How far before the oldest of those cycles to look for the commit that put the pref on for
 # Nightly. ponytail: a note added long after its Nightly enablement is matched only through
 # Bugzilla links; widen this if one is missed.

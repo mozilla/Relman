@@ -643,10 +643,12 @@ candidate:
 - Set `relnote-firefox` to `nightly+` and comment "Thanks, added to the Nightly release notes".
 - The note must name the version that introduced it ("Starting with Firefox 113, nightly builds…"),
   which is why carry-forward notes cite an older version than the release they appear in.
-- `nightly+` means the bug is included in Nightly release notes **for 3 cycles, or until the feature
+- `nightly+` means the bug is included in Nightly release notes **for 6 cycles, or until the feature
   is enabled by default — whichever comes first.** At that point the flag is removed and the change
   becomes a normal release-note request against the version it ships in. Revisit
-  `nightly-note-requested` watchlist entries on that schedule.
+  `nightly-note-requested` watchlist entries on that schedule. The limit was 3 cycles until Firefox
+  moved to a two-week release cycle; 6 keeps the same exposure time, so a note citing "Starting with
+  Firefox N" runs through N+5. The wiki page may still say 3.
 - `X+` means Release Management has decided the bug is in Firefox X's notes; `?` means nominated and
   awaiting their decision.
 

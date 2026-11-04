@@ -58,6 +58,9 @@ BUGZILLA_BUG = f"{trainlib.BUGZILLA_REST}/bug"
 # How many matches `--search` lists. A broad term matches hundreds ('performance' matches 242), and
 # the point of the search is precedent calibration, which a wall of output does not help.
 SEARCH_LIST_LIMIT = 40
+# How many cycles a Nightly-only note runs (six on the two-week release cycle), so `--search` lists
+# that many releases per note before marking the rest.
+NIGHTLY_NOTE_CYCLES = 6
 
 # Nucleus release URLs look like .../rna/releases/1550/?format=json
 RELEASE_ID_RE = re.compile(r"/releases/(\d+)/")
@@ -970,12 +973,12 @@ def main() -> None:
         if len(hits) > SEARCH_LIST_LIMIT:
             print(f"  showing the first {SEARCH_LIST_LIMIT}; narrow the search to see the rest")
         for vers, n in hits[:SEARCH_LIST_LIMIT]:
-            # Say when the release list is clipped. A Nightly note retires after three cycles, so a
-            # silent cap at three sits exactly on the decision boundary: a review counted cycles off
-            # this listing and read "153, 154, 155" as a complete history when there may be more.
-            where = ", ".join(vers[:3]) or "(unattached)"
-            if len(vers) > 3:
-                where += f", +{len(vers) - 3} more"
+            # Say when the release list is clipped. A Nightly note retires after six cycles, so a
+            # silent cap at six would sit exactly on the decision boundary: a review counted cycles
+            # off this listing and read "153, 154, 155" as a complete history when there may be more.
+            where = ", ".join(vers[:NIGHTLY_NOTE_CYCLES]) or "(unattached)"
+            if len(vers) > NIGHTLY_NOTE_CYCLES:
+                where += f", +{len(vers) - NIGHTLY_NOTE_CYCLES} more"
             # The bug number is the point of a precedent search: a carry-forward candidate needs to
             # cite the earlier note's bug, and looking it up by hand afterwards is the whole cost
             # this search exists to avoid. Nucleus carries it, so print it.
