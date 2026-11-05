@@ -202,7 +202,8 @@ Three mechanisms, in this order:
    app-level overrides, and prints `on in beta, nightly only` style verdicts. When the feature is
    gone it names the last commit that touched the name, which is how a shipped feature whose flag
    was deleted shows up (bug 2069046 removed `media-notification-improvements` above). It reads
-   tree defaults only; a live Nimbus rollout is still an Experimenter question. Focus's manifest is
+   tree defaults only; `nimbus-live.py --feature <feature>` lists the live experiments and rollouts
+   that can override them (`--pref <pref>` does the same for a desktop preference). Focus's manifest is
    not covered.
 
 Worked example: `security.pki.certificate_transparency.mode` carried a platform/channel condition in

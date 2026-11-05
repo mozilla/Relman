@@ -1028,7 +1028,7 @@ def near_names(name: str, table, limit: int = 5) -> list[str]:
 
 FENIX_FML = "mobile/android/fenix/app/nimbus.fml.yaml"
 FML_NOTE = ("tree defaults only: a Nimbus experiment or rollout can override these, and whether one "
-            "is live is an Experimenter question")
+            "is live is answered by nimbus-live.py --feature <name>")
 
 
 def _fml_scalar(v: str) -> str:

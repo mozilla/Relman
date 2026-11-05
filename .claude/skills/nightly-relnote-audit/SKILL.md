@@ -76,11 +76,13 @@ visible in it.
   `nightly: win, mac, linux only; beta-early: off; …`). Other prefs the same
   commit changed, such as a `force-enabled` override left off everywhere, are
   context, not the gate.
-- **No pref changed by any landing:** the gate is something else, for example a
-  Nimbus feature, a build flag, or `#ifdef NIGHTLY_BUILD` in code. Put the bug
-  under **Could not tell** and say which, if the commit makes it clear (read it
-  with `git -C $REPO show <sha>`). Mark that as **inferred** unless the commit
-  shows it outright.
+- **No pref changed by any landing:** read the commit
+  (`git -C $REPO show <sha>`). If it changes a feature's per-channel
+  `defaults:` in `mobile/android/fenix/app/nimbus.fml.yaml`, the gate is that
+  Nimbus feature: resolve it in step 3. Otherwise the gate is something else,
+  for example a build flag or `#ifdef NIGHTLY_BUILD` in code. Put the bug under
+  **Could not tell** and say which, if the commit makes it clear, marked
+  **inferred** unless the commit shows it outright.
 - **The gate's default depends on a build define pref-delta can't resolve:** it
   prints a `WARNING … GUESS` list. Report the bug under **Could not tell** and
   name the define.
@@ -93,6 +95,41 @@ The same JSON's `effective` field is the gate's default at `origin/main` now.
   **Still Nightly-only**.
 - On in Beta or Release, off everywhere, or absent (removed) →
   **No longer Nightly-only**.
+
+**A Nimbus feature gate:** resolve the tree defaults per channel with
+`python3 scripts/relnotes/pref-delta.py --fml <feature> --no-fetch`. On in
+nightly (and developer) only → **Still Nightly-only**; on in beta or release,
+or the feature gone → **No longer Nightly-only**, found in step 4 from
+`git -C $REPO log origin/main --format='%h %cs %s' -L '/^  <feature>:/,+40:mobile/android/fenix/app/nimbus.fml.yaml'`
+since the landing.
+
+**Then check live Nimbus enrollments for every gate, pref or feature.** Tree
+defaults are what a build ships with; a live experiment or rollout can turn the
+gate on for part of Beta or Release anyway:
+
+```sh
+python3 scripts/relnotes/nimbus-live.py --feature <feature>   # Fenix feature gates
+python3 scripts/relnotes/nimbus-live.py --pref <pref>         # desktop pref gates
+```
+
+`--pref` finds enrollments through a `setPref` or `fallbackPref` mapping in `FeatureManifest.yaml`
+and through branch values that name the pref (`prefFlips`). The group follows
+what users get, so read both together:
+
+- **Still Nightly-only:** the gate is on in Nightly, by the tree default or by a
+  live Nightly enrollment, and off by default in Beta and Release. A gate that
+  is off in the tree but on for Nightly through a rollout belongs here. Say
+  "via rollout `<slug>`" in **Now**.
+- **No longer Nightly-only:** on by default in Beta or Release, removed, or
+  off in the tree with no live enrollment turning it on.
+- An enrollment that turns the gate on for part of Beta or Release doesn't
+  change the group, because the default is still off there. Report it next to
+  the bug: slug, rollout or experiment, channel, population and targeting.
+
+A Nimbus gate goes under **Could not tell** only when the feature can't be
+resolved: `pref-delta.py --fml` doesn't cover its manifest (Focus), or
+Experimenter can't be reached. Its default being Nimbus-controlled is not a
+reason on its own.
 
 Sometimes no landing made a pref Nightly-only, because the landing turned it
 on everywhere, but that pref is Nightly-only now: a later bug pulled it back
@@ -130,6 +167,10 @@ Three groups, in this order. A group with no bugs reads "None."
 
 | Bug | Pref | Now |
 |---|---|---|
+
+A Nimbus feature gate goes in the **Pref** column as `fml:<feature>`. Under
+either table, one line per bug with a live Beta or Release enrollment of its
+gate (step 3), or "No live Beta or Release enrollments" if there are none.
 
 **Could not tell**
 
