@@ -294,7 +294,12 @@ on the branch, e.g. `gfx.webrender.svg-simple-clips = false on beta (all
 platforms)`.
 
 End with one line: the channel, how many bugs, and the commit read
-(`branch_head`).
+(`branch_head`). Then a Bugzilla link that opens every bug analyzed, in the
+table's order, including any listed under `errors`:
+
+```
+[Open the N bugs in Bugzilla](https://bugzilla.mozilla.org/buglist.cgi?bug_id=2078599,2088509,2087787)
+```
 
 ## Truthfulness
 
