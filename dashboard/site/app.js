@@ -494,7 +494,7 @@ function bugTable(bugs, sort) {
     ["Status", (b) => `${b.status} ${b.resolution || ""}`],
     ["Sev", (b) => b.severity],
     ["Assignee", (b) => (b.assignee === "nobody@mozilla.org" ? "" : b.assignee_name || b.assignee)],
-    ...flagCols.map((f) => [short(f), (b) => b.flags[f]]),
+    ...flagCols.map((f) => [short(f), (b) => (runner.DERIVED[f]?.sortKey ?? String)(b.flags[f])]),
     ["Last changed", (b) => Date.now() - new Date(b.last_change_time)], // by age, as shown
   ];
   const row = (b) => h("tr", {},

@@ -336,7 +336,7 @@ function channelChecks(c, r) {
     const newer = { beta: r.nightly, release: r.beta }[k] ?? r.esrs[r.esrs.indexOf(c) - 1] ?? r.beta;
     const newerName = newer.isEsr ? `ESR${newer.version}` : cap(newer.kind);
     add("uplift-requested", "Uplift requested", "1", upliftRequested(c), {
-      columns: [c.statusField, c.trackingField, newer.statusField],
+      columns: ["sec_rating", c.statusField, c.trackingField, newer.statusField],
       filter: { label: `Fixed in ${newerName}`, field: newer.statusField },
       skills: [{
         name: "uplift-risk-review",
@@ -347,11 +347,11 @@ function channelChecks(c, r) {
   if (k === "beta") {
     const secCols = r.all.map((ch) => ch.statusField);
     add("sec-pending-tracking", "Security Bugs pending tracking", "1",
-      secPendingTracking(r), { needsKey: true, columns: secCols });
+      secPendingTracking(r), { needsKey: true, columns: ["sec_rating", ...secCols] });
     add("sec-pending-affected", "Security Bugs pending affected versions", "1",
       secPendingAffected(r), {
         needsKey: true,
-        columns: secCols,
+        columns: ["sec_rating", ...secCols],
         skills: [{
           name: "beta-sec-affected-audit",
           summary: "for each bug, whether Beta, Release and each ESR are affected, unaffected or already fixed, worked out from the code. Paste it the “Open buglist for N bugs” link above, unless you have a Bugzilla API key in ~/.config/bugzilla/api-key or $BUGZILLA_API_KEY",

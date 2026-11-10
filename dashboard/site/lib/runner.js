@@ -19,6 +19,24 @@ export const idsLink = (bugs) => (bugs.length > 0 && bugs.length <= IDS_URL_MAX 
 
 const now = () => new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
+// Sec ratings, most severe first; the sec rating column sorts in this order.
+const SEC_RATINGS = ["sec-critical", "sec-high", "sec-moderate", "sec-low", "sec-want", "sec-other"];
+
+// Columns worked out from another Bugzilla field: name -> { field, value(bug),
+// sortKey(shown) }. sortKey is optional and gets the cell's text; without it
+// the table sorts on the text itself. Any other column is a Bugzilla field shown as it is.
+export const DERIVED = {
+  sec_rating: {
+    field: "keywords",
+    value: (bug) => (bug.keywords ?? []).filter((k) => k.startsWith("sec-")),
+    sortKey: (shown) => { // unrated, and keywords not in the list, come last
+      const i = SEC_RATINGS.findIndex((r) => shown.split(", ").includes(r));
+      return i < 0 ? SEC_RATINGS.length : i;
+    },
+  },
+};
+const fieldsFor = (columns) => [...new Set(columns.map((c) => DERIVED[c]?.field ?? c))];
+
 function shape(bug, columns) {
   const who = bug.assigned_to_detail ?? {}; // Bugzilla sends it with assigned_to
   return {
@@ -38,13 +56,15 @@ function shape(bug, columns) {
     security: (bug.groups ?? []).some((g) => g.includes("security")),
     // Bugzilla omits a custom flag from REST responses when it is unset.
     // The field was requested, so absent means "---", not "unknown".
-    flags: Object.fromEntries(columns.map((c) => [c, Array.isArray(bug[c])
-      ? (bug[c].length ? bug[c].join(", ") : "---") : (bug[c] ?? "---")])),
+    flags: Object.fromEntries(columns.map((c) => {
+      const v = DERIVED[c] ? DERIVED[c].value(bug) : bug[c];
+      return [c, Array.isArray(v) ? (v.length ? v.join(", ") : "---") : (v ?? "---")];
+    })),
   };
 }
 
 async function execute(check, key, opts, fresh) {
-  const full = [...bugzilla.BASE_FIELDS, ...check.columns];
+  const full = [...bugzilla.BASE_FIELDS, ...fieldsFor(check.columns)];
   let bugs;
   let candidates;
   let extra = {};
