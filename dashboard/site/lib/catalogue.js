@@ -44,12 +44,13 @@ class Check {
     // Each lives in .claude/skills/<name>/ at the repo root and gets its bugs
     // from bin/check.js, so the query stays here.
     skills = [],
-    // An in-page filter offered as "All / label": { label, field } keeps the
-    // loaded bugs whose `field` is fixed or verified, without a new search.
+    // In-page filters offered as "All / label / ...": each { label, fields }
+    // keeps the loaded bugs where any of `fields` is fixed or verified, without
+    // a new search. The fields are fetched but not shown unless also in `columns`.
     // The query link gets the same condition (filteredQueryUrl).
-    filter = null,
+    filters = [],
   } = {}) {
-    Object.assign(this, { id, title, tier, query, channel, needsKey, shouldBeZero, post, notes, columns, source, skills, filter });
+    Object.assign(this, { id, title, tier, query, channel, needsKey, shouldBeZero, post, notes, columns, source, skills, filters });
   }
 
   get runsOnLoad() {
@@ -69,10 +70,9 @@ class Check {
     return this.source ? null : this.query.buglistUrl(this.#listTitle());
   }
 
-  // The link with `filter` applied: "Uplift requested ESR153 fixed in Beta".
-  get filteredQueryUrl() {
-    const { label, field } = this.filter;
-    return this.query.extended(Chart(field, "anywords", "fixed,verified"))
+  // The link with one of `filters` applied: "Uplift requested ESR153 fixed in Beta".
+  filteredQueryUrl({ label, fields }) {
+    return this.query.extended(anyOf(...fields.map((f) => Chart(f, "anywords", "fixed,verified"))))
       .buglistUrl(`${this.#listTitle()} ${label[0].toLowerCase()}${label.slice(1)}`);
   }
 
@@ -335,9 +335,18 @@ function channelChecks(c, r) {
     // ESR at the next newer ESR.
     const newer = { beta: r.nightly, release: r.beta }[k] ?? r.esrs[r.esrs.indexOf(c) - 1] ?? r.beta;
     const newerName = newer.isEsr ? `ESR${newer.version}` : cap(newer.kind);
+    const filters = [{ label: `Fixed in ${newerName}`, fields: [newer.statusField] }];
+    // The newest ESR also offers the versions between it and Beta: a fix that
+    // landed in one of those (155 for ESR153) is in Beta without Beta's flag set.
+    const between = c.isEsr && newer === r.beta
+      ? Array.from({ length: r.beta.version - c.version - 1 }, (_, i) => c.version + 1 + i) : [];
+    if (between.length) {
+      const range = between.length > 1 ? `${between[0]}–${between.at(-1)}` : between[0];
+      filters.push({ label: `Fixed in ${range}`, fields: between.map(status) });
+    }
     add("uplift-requested", "Uplift requested", "1", upliftRequested(c), {
       columns: ["sec_rating", c.statusField, c.trackingField, newer.statusField],
-      filter: { label: `Fixed in ${newerName}`, field: newer.statusField },
+      filters,
       skills: [{
         name: "uplift-risk-review",
         summary: `a low, medium or high risk rating for each uplift patch, with a one-line reason. Run it as /uplift-risk-review ${c.key}`,

@@ -35,9 +35,10 @@ export const DERIVED = {
     },
   },
 };
-const fieldsFor = (columns) => [...new Set(columns.map((c) => DERIVED[c]?.field ?? c))];
+const fieldsFor = ({ columns, filters }) =>
+  [...new Set([...columns.map((c) => DERIVED[c]?.field ?? c), ...filters.flatMap((f) => f.fields)])];
 
-function shape(bug, columns) {
+function shape(bug, { columns, filters }) {
   const who = bug.assigned_to_detail ?? {}; // Bugzilla sends it with assigned_to
   return {
     id: bug.id,
@@ -54,6 +55,8 @@ function shape(bug, columns) {
     last_change_time: bug.last_change_time ?? "",
     // Hidden in a security group (core-security, dom-core-security, ...).
     security: (bug.groups ?? []).some((g) => g.includes("security")),
+    // One entry per check filter: whether this bug is in it.
+    filters: filters.map((f) => f.fields.some((x) => ["fixed", "verified"].includes(bug[x]))),
     // Bugzilla omits a custom flag from REST responses when it is unset.
     // The field was requested, so absent means "---", not "unknown".
     flags: Object.fromEntries(columns.map((c) => {
@@ -64,7 +67,7 @@ function shape(bug, columns) {
 }
 
 async function execute(check, key, opts, fresh) {
-  const full = [...bugzilla.BASE_FIELDS, ...fieldsFor(check.columns)];
+  const full = [...bugzilla.BASE_FIELDS, ...fieldsFor(check)];
   let bugs;
   let candidates;
   let extra = {};
@@ -93,7 +96,7 @@ async function execute(check, key, opts, fresh) {
     count: bugs.length,
     candidates,
     capped: candidates >= BUGZILLA_ROW_CAP,
-    bugs: bugs.map((b) => shape(b, check.columns)),
+    bugs: bugs.map((b) => shape(b, check)),
     ids_url: idsLink(bugs),
     ran_at: now(),
     ...extra,

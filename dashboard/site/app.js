@@ -285,7 +285,7 @@ class Row {
     this.token = token;
     this.result = null;
     this.loading = false;
-    this.filterOn = false; // whether check.filter is applied
+    this.view = -1; // which of check.filters is applied; -1 shows all
     this.pill = h("span", { class: "pill idle" }, "–");
     this.panel = h("div", { class: "panel", hidden: true });
     const options = check.source?.options;
@@ -417,21 +417,23 @@ class Row {
     }
     for (const n of c.notes || []) parts.push(h("p", { class: "note" }, n));
 
-    const fixed = this.result?.state === "ok" && c.filter ? this.result.bugs.filter((b) => ["fixed", "verified"].includes(b.flags[c.filter.field])) : null;
-    const bugs = this.filterOn && fixed ? fixed : this.result?.bugs;
-    if (fixed && this.result.bugs.length) {
-      const choice = (on, text) => h("button", {
-        type: "button", class: "secondary small", "aria-pressed": String(this.filterOn === on),
-        onclick: () => { this.filterOn = on; this.renderPanel(); },
+    const views = this.result?.state === "ok" && this.result.bugs.length
+      ? c.filters.map((_, i) => this.result.bugs.filter((b) => b.filters[i])) : [];
+    const shown = views[this.view]; // undefined while showing all
+    const bugs = shown ?? this.result?.bugs;
+    if (views.length) {
+      const choice = (view, text) => h("button", {
+        type: "button", class: "secondary small", "aria-pressed": String(this.view === view),
+        onclick: () => { this.view = view; this.renderPanel(); },
       }, text);
       parts.push(h("p", { class: "view-filter", role: "group", "aria-label": "Show" }, "Show: ",
-        choice(false, `All (${this.result.bugs.length})`),
-        choice(true, `${c.filter.label} (${fixed.length})`)));
+        choice(-1, `All (${this.result.bugs.length})`),
+        c.filters.flatMap((f, i) => [" ", choice(i, `${f.label} (${views[i].length})`)])));
     }
-    const queryUrl = this.filterOn && fixed ? c.filteredQueryUrl : c.queryUrl;
+    const queryUrl = shown ? c.filteredQueryUrl(c.filters[this.view]) : c.queryUrl;
     const links = queryUrl ? [extLink(queryUrl, "Open query in Bugzilla")] : [];
-    const count = this.filterOn && fixed ? fixed.length : this.result?.count;
-    const ids = this.filterOn && fixed ? runner.idsLink(fixed) : this.result?.ids_url;
+    const count = shown ? shown.length : this.result?.count;
+    const ids = shown ? runner.idsLink(shown) : this.result?.ids_url;
     if (ids) {
       if (links.length) links.push(" · ");
       links.push(extLink(ids, `Open buglist for ${count} bugs`), " · ", ...openTabsButton(bugs));

@@ -128,7 +128,7 @@ test("crash series", () => {
 
 test("each uplift filter looks at the next newer branch", () => {
   const filters = (r) => Object.fromEntries([...catalogue.allChecks(r)]
-    .filter(([id, c]) => id.endsWith(".uplift-requested") && c.filter).map(([id, c]) => [id, c.filter.label]));
+    .filter(([id, c]) => id.endsWith(".uplift-requested")).map(([id, c]) => [id, c.filters[0].label]));
   // During a transition there are three ESRs.
   const transition = versions.build({ ...train, esr: { version: "175" }, esr_previous: { version: "153" } }, details, mergeDay);
   assert.deepEqual(filters(transition), {
@@ -139,10 +139,25 @@ test("each uplift filter looks at the next newer branch", () => {
     "esr115.uplift-requested": "Fixed in ESR153",
   });
   const c = catalogue.allChecks(transition).get("esr153.uplift-requested");
-  assert.ok(c.columns.includes(c.filter.field), "the filter's field is fetched");
-  const link = new URL(c.filteredQueryUrl).searchParams;
+  assert.ok(c.columns.includes(c.filters[0].fields[0]), "the filter's field is shown");
+  const link = new URL(c.filteredQueryUrl(c.filters[0])).searchParams;
   assert.equal(link.get("title"), "Uplift requested ESR153 fixed in ESR175");
-  assert.ok([...link].some(([k, v]) => k.startsWith("f") && v === c.filter.field), "the filtered link adds the field");
+  assert.ok([...link].some(([k, v]) => k.startsWith("f") && v === c.filters[0].fields[0]), "the filtered link adds the field");
+  // ESR175 is newer than Beta 158, so there are no versions between them.
+  assert.equal(catalogue.allChecks(transition).get("esr175.uplift-requested").filters.length, 1);
+});
+
+test("the newest ESR also filters on the versions between it and Beta", () => {
+  const all = catalogue.allChecks(releases); // ESR153, ESR140, Beta 158
+  const f = all.get("esr153.uplift-requested").filters[1];
+  assert.equal(f.label, "Fixed in 154–157");
+  assert.deepEqual(f.fields, [154, 155, 156, 157].map((v) => `cf_status_firefox${v}`));
+  const link = [...new URL(all.get("esr153.uplift-requested").filteredQueryUrl(f)).searchParams];
+  assert.ok(f.fields.every((x) => link.some(([, v]) => v === x)), "the link asks for any of them");
+  assert.ok(link.some(([k, v]) => k.startsWith("j") && v === "OR"));
+  for (const id of ["esr140.uplift-requested", "beta.uplift-requested", "release.uplift-requested"]) {
+    assert.equal(all.get(id).filters.length, 1, id);
+  }
 });
 
 test("an ESR's missing uplift request follows Beta and the newest ESR", () => {
