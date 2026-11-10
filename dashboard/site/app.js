@@ -293,6 +293,7 @@ class Row {
     const options = check.source?.options;
     this.opts = options ? { [options.name]: options.default } : {};
     this.seq = 0;
+    this.sort = { col: -1, dir: 1 }; // kept on the row so a redrawn table keeps its order
     // A div, not a <button>: the header can hold a <select>, and Firefox does
     // not deliver clicks to controls inside a button.
     this.header = h("div", {
@@ -453,7 +454,7 @@ class Row {
     if (this.result && this.result.state === "ok") {
       const r = this.result;
       if (filtered) parts.push(h("p", { class: "muted small" }, `Bugzilla matched ${r.candidates} bugs; ${r.count} are left after the dashboard's own filtering.`));
-      if (bugs.length) parts.push(bugTable(bugs));
+      if (bugs.length) parts.push(bugTable(bugs, this.sort));
       parts.push(h("p", { class: "muted small" }, `Ran ${new Date(r.ran_at).toLocaleString()} (results are reused for up to ${CACHE_MS / 60_000} minutes; reload the page for fresh ones).`));
     }
     this.panel.replaceChildren(...parts);
@@ -483,26 +484,50 @@ function queryHelp(getLines) {
   }, "?");
 }
 
-function bugTable(bugs) {
+function bugTable(bugs, sort) {
   const flagCols = Object.keys(bugs[0].flags);
   const short = (f) => f.replace("cf_status_firefox", "status ").replace("cf_tracking_firefox", "tracking ").replace("_esr", "esr").replace(/_/g, " ");
-  return h("div", { class: "table-wrap" }, h("table", { class: "bugs" },
-    h("thead", {}, h("tr", {},
-      ["Bug", "Summary", "Product :: Component", "Status", "Sev", "Assignee", ...flagCols.map(short), "Last changed"].map((t) => h("th", {}, t)))),
-    h("tbody", {}, bugs.map((b) => h("tr", {},
-      h("td", { class: "bug-id" }, extLink(bugUrl(b.id), b.id),
-        b.security ? h("span", { class: "lock", role: "img", "aria-label": "Security bug", title: "Security bug" }) : null),
-      h("td", { class: "summary" }, b.summary),
-      h("td", {}, `${b.product} :: ${b.component}`),
-      h("td", {}, b.resolution ? `${b.status} ${b.resolution}` : b.status),
-      h("td", {}, b.severity),
-      b.assignee === "nobody@mozilla.org"
-        ? h("td", { class: "muted" }, "nobody")
-        : h("td", { title: b.assignee }, b.assignee_name || b.assignee),
-      flagCols.map((f) => h("td", { class: b.flags[f] === "---" ? "muted" : "" }, b.flags[f])),
-      h("td", { title: b.last_change_time }, age(b.last_change_time)),
-    ))),
-  ));
+  const cols = [
+    ["Bug", (b) => b.id],
+    ["Summary", (b) => b.summary],
+    ["Product :: Component", (b) => `${b.product} :: ${b.component}`],
+    ["Status", (b) => `${b.status} ${b.resolution || ""}`],
+    ["Sev", (b) => b.severity],
+    ["Assignee", (b) => (b.assignee === "nobody@mozilla.org" ? "" : b.assignee_name || b.assignee)],
+    ...flagCols.map((f) => [short(f), (b) => b.flags[f]]),
+    ["Last changed", (b) => Date.now() - new Date(b.last_change_time)], // by age, as shown
+  ];
+  const row = (b) => h("tr", {},
+    h("td", { class: "bug-id" }, extLink(bugUrl(b.id), b.id),
+      b.security ? h("span", { class: "lock", role: "img", "aria-label": "Security bug", title: "Security bug" }) : null),
+    h("td", { class: "summary" }, b.summary),
+    h("td", {}, `${b.product} :: ${b.component}`),
+    h("td", {}, b.resolution ? `${b.status} ${b.resolution}` : b.status),
+    h("td", {}, b.severity),
+    b.assignee === "nobody@mozilla.org"
+      ? h("td", { class: "muted" }, "nobody")
+      : h("td", { title: b.assignee }, b.assignee_name || b.assignee),
+    flagCols.map((f) => h("td", { class: b.flags[f] === "---" ? "muted" : "" }, b.flags[f])),
+    h("td", { title: b.last_change_time }, age(b.last_change_time)),
+  );
+  // Clicking a heading sorts ascending, then descending, then back to the query's own order.
+  const tbody = h("tbody", {});
+  const headRow = h("tr", {});
+  const render = () => {
+    const key = cols[sort.col]?.[1];
+    const sorted = key ? [...bugs].sort((a, b) => sort.dir * String(key(a) ?? "").localeCompare(String(key(b) ?? ""), undefined, { numeric: true })) : bugs;
+    tbody.replaceChildren(...sorted.map(row));
+    headRow.replaceChildren(...cols.map(([label], i) => h("th", { "aria-sort": i === sort.col ? (sort.dir > 0 ? "ascending" : "descending") : null },
+      h("button", {
+        type: "button", class: "sort",
+        onclick: () => {
+          if (i !== sort.col) Object.assign(sort, { col: i, dir: 1 }); else if (sort.dir > 0) sort.dir = -1; else sort.col = -1;
+          render();
+        },
+      }, label, h("span", { class: "sort-arrow", "aria-hidden": "true" }, i === sort.col ? (sort.dir > 0 ? "▲" : "▼") : "")))));
+  };
+  render();
+  return h("div", { class: "table-wrap" }, h("table", { class: "bugs" }, h("thead", {}, headRow), tbody));
 }
 
 // --- crash data ------------------------------------------------------------
