@@ -249,11 +249,9 @@ async function renderPage(main, page, token) {
   const crashes = page !== "misc" ? renderCrashes(catalogue.pageChannels(page, releases), token) : null;
   if (crashes) main.append(crashes.el);
 
-  // Tier 1 first, on its own: it is the morning's work, and only a few
-  // Bugzilla requests run at once (bugzilla.js), so anything started alongside
-  // it would delay it. Then Tier 2 and crash data together.
-  await Promise.all((autorun["1"] || []).map((r) => r.run()));
-  if (token !== renderToken) return;
+  // Tier 1, Tier 2 and crash data all start at once. Only a few Bugzilla
+  // requests run at a time (bugzilla.js), so Tier 1 shares them with Tier 2.
+  (autorun["1"] || []).forEach((r) => r.run());
   (autorun["2"] || []).forEach((r) => r.run());
   if (crashes) crashes.start();
 }
@@ -311,7 +309,7 @@ class Row {
       h("span", { class: "row-right" }, options ? this.optionSelect(options) : null, this.pill, this.refreshButton()));
     this.el = h("div", { class: "row" }, this.header, this.panel);
     if (check.needsKey && !apiKey()) this.setPill("needs key", "warn");
-    else if (check.runsOnLoad) this.setPill("queued", "queued", "Waiting for its turn: Tier 1 loads first");
+    else if (check.runsOnLoad) this.setPill("queued", "queued", "Waiting for its turn: only a few Bugzilla queries run at once");
     this.renderPanel();
   }
 
@@ -535,7 +533,7 @@ function bugTable(bugs, sort) {
 function renderCrashes(channels, token) {
   const el = h("section", { class: "tier" }, h("div", { class: "tier-heading" }, h("h3", {}, "Crash data", h("span", { class: "muted" }, " — from crash-stats"))));
   const boxes = channels.map((c) => {
-    const box = h("div", { class: "crash" }, h("p", { class: "muted" }, `${c.label}: queued until Tier 1 has loaded`));
+    const box = h("div", { class: "crash" }, h("p", { class: "muted" }, `${c.label}: queued`));
     el.append(box);
     return [c, box];
   });
