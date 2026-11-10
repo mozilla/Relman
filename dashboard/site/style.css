@@ -154,9 +154,9 @@ ul.incomplete { margin: 6px 0 0; padding-left: 18px; color: var(--warn); }
 
 .table-wrap { overflow-x: auto; }
 table.bugs { border-collapse: collapse; width: 100%; font-size: 13px; }
-table.bugs th { text-align: left; color: var(--muted); font-weight: 500; white-space: nowrap; }
+table.bugs th { text-align: left; color: var(--muted); font-weight: 500; }
 table.bugs th, table.bugs td { padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
-table.bugs td.summary { min-width: 300px; }
+table.bugs td.summary { min-width: 300px; overflow-wrap: anywhere; }
 table.bugs th button.sort { all: unset; cursor: pointer; }
 table.bugs th button.sort:hover { color: var(--text); }
 table.bugs th button.sort:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; }
