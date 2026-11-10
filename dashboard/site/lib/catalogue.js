@@ -4,7 +4,7 @@
 // out, so the catalogue moves with the trains.
 
 import { ApprovedThisCycle, NotLandedOnBranch, ReporterNotStaff } from "./postfilters.js";
-import { Changed, Chart, Eq, In, Keywords, Query, allOf, anyOf } from "./querydef.js";
+import { Changed, Chart, Eq, In, Keywords, Query, allOf, anyOf, notComponent } from "./querydef.js";
 import { LANDED_COLUMN, QUERY as SEC_OPEN_QUERY, SecOpenOnMain } from "./sec_open_on_main.js";
 
 // tier -> [name, subtitle, runs on load]
@@ -32,6 +32,9 @@ const BAD_RESOLUTIONS = "INVALID,WORKSFORME,DUPLICATE";
 const NOBODY = "nobody@mozilla.org";
 // Products with no ESR versions.
 const ESR_LESS_PRODUCTS = ["Firefox for Android", "Focus", "GeckoView", "Data Platform and Tools"];
+// Product :: component pairs left out of New Regressions and Carry Over Regressions:
+// developer tools that do not ship in Firefox, so their regressions never affect a release.
+const REGRESSION_EXCLUDED_COMPONENTS = [["Testing", "mozregression"]];
 // Left out of ESR Burndown, there may be products we would still uplift for if request but we won't follow them
 const ESR_BURNDOWN_EXCLUDED_PRODUCTS = ["NSS", "MailNews Core", "Thunderbird", "Calendar", "Firefox for iOS"];
 
@@ -144,8 +147,9 @@ const regressions = (c, previousValues) => new Query([
   Chart("keywords", "nowordssubstr", "stalled,intermittent-failure"),
 ]);
 
-const newRegressions = (c) => regressions(c, ["unaffected", "?", "---"]);
-const carryoverRegressions = (c) => regressions(c, ["affected", "wontfix", "disabled", "fix-optional"]);
+const regressionExclusions = REGRESSION_EXCLUDED_COMPONENTS.map(([p, comp]) => notComponent(p, comp));
+const newRegressions = (c) => regressions(c, ["unaffected", "?", "---"]).extended(...regressionExclusions);
+const carryoverRegressions = (c) => regressions(c, ["affected", "wontfix", "disabled", "fix-optional"]).extended(...regressionExclusions);
 // The carry-overs not enabled in the previous Release: their regressor was
 // gated off there, so the question is whether it still is on this branch.
 const carryoverDisabledInRelease = (c) => regressions(c, ["disabled"]);

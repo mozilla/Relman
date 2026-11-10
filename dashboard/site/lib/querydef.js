@@ -67,6 +67,16 @@ const group = (join, terms) => ({
 export const anyOf = (...terms) => group("OR", terms);
 export const allOf = (...terms) => group("AND", terms);
 
+// Leaves out one component: NOT (product = p AND component = c).
+export const notComponent = (product, component) => ({
+  params: (n) => {
+    const i = n();
+    const inner = [Chart("product", "equals", product), Chart("component", "equals", component)].flatMap((t) => t.params(n));
+    return [[`f${i}`, "OP"], [`n${i}`, "1"], ...inner, [`f${n()}`, "CP"]];
+  },
+  lines: () => [`not ${product} :: ${component}`],
+});
+
 export class Query {
   // `linkOnly`: terms only the buglist.cgi link can carry (REST rejects them).
   constructor(terms, linkOnly = []) {
