@@ -66,6 +66,12 @@ Each bug's record, and what to do with it:
     the substantive one.
   - None: the risk is **Could not tell** ("no flagged attachment"). Don't
     guess which patch is meant.
+  - Revision not readable (security bugs' revisions are private, and the MCP
+    says "not found"): use the landed commits instead. If the same patch
+    already landed on a newer channel (`landings.newer`), diff it against
+    its `pending` main commit (`git -C $REPO show <sha>`). If the two match,
+    rebasing wasn't needed, and the main commit stands in for the uplift.
+    Say in the notes that the uplift revision itself wasn't read.
 - **`form`**: the latest `firefox-<channel> Uplift Approval Request`, parsed:
   the developer's risk rating and reason, test coverage, whether it's verified
   in Nightly, string changes, user impact if declined. `count` > 1 means there
@@ -149,7 +155,8 @@ The record has `severity`, `keywords`, `status_flags`, `regressed_by`, and
 `regressions` with each one's status. For the discussion, read the comments:
 
 ```sh
-python3 scripts/relnotes/bug-detail.py <N> --comment all
+BUGZILLA_API_KEY="${BUGZILLA_API_KEY:-$(cat ~/.config/bugzilla/api-key 2>/dev/null)}" \
+  python3 scripts/relnotes/bug-detail.py <N> --comment all
 ```
 
 Use this, not the moz MCP `get_bugzilla_bug`, for comments: the MCP redacts

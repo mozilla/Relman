@@ -27,10 +27,17 @@ import argparse
 import base64
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+# trainlib only reads $BUGZILLA_API_KEY; fall back to the key file dashboard/bin/check.js uses, so
+# hidden bugs the dashboard lists can be read here too.
+_KEY_FILE = Path.home() / ".config" / "bugzilla" / "api-key"
+if not os.environ.get("BUGZILLA_API_KEY") and _KEY_FILE.is_file():
+    os.environ["BUGZILLA_API_KEY"] = _KEY_FILE.read_text().strip()
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "relnotes"))
