@@ -254,6 +254,11 @@ const approvedNeverLanded = (c, since) => new Query([
   Chart("product", "nowords", "Thunderbird,NSS"),
 ]);
 
+const fixedStillOpen = (c) => new Query([
+  Chart(c.statusField, "anywords", "fixed,verified"),
+  Eq("resolution", "---"),
+]);
+
 const secResolvedMissingVersion = (r) => new Query([
   Changed("resolution", r.cycleStart, "FIXED"),
   Chart("bug_group", "substring", "sec"),
@@ -419,6 +424,13 @@ function channelChecks(c, r) {
           summary: "whether each regressor is still off for Release in the current Beta code, and if not, the bug that turned it on",
         }],
       });
+  }
+  if (k === "nightly") {
+    add("fixed-still-open", "Fixed on Nightly, bug still open", "3", fixedStillOpen(c), {
+      shouldBeZero: true,
+      columns: [c.statusField, "leave_open"],
+      notes: ["Bugs with more patches to come should have the leave-open keyword; the rest probably need resolving."],
+    });
   }
   if (k !== "nightly") {
     const approval = new ApprovedThisCycle(c.approvalFlag, since);

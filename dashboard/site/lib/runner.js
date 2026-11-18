@@ -35,6 +35,10 @@ export const DERIVED = {
       return i < 0 ? SEC_RATINGS.length : i;
     },
   },
+  leave_open: {
+    field: "keywords",
+    value: (bug) => ((bug.keywords ?? []).includes("leave-open") ? "leave-open" : "---"),
+  },
 };
 const fieldsFor = ({ columns, filters }) =>
   [...new Set([...columns.map((c) => DERIVED[c]?.field ?? c), ...filters.flatMap((f) => f.fields)])];
