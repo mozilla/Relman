@@ -244,6 +244,7 @@ To add a skill to a check, give the check `skills: [{ name, summary }]` in
 ```
 run.py            serves site/ locally, on macOS, Linux and Windows
 bin/check.js      runs one check from the command line (for skills)
+bin/backed-out.js the backed-out check over a local Firefox checkout, any window (for nightly-backout-audit)
 site/
   index.html, style.css, theme.js, favicon.svg
   app.js          the page
@@ -255,6 +256,7 @@ site/
     postfilters.js  the "then:" steps: approval dates, landed on branch, staff reporters
     commits.js    GitHub commit history; which bugs a commit lands or backs out
     sec_open_on_main.js  "Security fixes on main, bug still open" (Beta, Tier 3)
+    backed_out_resolved.js  "Backed out of main, never relanded, bug resolved fixed" (Nightly, Tier 3)
     uplift_revisions.js  "Open revisions for this branch: uplift not requested or denied" (Beta, Release, ESR; Tier 3)
     phabricator.js  Phabricator API client: the reader's token, open revisions per repository
     runner.js     runs a check, shapes the result, computes headlines

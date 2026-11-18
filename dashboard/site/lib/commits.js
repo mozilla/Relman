@@ -5,7 +5,10 @@
 // ("[ESR 115] Bug 123 - ...") or in brackets ("[Bug 123] ..."). A backout is
 // a revert of one: 'Revert "Bug 123 - ..." for causing ...'. It names the same
 // bug, and it is the opposite of a landing, so the two are told apart before
-// anything counts.
+// anything counts. A backout names only the bugs it undoes: those leading the
+// quoted subject of a revert, or those before "for" in the older form. The bug
+// it was backed out "for causing" is not one of them. Reverting a backout
+// relands it, so 'Revert "Revert "Bug 123 - ...""' is a landing.
 
 import { GITHUB_REPO } from "./config.js";
 import { SourceError, get } from "./http.js";
@@ -14,13 +17,19 @@ const LANDING = /^\s*(?:\[(?!bug)[^\]]*\]\s*)?\[?((?:bug\s*\d+\s*(?:,|&|and)?\s*
 const BACKOUT = /^\s*(revert\b|back(ed|ing)?\s*out\b)/i;
 const BUG = /\bbug\s*(\d+)/gi;
 const REVERTS = /^This reverts commit ([0-9a-f]{40})/m;
+const QUOTED = /^\s*revert\s+"(.*)"/i;
 
 const bugsIn = (text) => [...text.matchAll(BUG)].map((m) => Number(m[1]));
 
 // ["landing" | "backout" | null, bug numbers] for one commit message.
 export function classify(message) {
   const line = message.split("\n", 1)[0];
-  if (BACKOUT.test(line)) return ["backout", bugsIn(line)];
+  if (BACKOUT.test(line)) {
+    const quoted = line.match(QUOTED);
+    if (!quoted) return ["backout", bugsIn(line.split(/\sfor\s/i)[0])];
+    const [kind, bugs] = classify(quoted[1]);
+    return [kind === "backout" ? "landing" : "backout", bugs];
+  }
   const m = line.match(LANDING);
   if (m) return ["landing", bugsIn(m[1])];
   return [null, []];
@@ -35,14 +44,8 @@ export function classify(message) {
 // every earlier landing of its bugs. Reverting a revert restores the landing.
 // `commits` may be in any order.
 export function landed(commits) {
-  const ordered = [...commits].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  const undone = new Set();
-  // Newest first, so a revert that was itself reverted undoes nothing.
-  for (const c of [...ordered].reverse()) {
-    if (undone.has(c.sha)) continue;
-    const m = c.message.match(REVERTS);
-    if (m) undone.add(m[1]);
-  }
+  const ordered = byDate(commits);
+  const undone = undoneShas(ordered);
   const state = new Map(); // bug -> dates of its live landings
   for (const c of ordered) {
     if (undone.has(c.sha)) continue;
@@ -53,6 +56,39 @@ export function landed(commits) {
     }
   }
   return new Map([...state].map(([b, dates]) => [b, dates.at(-1)]));
+}
+
+// Bugs named by a backout in `commits` that was not itself reverted, with the
+// time of the latest one (a Map of bug -> ISO date). Whether the bug relanded
+// is landed()'s to say.
+export function backedOut(commits) {
+  const ordered = byDate(commits);
+  const undone = undoneShas(ordered);
+  const out = new Map();
+  for (const c of ordered) {
+    if (undone.has(c.sha)) continue;
+    const [kind, bugs] = classify(c.message);
+    if (kind === "backout") for (const b of bugs) out.set(b, c.date);
+  }
+  return out;
+}
+
+const byDate = (commits) => [...commits].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+// Shas undone by a revert: those with a revert that was not itself undone.
+// Follows the "This reverts commit" chain rather than dates, which can tie.
+function undoneShas(commits) {
+  const reverters = new Map(); // sha -> shas of the commits reverting it
+  for (const c of commits) {
+    const m = c.message.match(REVERTS);
+    if (m) reverters.set(m[1], [...(reverters.get(m[1]) ?? []), c.sha]);
+  }
+  const memo = new Map();
+  const isUndone = (sha) => {
+    if (!memo.has(sha)) memo.set(sha, (reverters.get(sha) ?? []).some((r) => !isUndone(r)));
+    return memo.get(sha);
+  };
+  return new Set([...reverters.keys()].filter(isUndone));
 }
 
 // Every commit on `branch` with a committer date at or after `since`.

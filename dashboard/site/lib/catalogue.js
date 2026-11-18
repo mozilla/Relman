@@ -3,6 +3,7 @@
 // Field names are derived from the channel (see versions.Channel), never typed
 // out, so the catalogue moves with the trains.
 
+import { BACKED_OUT_COLUMN, BackedOutResolved, QUERY as BACKED_OUT_QUERY } from "./backed_out_resolved.js";
 import { ApprovedThisCycle, NotLandedOnBranch, ReporterNotStaff } from "./postfilters.js";
 import { Changed, Chart, Eq, In, Keywords, Query, allOf, anyOf, notComponent } from "./querydef.js";
 import { LANDED_COLUMN, QUERY as SEC_OPEN_QUERY, SecOpenOnMain } from "./sec_open_on_main.js";
@@ -430,6 +431,22 @@ function channelChecks(c, r) {
       shouldBeZero: true,
       columns: [c.statusField, "leave_open"],
       notes: ["Bugs with more patches to come should have the leave-open keyword; the rest probably need resolving."],
+    });
+    add("backed-out-resolved", "Backed out of main, never relanded, bug resolved fixed", "3", BACKED_OUT_QUERY, {
+      shouldBeZero: true,
+      source: BackedOutResolved,
+      columns: [c.statusField, BACKED_OUT_COLUMN],
+      skills: [{
+        name: "nightly-backout-audit",
+        summary: "the same check over the whole Nightly cycle from your Firefox checkout, per patch, so it also finds a part of a bug that was backed out and never relanded",
+      }],
+      notes: [
+        "A bug that relanded after its backout does not show up, nor does one whose backout was itself reverted.",
+        "Checked per bug, not per patch: if only one part of a bug was backed out and another part " +
+        "is still in, the bug counts as landed and does not show up here.",
+        "Only landings in the last 14 days are seen: a part that landed before that and is still in " +
+        "does not count, so the bug can show up here when it should not. The audit skill reads the whole history.",
+      ],
     });
   }
   if (k !== "nightly") {

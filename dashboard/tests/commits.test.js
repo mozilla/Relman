@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { classify, landed } from "../site/lib/commits.js";
+import { backedOut, classify, landed } from "../site/lib/commits.js";
 
 test("classify", () => {
   for (const [message, want] of [
@@ -11,6 +11,12 @@ test("classify", () => {
     ['Revert "Bug 2072379 - Add test; r=smaug" for causing failures', ["backout", [2072379]]],
     ['Revert "Bug 2077977, Bug 2077976 - Map names" for causing failures', ["backout", [2077977, 2077976]]],
     ["Backed out changeset 0a1b2c (bug 1234567) for bustage", ["backout", [1234567]]],
+    // The bug a backout was "for causing" is not backed out.
+    ['Revert "Bug 2039813 - Update builders to clang 23. r=sylvestre" for causing performance regression seen in Bug 2090871.', ["backout", [2039813]]],
+    ["Backed out 2 changesets (bug 111, bug 222) for causing failures in bug 333", ["backout", [111, 222]]],
+    // Reverting a backout relands it.
+    ['Revert "Revert "Bug 1 - fix" for bustage in bug 9"', ["landing", [1]]],
+    ['Revert "Revert "Revert "Bug 1 - fix"""', ["backout", [1]]],
     ["[ESR 115] Bug 2071733 - Update FFmpeg plane handling.  a=RyanVM", ["landing", [2071733]]],
     ["[release] Bug 2053586 - Part 1: Gate the fallback.  a=pascalc", ["landing", [2053586]]],
     ["[Bug 2025291] Add launch on login for new Windows users.", ["landing", [2025291]]],
@@ -59,4 +65,23 @@ test("a revert by sha cancels only that commit", () => {
     { sha: sha(1), date: "2026-10-01T10:00:00Z", message: "Bug 1 - fix" },
     revert(2, "2026-10-01T11:00:00Z", 1),
   ]), new Map());
+});
+
+test("backedOut names each backout that was not itself reverted", () => {
+  assert.deepEqual(backedOut([
+    { sha: sha(1), date: "2026-10-01T10:00:00Z", message: "Bug 1 - fix" },
+    { sha: sha(2), date: "2026-10-01T11:00:00Z", message: `Revert "Bug 1 - fix"\n\nThis reverts commit ${sha(1)}.` },
+    { sha: sha(3), date: "2026-10-01T12:00:00Z", message: "Bug 2 - fix" },
+    { sha: sha(4), date: "2026-10-01T13:00:00Z", message: `Revert "Bug 2 - fix"\n\nThis reverts commit ${sha(3)}.` },
+    { sha: sha(5), date: "2026-10-01T14:00:00Z", message: `Revert "Revert "Bug 2 - fix""\n\nThis reverts commit ${sha(4)}.` },
+  ]), new Map([[1, "2026-10-01T11:00:00Z"]]));
+});
+
+test("a revert chain resolves by sha, not by date order", () => {
+  const t = "2026-10-01T10:00:00Z";
+  const chain = [{ sha: sha(1), date: t, message: "Bug 1 - fix" }, revert(2, t, 1), revert(3, t, 2)];
+  for (const commits of [chain, [...chain].reverse()]) {
+    assert.deepEqual(landed(commits), new Map([[1, t]]));
+    assert.deepEqual(backedOut(commits), new Map());
+  }
 });

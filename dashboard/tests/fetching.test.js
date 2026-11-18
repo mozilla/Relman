@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
+import { BackedOutResolved } from "../site/lib/backed_out_resolved.js";
 import * as bugzilla from "../site/lib/bugzilla.js";
 import { Cache, SourceError, cache } from "../site/lib/http.js";
 import { SecOpenOnMain } from "../site/lib/sec_open_on_main.js";
@@ -128,4 +129,28 @@ test("a fresh run skips the nested caches too", async () => {
   assert.deepEqual(calls, { github: 1, bugzilla: 1 }); // second run was all cache
   await SecOpenOnMain.fetch(["id"], "key", {}, true);
   assert.deepEqual(calls, { github: 2, bugzilla: 2 }); // refresh went back to both
+});
+
+test("backed out and resolved: relanded and reverted-revert bugs drop out, the range re-filters", async () => {
+  const sha = (n) => n.toString(16).padStart(40, "0");
+  const commits = [
+    [1, 9, "Bug 201 - fix"], [2, 8, `Revert "Bug 201 - fix"\n\nThis reverts commit ${sha(1)}.`], // backed out 8 days ago
+    [3, 5, "Bug 202 - fix"], [4, 2, `Revert "Bug 202 - fix"\n\nThis reverts commit ${sha(3)}.`], // backed out 2 days ago
+    [5, 2, "Bug 203 - fix"], [6, 1.5, `Revert "Bug 203 - fix"\n\nThis reverts commit ${sha(5)}.`],
+    [7, 1, "Bug 203 - fix (reland)"], // relanded
+    [8, 2, "Bug 204 - fix"], [9, 1.5, `Revert "Bug 204 - fix"\n\nThis reverts commit ${sha(8)}.`],
+    [10, 1, `Revert "Revert "Bug 204 - fix""\n\nThis reverts commit ${sha(9)}.`], // backout reverted
+    [11, 0.5, "Bug 205 - fix"], [12, 0.4, `Revert "Bug 205 - fix"\n\nThis reverts commit ${sha(11)}.`], // reopened
+  ].map(([n, d, message]) => ({ sha: sha(n), commit: { committer: { date: ago(d) }, message } }));
+  const asked = [];
+  globalThis.fetch = async (url) => {
+    const u = new URL(url);
+    if (u.host === "api.github.com") return json(200, commits);
+    asked.push(u.searchParams.get("id"));
+    return json(200, { bugs: [{ id: 201 }, { id: 202 }] }); // 205 is not resolved fixed
+  };
+  const run = async (days) => (await BackedOutResolved.fetch(["id"], "key", { days }))[0].map((b) => b.id);
+  assert.deepEqual(await run(3), [202]);
+  assert.deepEqual(await run(14), [201, 202]);
+  assert.deepEqual(asked, ["201,202,205"]);
 });
