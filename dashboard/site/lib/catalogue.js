@@ -37,6 +37,10 @@ const ESR_LESS_PRODUCTS = ["Firefox for Android", "Focus", "GeckoView", "Data Pl
 // Product :: component pairs left out of New Regressions and Carry Over Regressions:
 // developer tools that do not ship in Firefox, so their regressions never affect a release.
 const REGRESSION_EXCLUDED_COMPONENTS = [["Testing", "mozregression"]];
+// Product :: component pairs left out of Burndown on every channel: ETP site
+// reports are fixed by exceptions shipped through remote settings, so their
+// status flags stay "affected" with nothing to uplift.
+const BURNDOWN_EXCLUDED_COMPONENTS = [["Web Compatibility", "Privacy: Site Reports"]];
 // Left out of ESR Burndown, there may be products we would still uplift for if request but we won't follow them
 const ESR_BURNDOWN_EXCLUDED_PRODUCTS = ["NSS", "MailNews Core", "Thunderbird", "Calendar", "Firefox for iOS"];
 
@@ -183,6 +187,7 @@ const burndown = (c) => new Query([
   // One row per product: nowords splits on spaces too, so "MailNews Core"
   // would also exclude Core.
   ...(c.isEsr ? ESR_BURNDOWN_EXCLUDED_PRODUCTS.map((p) => Chart("product", "notequals", p)) : []),
+  ...BURNDOWN_EXCLUDED_COMPONENTS.map(([p, comp]) => notComponent(p, comp)),
 ]);
 
 const secHighPendingUplift = (r) => new Query([
