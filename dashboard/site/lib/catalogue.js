@@ -200,6 +200,7 @@ const secHighPendingUplift = (r) => new Query([
 // An ESR said no to a fix that ships with the current Beta: Beta has it or
 // still needs it, and Release is wontfix, so it did not ship there.
 const esrSecHighWontfix = (c, r) => new Query([
+  In("bug_status", ["RESOLVED", "VERIFIED"]),
   Chart("keywords", "anywordssubstr", "sec-critical sec-high"),
   Chart(c.statusField, "equals", "wontfix"),
   Chart(r.beta.statusField, "anyexact", "affected,fixed,verified"),
@@ -216,6 +217,7 @@ const newestEsrBefore = (c, r) => (c === r.esrs[0] ? null : r.esrs[0]);
 const esrSecHighNoUpliftRequest = (c, r) => {
   const newest = newestEsrBefore(c, r);
   return new Query([
+    In("bug_status", ["RESOLVED", "VERIFIED"]),
     Chart("keywords", "anywordssubstr", "sec-critical sec-high"),
     anyOf(
       Chart(r.beta.statusField, "anyexact", "fixed,verified"),
